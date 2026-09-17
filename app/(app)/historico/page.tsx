@@ -10,7 +10,8 @@ import { Progress } from "@/components/ui/progress";
 import { RoutineItem } from "@/components/shared/routine-item";
 import { getOccurrences } from "@/lib/routine";
 import { personalFinanceSummary, currentMonthKey } from "@/lib/selectors";
-import { formatDateShort, formatMonthYear, formatCurrency } from "@/lib/format";
+import { formatDateShort, formatMonthYear, formatCurrency, weekdayLabel, toDateKey } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 function useWeekRanges(count: number) {
   return useMemo(() => {
@@ -35,6 +36,7 @@ export default function HistoricoPage() {
   const update = useDbStore((s) => s.update);
 
   const [openWeek, setOpenWeek] = useState<number | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const weeks = useWeekRanges(6);
 
   if (!profile || !personalSpace) return null;
@@ -83,7 +85,7 @@ export default function HistoricoPage() {
                 <Card key={w.offset} className="p-4">
                   <button
                     className="flex w-full items-center justify-between gap-3 text-left"
-                    onClick={() => setOpenWeek(isOpen ? null : w.offset)}
+                    onClick={() => { setOpenWeek(isOpen ? null : w.offset); setSelectedDay(null); }}
                   >
                     <div>
                       <p className="text-sm font-medium text-foreground">
@@ -99,21 +101,81 @@ export default function HistoricoPage() {
                     </div>
                   </button>
                   {isOpen && (
-                    <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-                      {occ.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">Nenhuma atividade nesta semana.</p>
-                      ) : (
-                        occ.map((o) => (
-                          <RoutineItem
-                            key={`${o.activity.id}-${o.date}`}
-                            activity={o.activity}
-                            completed={o.completed}
-                            onToggle={() => toggle(o.activity.id, o.date)}
-                            onEdit={() => {}}
-                            onDelete={() => {}}
-                          />
-                        ))
-                      )}
+                    <div className="mt-3 border-t border-border pt-3">
+                      <div className="mb-3 grid grid-cols-7 gap-1">
+                        {Array.from({ length: 7 }, (_, i) => {
+                          const d = new Date(w.start);
+                          d.setDate(d.getDate() + i);
+                          const dateKey = toDateKey(d);
+                          const dayOcc = occ.filter((o) => o.date === dateKey);
+                          const dayPct = dayOcc.length
+                            ? Math.round((dayOcc.filter((o) => o.completed).length / dayOcc.length) * 100)
+                            : null;
+                          const isSelected = selectedDay === dateKey;
+                          return (
+                            <button
+                              key={dateKey}
+                              onClick={() => setSelectedDay(isSelected ? null : dateKey)}
+                              className={cn(
+                                "flex flex-col items-center gap-0.5 rounded-md border border-border px-1 py-1.5 text-center transition-colors",
+                                isSelected ? "border-primary bg-primary/10" : "hover:bg-secondary/40"
+                              )}
+                            >
+                              <span className="text-[10px] text-muted-foreground">
+                                {weekdayLabel(d.getDay()).slice(0, 3)}
+                              </span>
+                              <span className="text-xs font-medium text-foreground">
+                                {dayPct === null ? "—" : `${dayPct}%`}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        {(() => {
+                          const visible = selectedDay ? occ.filter((o) => o.date === selectedDay) : occ;
+                          if (visible.length === 0) {
+                            return <p className="text-xs text-muted-foreground">Nenhuma atividade neste dia.</p>;
+                          }
+                          const planejadas = visible.filter((o) => !o.completed);
+                          const concluidasDia = visible.filter((o) => o.completed);
+                          return (
+                            <>
+                              {selectedDay && concluidasDia.length > 0 && (
+                                <p className="text-[11px] font-medium uppercase tracking-wide text-success">
+                                  Concluído ({concluidasDia.length})
+                                </p>
+                              )}
+                              {(selectedDay ? concluidasDia : visible.filter((o) => o.completed)).map((o) => (
+                                <RoutineItem
+                                  key={`${o.activity.id}-${o.date}`}
+                                  activity={o.activity}
+                                  completed={o.completed}
+                                  onToggle={() => toggle(o.activity.id, o.date)}
+                                  onEdit={() => {}}
+                                  onDelete={() => {}}
+                                />
+                              ))}
+                              {selectedDay && planejadas.length > 0 && (
+                                <p className="mt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                  Não concluído ({planejadas.length})
+                                </p>
+                              )}
+                              {(selectedDay ? planejadas : visible.filter((o) => !o.completed)).map((o) => (
+                                <RoutineItem
+                                  key={`${o.activity.id}-${o.date}`}
+                                  activity={o.activity}
+                                  completed={o.completed}
+                                  onToggle={() => toggle(o.activity.id, o.date)}
+                                  onEdit={() => {}}
+                                  onDelete={() => {}}
+                                />
+                              ))}
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
                   )}
                 </Card>

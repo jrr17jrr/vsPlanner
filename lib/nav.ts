@@ -39,6 +39,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Hoje", href: "/hoje", icon: Sun },
       { label: "Minha Rotina", href: "/rotina", icon: CalendarClock },
+      { label: "Trabalho / CLT", href: "/trabalho", icon: Briefcase },
       { label: "Tarefas", href: "/tarefas", icon: ListChecks },
       { label: "Histórico", href: "/historico", icon: History },
     ],

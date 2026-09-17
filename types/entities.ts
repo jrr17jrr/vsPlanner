@@ -2,10 +2,12 @@
  * Modelos de dados do VSLead.
  *
  * Estes tipos são desenhados para espelhar futuras tabelas do Supabase/Postgres:
- * profiles, spaces, space_members, activities, tasks, financial_accounts,
- * transactions, financial_goals, clients, services, client_services,
- * client_payments, client_sites, work_items, vendors, sales, commissions,
- * expenses, notifications.
+ * profiles, spaces, space_members, activities, activity_occurrences (embutido
+ * hoje em `Activity.completedDates`, mas já pensado como tabela própria),
+ * tasks, work_tasks (tarefas do Trabalho/CLT — domínio separado de `tasks`),
+ * financial_accounts, transactions, financial_goals, clients, services,
+ * client_services, client_payments, client_sites, work_items, vendors, sales,
+ * commissions, expenses, notifications.
  *
  * Convenções:
  * - Toda entidade possui `id: string` (uuid no futuro).
@@ -57,7 +59,7 @@ export interface SpaceMember {
 
 export type ActivityCategory =
   | "Pessoal"
-  | "CLT"
+  | "Trabalho / CLT"
   | "Visionário Dev"
   | "TikTok"
   | "Treino"
@@ -68,7 +70,7 @@ export type ActivityCategory =
 
 export const ACTIVITY_CATEGORIES: ActivityCategory[] = [
   "Pessoal",
-  "CLT",
+  "Trabalho / CLT",
   "Visionário Dev",
   "TikTok",
   "Treino",
@@ -117,11 +119,33 @@ export interface Task {
   description?: string;
   category: string;
   priority: Priority;
-  dueDate?: string;
+  dueDate?: string; // também funciona como "dia agendado" (aparece em Hoje quando = hoje)
+  scheduledTime?: string; // HH:mm opcional, para aparecer na linha do tempo de Hoje
   status: TaskStatus;
   responsibleId: string;
   clientId?: string;
   workItemId?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Trabalho / CLT — organização pessoal do emprego, separada da Visionário Dev
+// ---------------------------------------------------------------------------
+
+export type WorkTaskPriority = "baixa" | "normal" | "alta" | "urgente";
+
+export interface WorkTask {
+  id: string;
+  spaceId: string; // espaço pessoal do usuário
+  userId: string;
+  title: string;
+  description?: string;
+  dueDate?: string; // dia em que a tarefa está agendada/vence (aparece em Hoje quando = hoje)
+  scheduledTime?: string; // HH:mm opcional
+  priority: WorkTaskPriority;
+  status: TaskStatus;
+  notes?: string;
   createdAt: string;
   completedAt?: string;
 }

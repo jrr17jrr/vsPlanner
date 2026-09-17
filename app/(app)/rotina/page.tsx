@@ -152,6 +152,7 @@ export default function RotinaPage() {
               const occ = getOccurrencesForDay(myActivities, d);
               const dateKey = toDateKey(d);
               const isToday = dateKey === toDateKey(today);
+              const dayPct = occ.length ? Math.round((occ.filter((o) => o.completed).length / occ.length) * 100) : null;
               return (
                 <div key={dateKey}>
                   <div className="mb-1.5 flex items-center gap-2">
@@ -159,6 +160,7 @@ export default function RotinaPage() {
                       {weekdayLabel(d.getDay())}
                     </p>
                     <span className="text-xs text-muted-foreground">{formatDateShort(d)}</span>
+                    {dayPct !== null && <span className="text-xs font-medium text-primary">{dayPct}%</span>}
                     <button
                       onClick={() => openCreate(dateKey)}
                       className="ml-auto text-xs text-primary hover:underline"

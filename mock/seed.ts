@@ -6,6 +6,7 @@ import type {
   SpaceMember,
   Activity,
   Task,
+  WorkTask,
   FinancialAccount,
   Transaction,
   RecurringExpense,
@@ -30,6 +31,7 @@ export interface Database {
   spaceMembers: SpaceMember[];
   activities: Activity[];
   tasks: Task[];
+  workTasks: WorkTask[];
   financialAccounts: FinancialAccount[];
   transactions: Transaction[];
   recurringExpenses: RecurringExpense[];
@@ -304,7 +306,7 @@ export function createSeedDatabase(): Database {
   const activities: Activity[] = [
     // Ricardo
     { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Tomar creatina", category: "Pessoal", priority: "baixa", date: weekStartKey, startTime: "06:35", recurrence: "diaria", responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [relativeDay(-1), relativeDay(-2)], createdAt: now },
-    { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Trabalho (CLT)", category: "CLT", priority: "alta", date: weekStartKey, startTime: "08:00", endTime: "17:00", recurrence: "segunda_sexta", responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [relativeDay(-1), relativeDay(-2), relativeDay(-3)], createdAt: now },
+    { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Trabalho / CLT", category: "Trabalho / CLT", priority: "alta", date: weekStartKey, startTime: "08:00", endTime: "17:00", recurrence: "segunda_sexta", responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [relativeDay(-1), relativeDay(-2), relativeDay(-3)], createdAt: now },
     { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Responder clientes", description: "Checar WhatsApp e e-mails da Visionário Dev.", category: "Visionário Dev", priority: "media", date: weekStartKey, startTime: "12:30", endTime: "13:00", recurrence: "segunda_sexta", responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [relativeDay(-1)], createdAt: now },
     { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Finalizar site Ponciane", category: "Visionário Dev", priority: "alta", date: relativeDay(0), startTime: "17:30", endTime: "19:00", recurrence: "dias_especificos", recurrenceDays: [1, 3, 5], responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [], workItemId: workItems[0].id, createdAt: now },
     { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Gravar/editar TikTok", category: "TikTok", priority: "media", date: weekStartKey, startTime: "19:00", endTime: "20:00", recurrence: "dias_especificos", recurrenceDays: [2, 4], responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [], createdAt: now },
@@ -313,7 +315,7 @@ export function createSeedDatabase(): Database {
     { id: generateId("act"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Estudar na Alura", category: "Alura", priority: "baixa", date: weekStartKey, startTime: "10:00", endTime: "11:00", recurrence: "dias_especificos", recurrenceDays: [6], responsibleId: ID.USER_RICARDO, status: "pendente", completedDates: [], createdAt: now },
 
     // Usuário Teste
-    { id: generateId("act"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Trabalho (CLT)", category: "CLT", priority: "alta", date: weekStartKey, startTime: "08:00", endTime: "16:00", recurrence: "segunda_sexta", responsibleId: ID.USER_TESTE, status: "pendente", completedDates: [relativeDay(-1), relativeDay(-2)], createdAt: now },
+    { id: generateId("act"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Trabalho / CLT", category: "Trabalho / CLT", priority: "alta", date: weekStartKey, startTime: "08:00", endTime: "16:00", recurrence: "segunda_sexta", responsibleId: ID.USER_TESTE, status: "pendente", completedDates: [relativeDay(-1), relativeDay(-2)], createdAt: now },
     { id: generateId("act"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Criar posts do mês (VitaSorriso)", category: "Visionário Dev", priority: "media", date: relativeDay(1), startTime: "18:00", endTime: "19:30", recurrence: "nenhuma", responsibleId: ID.USER_TESTE, status: "pendente", completedDates: [], workItemId: workItems[1].id, createdAt: now },
     { id: generateId("act"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Yoga", category: "Treino", priority: "baixa", date: weekStartKey, startTime: "19:30", endTime: "20:15", recurrence: "dias_especificos", recurrenceDays: [2, 4], responsibleId: ID.USER_TESTE, status: "pendente", completedDates: [relativeDay(-2)], createdAt: now },
     { id: generateId("act"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Curso de Design", category: "Curso", priority: "media", date: weekStartKey, startTime: "20:30", endTime: "22:00", recurrence: "dias_especificos", recurrenceDays: [1, 3], responsibleId: ID.USER_TESTE, status: "pendente", completedDates: [], createdAt: now },
@@ -332,6 +334,19 @@ export function createSeedDatabase(): Database {
     { id: generateId("task"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Estudar para prova da faculdade", category: "Faculdade", priority: "alta", dueDate: relativeDay(2), status: "em_andamento", responsibleId: ID.USER_RICARDO, createdAt: now },
     { id: generateId("task"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Organizar planejamento semanal", category: "Pessoal", priority: "media", dueDate: relativeDay(1), status: "pendente", responsibleId: ID.USER_TESTE, createdAt: now },
     { id: generateId("task"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Planejar roteiro de vídeos da semana", category: "TikTok", priority: "media", dueDate: relativeDay(0), status: "concluida", responsibleId: ID.USER_RICARDO, completedAt: relativeDay(-1), createdAt: now },
+  ];
+
+  // ---------------------------------------------------------------------
+  // Trabalho / CLT — tarefas do emprego, separadas da Visionário Dev
+  // ---------------------------------------------------------------------
+  const workTasks: WorkTask[] = [
+    { id: generateId("wtask"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Conferir pedidos", priority: "normal", status: "concluida", dueDate: relativeDay(0), completedAt: relativeDay(0), createdAt: now },
+    { id: generateId("wtask"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Atualizar planilha", priority: "normal", status: "concluida", dueDate: relativeDay(0), completedAt: relativeDay(0), createdAt: now },
+    { id: generateId("wtask"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Falar com responsável", priority: "baixa", status: "concluida", dueDate: relativeDay(0), completedAt: relativeDay(0), createdAt: now },
+    { id: generateId("wtask"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Resolver problema no sistema interno", priority: "urgente", status: "pendente", dueDate: relativeDay(0), createdAt: now },
+    { id: generateId("wtask"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Finalizar relatório mensal", priority: "alta", status: "pendente", dueDate: relativeDay(0), createdAt: now },
+    { id: generateId("wtask"), spaceId: ID.SPACE_RICARDO_PESSOAL, userId: ID.USER_RICARDO, title: "Enviar informação para o RH", priority: "normal", status: "pendente", dueDate: relativeDay(1), createdAt: now },
+    { id: generateId("wtask"), spaceId: ID.SPACE_TESTE_PESSOAL, userId: ID.USER_TESTE, title: "Organizar arquivos do setor", priority: "normal", status: "pendente", dueDate: relativeDay(0), createdAt: now },
   ];
 
   // ---------------------------------------------------------------------
@@ -420,6 +435,7 @@ export function createSeedDatabase(): Database {
     spaceMembers,
     activities,
     tasks,
+    workTasks,
     financialAccounts,
     transactions,
     recurringExpenses,

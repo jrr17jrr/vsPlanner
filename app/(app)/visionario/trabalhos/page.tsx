@@ -1,13 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Briefcase, Pencil, Trash2, CalendarPlus, AlertTriangle } from "lucide-react";
+import { Plus, Briefcase, Pencil, Trash2, CalendarPlus, AlertTriangle, User } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useDbStore } from "@/store/db-store";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -16,6 +19,8 @@ import { AddToRoutineDialog } from "@/components/forms/add-to-routine-dialog";
 import { formatDate } from "@/lib/format";
 import { daysUntil } from "@/lib/selectors";
 import type { WorkItem, WorkStatus } from "@/types/entities";
+
+type ResponsibleFilter = "todos" | "meus" | "socio" | "sem_responsavel";
 
 export default function TrabalhosPage() {
   const { profile, personalSpace, mySpaces } = useAuth();
@@ -27,6 +32,7 @@ export default function TrabalhosPage() {
   const remove = useDbStore((s) => s.remove);
 
   const [statusFilter, setStatusFilter] = useState<"todos" | WorkStatus>("todos");
+  const [responsibleFilter, setResponsibleFilter] = useState<ResponsibleFilter>("todos");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<WorkItem | undefined>();
   const [deleting, setDeleting] = useState<WorkItem | undefined>();
@@ -51,6 +57,14 @@ export default function TrabalhosPage() {
   const items = workItems
     .filter((w) => w.spaceId === visionarioSpace.id)
     .filter((w) => statusFilter === "todos" || w.status === statusFilter)
+    .filter((w) => {
+      switch (responsibleFilter) {
+        case "meus": return w.responsibleIds.includes(profile.id);
+        case "socio": return w.responsibleIds.length > 0 && !w.responsibleIds.includes(profile.id);
+        case "sem_responsavel": return w.responsibleIds.length === 0;
+        default: return true;
+      }
+    })
     .sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"));
 
   return (
@@ -65,15 +79,27 @@ export default function TrabalhosPage() {
         }
       />
 
-      <Tabs value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-        <TabsList>
-          <TabsTrigger value="todos">Todos</TabsTrigger>
-          <TabsTrigger value="pendente">Pendente</TabsTrigger>
-          <TabsTrigger value="em_andamento">Em andamento</TabsTrigger>
-          <TabsTrigger value="aguardando_cliente">Aguardando cliente</TabsTrigger>
-          <TabsTrigger value="concluido">Concluído</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Tabs value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+          <TabsList>
+            <TabsTrigger value="todos">Todos</TabsTrigger>
+            <TabsTrigger value="pendente">Pendente</TabsTrigger>
+            <TabsTrigger value="em_andamento">Em andamento</TabsTrigger>
+            <TabsTrigger value="aguardando_cliente">Aguardando cliente</TabsTrigger>
+            <TabsTrigger value="concluido">Concluído</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <Select value={responsibleFilter} onValueChange={(v) => setResponsibleFilter(v as ResponsibleFilter)}>
+          <SelectTrigger className="w-full sm:w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos os responsáveis</SelectItem>
+            <SelectItem value="meus">Meus trabalhos</SelectItem>
+            <SelectItem value="socio">Trabalhos do sócio</SelectItem>
+            <SelectItem value="sem_responsavel">Sem responsável</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {items.length === 0 ? (
         <EmptyState icon={Briefcase} title="Nenhum trabalho encontrado" />
@@ -82,10 +108,9 @@ export default function TrabalhosPage() {
           {items.map((w) => {
             const client = clients.find((c) => c.id === w.clientId);
             const service = services.find((s) => s.id === w.serviceId);
-            const responsibles = w.responsibleIds
+            const responsibleNames = w.responsibleIds
               .map((id) => profiles.find((p) => p.id === id)?.name)
-              .filter(Boolean)
-              .join(", ");
+              .filter((n): n is string => !!n);
             const days = daysUntil(w.dueDate);
             const isMine = w.responsibleIds.includes(profile.id);
             return (
@@ -104,8 +129,18 @@ export default function TrabalhosPage() {
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       {client && <span>Cliente: {client.name}</span>}
                       {service && <span>Serviço: {service.name}</span>}
-                      {responsibles && <span>Responsável: {responsibles}</span>}
                       {w.dueDate && <span>Prazo: {formatDate(w.dueDate)}</span>}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      {responsibleNames.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">Sem responsável</span>
+                      ) : (
+                        responsibleNames.map((name) => (
+                          <span key={name} className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <User className="h-3 w-3" /> {name}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">

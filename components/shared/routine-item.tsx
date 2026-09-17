@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 
 const CATEGORY_COLORS: Record<string, string> = {
   Pessoal: "bg-sky-500/15 text-sky-400",
-  CLT: "bg-amber-500/15 text-amber-400",
+  "Trabalho / CLT": "bg-amber-500/15 text-amber-400",
   "Visionário Dev": "bg-violet-500/15 text-violet-400",
   TikTok: "bg-pink-500/15 text-pink-400",
   Treino: "bg-emerald-500/15 text-emerald-400",

@@ -7,28 +7,26 @@ import {
   TrendingDown,
   Rocket,
   Video,
-  CheckCircle2,
-  Clock,
   ArrowRight,
   Briefcase,
+  GraduationCap,
   AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useDbStore } from "@/store/db-store";
 import { PageHeader } from "@/components/shared/page-header";
 import { MoneyCard } from "@/components/shared/money-card";
-import { MetricCard } from "@/components/shared/metric-card";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import {
   personalFinanceSummary,
   visionarioFinanceSummary,
   daysUntil,
 } from "@/lib/selectors";
 import { getOccurrencesForDay, getOccurrences } from "@/lib/routine";
-import { formatCurrency, formatDateLong, formatDate } from "@/lib/format";
+import { formatCurrency, formatDateLong, formatDate, toDateKey } from "@/lib/format";
 import { StatusBadge } from "@/components/shared/status-badge";
 
 function greeting() {
@@ -45,12 +43,19 @@ export default function DashboardPage() {
   if (!profile || !personalSpace) return null;
 
   const today = new Date();
+  const todayKey = toDateKey(today);
   const todayOccurrences = getOccurrencesForDay(
     db.activities.filter((a) => a.userId === profile.id),
     today
   );
-  const concluidas = todayOccurrences.filter((o) => o.completed).length;
-  const total = todayOccurrences.length;
+  const todayTasks = db.tasks.filter((t) => t.userId === profile.id && t.dueDate === todayKey);
+  const todayWorkTasks = db.workTasks.filter((t) => t.userId === profile.id && t.dueDate === todayKey);
+
+  const total = todayOccurrences.length + todayTasks.length + todayWorkTasks.length;
+  const concluidas =
+    todayOccurrences.filter((o) => o.completed).length +
+    todayTasks.filter((t) => t.status === "concluida").length +
+    todayWorkTasks.filter((t) => t.status === "concluida").length;
   const pct = total > 0 ? Math.round((concluidas / total) * 100) : 0;
   const proxima = todayOccurrences.find((o) => !o.completed);
 
@@ -67,6 +72,19 @@ export default function DashboardPage() {
   const weekConcluidas = weekOccurrences.filter((o) => o.completed).length;
   const weekPct = weekOccurrences.length > 0 ? Math.round((weekConcluidas / weekOccurrences.length) * 100) : 0;
 
+  // Pendências por área (para priorizar rapidamente)
+  const pendenciasTrabalho = todayWorkTasks.filter((t) => t.status !== "concluida").length;
+  const pendenciasVisionario = canAccessVisionario
+    ? db.workItems.filter((w) => w.responsibleIds.includes(profile.id) && w.status !== "concluido").length
+    : 0;
+  const pendenciasTiktok = canAccessTiktok
+    ? todayOccurrences.filter((o) => o.activity.category === "TikTok" && !o.completed).length
+    : 0;
+  const pendenciasEstudos =
+    todayOccurrences.filter(
+      (o) => ["Faculdade", "Alura", "Curso"].includes(o.activity.category) && !o.completed
+    ).length + todayTasks.filter((t) => t.category === "Faculdade" && t.status !== "concluida").length;
+
   const pessoal = personalFinanceSummary(db, personalSpace.id);
 
   const visionarioSpace = db.spaces.find((s) => s.slug === "visionario-dev");
@@ -78,11 +96,6 @@ export default function DashboardPage() {
   const tiktok = canAccessTiktok && tiktokSpace
     ? personalFinanceSummary(db, tiktokSpace.id)
     : null;
-
-  const myTasks = db.tasks
-    .filter((t) => t.responsibleId === profile.id && t.status !== "concluida")
-    .sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"))
-    .slice(0, 5);
 
   const upcomingBills = db.recurringExpenses
     .filter((e) => e.spaceId === personalSpace.id && e.active)
@@ -103,9 +116,10 @@ export default function DashboardPage() {
         .slice(0, 4)
     : [];
 
+  // Prioriza trabalhos atribuídos a mim — um trabalho só do sócio não é pendência minha.
   const upcomingWork = canAccessVisionario
     ? db.workItems
-        .filter((w) => w.status !== "concluido" && w.dueDate)
+        .filter((w) => w.status !== "concluido" && w.dueDate && w.responsibleIds.includes(profile.id))
         .map((w) => ({ ...w, days: daysUntil(w.dueDate) }))
         .sort((a, b) => (a.days ?? 0) - (b.days ?? 0))
         .slice(0, 4)
@@ -114,32 +128,58 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={`${greeting()}, ${profile.name.split(" ")[0]}.`}
+        title={`${greeting()}, ${profile.name.split(" ")[0]}`}
         description={formatDateLong(today)}
       />
 
-      {/* Hoje */}
-      <section>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Hoje</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MetricCard label="Concluídas" value={concluidas} icon={CheckCircle2} tone="success" />
-          <MetricCard label="Total de atividades" value={total} icon={Clock} />
-          <MetricCard label="Progresso" value={`${pct}%`} icon={TrendingUp} />
-          <Card className="col-span-2 p-4 sm:col-span-1">
-            <p className="text-xs font-medium text-muted-foreground">Próxima atividade</p>
-            {proxima ? (
-              <>
-                <p className="mt-2 truncate text-sm font-semibold text-foreground">
-                  {proxima.activity.title}
-                </p>
-                <p className="text-xs text-muted-foreground">{proxima.activity.startTime}</p>
-              </>
-            ) : (
-              <p className="mt-2 text-sm text-muted-foreground">Tudo concluído 🎉</p>
-            )}
-          </Card>
+      {/* Meu Dia */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">Meu dia</p>
+          <span className="text-sm font-semibold text-primary">
+            {concluidas}/{total} · {pct}%
+          </span>
         </div>
-      </section>
+        <Progress value={pct} className="mt-2" />
+
+        {proxima && (
+          <div className="mt-3 flex items-center justify-between rounded-md bg-secondary/40 px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Próximo</span>
+            <span className="font-medium text-foreground">
+              {proxima.activity.startTime} — {proxima.activity.title}
+            </span>
+          </div>
+        )}
+
+        {(pendenciasTrabalho > 0 || pendenciasVisionario > 0 || pendenciasTiktok > 0 || pendenciasEstudos > 0) && (
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {pendenciasTrabalho > 0 && (
+              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
+                <Briefcase className="h-3 w-3" /> Trabalho <b className="text-foreground">{pendenciasTrabalho}</b>
+              </span>
+            )}
+            {pendenciasVisionario > 0 && (
+              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
+                <Rocket className="h-3 w-3" /> Visionário <b className="text-foreground">{pendenciasVisionario}</b>
+              </span>
+            )}
+            {pendenciasTiktok > 0 && (
+              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
+                <Video className="h-3 w-3" /> TikTok <b className="text-foreground">{pendenciasTiktok}</b>
+              </span>
+            )}
+            {pendenciasEstudos > 0 && (
+              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
+                <GraduationCap className="h-3 w-3" /> Estudos <b className="text-foreground">{pendenciasEstudos}</b>
+              </span>
+            )}
+          </div>
+        )}
+
+        <Button asChild size="sm" className="mt-3 w-full sm:w-auto">
+          <Link href="/hoje">Ver meu dia <ArrowRight className="h-3.5 w-3.5" /></Link>
+        </Button>
+      </Card>
 
       {/* Financeiro resumido */}
       <section>
@@ -196,42 +236,15 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Progresso semanal */}
-        <Card className="p-4">
-          <p className="text-sm font-medium text-foreground">Progresso semanal</p>
-          <p className="text-xs text-muted-foreground">
-            {weekConcluidas} de {weekOccurrences.length} atividades concluídas
-          </p>
-          <Progress value={weekPct} className="mt-3" />
-          <p className="mt-1.5 text-right text-xs font-medium text-primary">{weekPct}%</p>
-        </Card>
-
-        {/* Tarefas importantes */}
-        <Card className="p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-foreground">Tarefas importantes</p>
-            <Link href="/tarefas" className="flex items-center gap-1 text-xs text-primary hover:underline">
-              Ver todas <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-          <div className="mt-3 flex flex-col gap-2">
-            {myTasks.length === 0 ? (
-              <p className="py-4 text-center text-xs text-muted-foreground">Nenhuma tarefa pendente.</p>
-            ) : (
-              myTasks.map((t) => (
-                <div key={t.id} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={t.status === "concluida"} disabled />
-                  <span className="flex-1 truncate text-foreground">{t.title}</span>
-                  {t.dueDate && (
-                    <span className="shrink-0 text-xs text-muted-foreground">{formatDate(t.dueDate)}</span>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-      </div>
+      {/* Progresso da semana */}
+      <Card className="p-4">
+        <p className="text-sm font-medium text-foreground">Progresso da semana</p>
+        <p className="text-xs text-muted-foreground">
+          {weekConcluidas} de {weekOccurrences.length} atividades concluídas
+        </p>
+        <Progress value={weekPct} className="mt-3" />
+        <p className="mt-1.5 text-right text-xs font-medium text-primary">{weekPct}%</p>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Contas próximas do vencimento */}
@@ -277,10 +290,10 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        {/* Trabalhos próximos do prazo */}
+        {/* Trabalhos próximos do prazo (atribuídos a mim) */}
         {canAccessVisionario && (
           <Card className="p-4">
-            <p className="text-sm font-medium text-foreground">Trabalhos próximos do prazo</p>
+            <p className="text-sm font-medium text-foreground">Meus trabalhos próximos do prazo</p>
             <div className="mt-3 flex flex-col gap-2">
               {upcomingWork.length === 0 ? (
                 <p className="py-2 text-xs text-muted-foreground">Nenhum prazo próximo.</p>
