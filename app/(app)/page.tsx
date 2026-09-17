@@ -2,23 +2,20 @@
 
 import Link from "next/link";
 import {
-  Wallet,
-  TrendingUp,
-  TrendingDown,
   Rocket,
   Video,
   ArrowRight,
   Briefcase,
   GraduationCap,
-  AlertTriangle,
+  Wallet,
+  Globe,
+  type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useDbStore } from "@/store/db-store";
 import { PageHeader } from "@/components/shared/page-header";
-import { MoneyCard } from "@/components/shared/money-card";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   personalFinanceSummary,
@@ -26,8 +23,7 @@ import {
   daysUntil,
 } from "@/lib/selectors";
 import { getOccurrencesForDay, getOccurrences } from "@/lib/routine";
-import { formatCurrency, formatDateLong, formatDate, toDateKey } from "@/lib/format";
-import { StatusBadge } from "@/components/shared/status-badge";
+import { formatCurrency, formatDateLong, toDateKey } from "@/lib/format";
 
 function greeting() {
   const h = new Date().getHours();
@@ -97,33 +93,94 @@ export default function DashboardPage() {
     ? personalFinanceSummary(db, tiktokSpace.id)
     : null;
 
-  const upcomingBills = db.recurringExpenses
+  // ---------------------------------------------------------------------
+  // Precisa da sua atenção — lista única combinando as fontes existentes
+  // ---------------------------------------------------------------------
+  interface AttentionItem {
+    id: string;
+    icon: LucideIcon;
+    label: string;
+    title: string;
+    meta: string;
+    urgent: boolean;
+    days: number;
+    href: string;
+  }
+  const attentionItems: AttentionItem[] = [];
+
+  db.recurringExpenses
     .filter((e) => e.spaceId === personalSpace.id && e.active)
-    .map((e) => ({ ...e, days: daysUntil(e.nextDueDate) }))
-    .filter((e) => e.days !== null && e.days <= 10)
-    .sort((a, b) => (a.days ?? 0) - (b.days ?? 0));
+    .forEach((e) => {
+      const days = daysUntil(e.nextDueDate);
+      if (days === null || days > 10) return;
+      attentionItems.push({
+        id: e.id,
+        icon: Wallet,
+        label: "Conta próxima do vencimento",
+        title: `${e.name} — ${formatCurrency(e.amount)}`,
+        meta: days < 0 ? "atrasada" : days === 0 ? "vence hoje" : `vence em ${days}d`,
+        urgent: days <= 3,
+        days,
+        href: "/financeiro",
+      });
+    });
 
-  const pendingClients = canAccessVisionario
-    ? db.clients
-        .filter((c) => c.status === "ativo")
-        .map((c) => {
-          const payment = db.clientPayments
-            .filter((p) => p.clientId === c.id)
-            .sort((a, b) => (a.competencia < b.competencia ? 1 : -1))[0];
-          return { client: c, payment };
-        })
-        .filter((x) => x.payment && x.payment.status !== "pago")
-        .slice(0, 4)
-    : [];
+  if (canAccessVisionario) {
+    db.clients
+      .filter((c) => c.status === "ativo")
+      .forEach((c) => {
+        const payment = db.clientPayments
+          .filter((p) => p.clientId === c.id)
+          .sort((a, b) => (a.competencia < b.competencia ? 1 : -1))[0];
+        if (!payment || payment.status === "pago") return;
+        attentionItems.push({
+          id: payment.id,
+          icon: Wallet,
+          label: "Pagamento pendente",
+          title: `${c.name} — ${formatCurrency(payment.amount)}`,
+          meta: payment.status === "atrasado" ? "atrasado" : "pendente",
+          urgent: payment.status === "atrasado",
+          days: payment.status === "atrasado" ? -1 : 5,
+          href: `/visionario/clientes/${c.id}`,
+        });
+      });
 
-  // Prioriza trabalhos atribuídos a mim — um trabalho só do sócio não é pendência minha.
-  const upcomingWork = canAccessVisionario
-    ? db.workItems
-        .filter((w) => w.status !== "concluido" && w.dueDate && w.responsibleIds.includes(profile.id))
-        .map((w) => ({ ...w, days: daysUntil(w.dueDate) }))
-        .sort((a, b) => (a.days ?? 0) - (b.days ?? 0))
-        .slice(0, 4)
-    : [];
+    // Prioriza trabalhos atribuídos a mim — um trabalho só do sócio não é pendência minha.
+    db.workItems
+      .filter((w) => w.status !== "concluido" && w.dueDate && w.responsibleIds.includes(profile.id))
+      .forEach((w) => {
+        const days = daysUntil(w.dueDate);
+        if (days === null) return;
+        attentionItems.push({
+          id: w.id,
+          icon: Briefcase,
+          label: "Trabalho próximo do prazo",
+          title: w.title,
+          meta: days < 0 ? "atrasado" : days === 0 ? "hoje" : days === 1 ? "amanhã" : `em ${days}d`,
+          urgent: days < 0,
+          days,
+          href: "/visionario/trabalhos",
+        });
+      });
+
+    db.clientSites
+      .forEach((site) => {
+        const days = daysUntil(site.domainRenewalDate);
+        if (days === null || days > 30) return;
+        attentionItems.push({
+          id: site.id,
+          icon: Globe,
+          label: "Domínio próximo da renovação",
+          title: site.domain ?? site.siteName ?? "Domínio",
+          meta: days < 0 ? "vencido" : `vence em ${days}d`,
+          urgent: days <= 7,
+          days,
+          href: "/visionario/sites",
+        });
+      });
+  }
+
+  attentionItems.sort((a, b) => a.days - b.days);
 
   return (
     <div className="flex flex-col gap-6">
@@ -181,60 +238,51 @@ export default function DashboardPage() {
         </Button>
       </Card>
 
-      {/* Financeiro resumido */}
+      {/* Resumo financeiro */}
       <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Meu Dinheiro</h2>
-          <Link href="/financeiro" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Ver detalhes <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <MoneyCard label="Saldo atual" amount={pessoal.saldo} icon={Wallet} />
-          <MoneyCard label="Entradas do mês" amount={pessoal.entradasMes} icon={TrendingUp} tone="success" />
-          <MoneyCard label="Gastos do mês" amount={pessoal.saidasMes} icon={TrendingDown} tone="destructive" />
-        </div>
+        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Resumo financeiro</h2>
+        <Card className="p-4">
+          <div className="grid grid-cols-1 gap-4 divide-y divide-border sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
+            <FinanceColumn
+              title="Pessoal"
+              icon={Wallet}
+              rows={[
+                { label: "Saldo atual", value: pessoal.saldo },
+                { label: "Entradas", value: pessoal.entradasMes, tone: "success" },
+                { label: "Gastos", value: pessoal.saidasMes, tone: "destructive" },
+              ]}
+              href="/financeiro"
+              linkLabel="Ver meu dinheiro"
+            />
+            {visionario && (
+              <FinanceColumn
+                title="Visionário Dev"
+                icon={Rocket}
+                rows={[
+                  { label: "Recebido", value: visionario.recebido, tone: "success" },
+                  { label: "A receber", value: visionario.aReceber, tone: "warning" },
+                  { label: "Lucro", value: visionario.lucro, tone: visionario.lucro >= 0 ? "success" : "destructive" },
+                ]}
+                href="/visionario/financeiro"
+                linkLabel="Ver financeiro"
+              />
+            )}
+            {tiktok && (
+              <FinanceColumn
+                title="TikTok"
+                icon={Video}
+                rows={[
+                  { label: "Ganhos", value: tiktok.entradasMes },
+                  { label: "Gastos", value: tiktok.saidasMes, tone: "destructive" },
+                  { label: "Lucro", value: tiktok.entradasMes - tiktok.saidasMes, tone: "success" },
+                ]}
+                href="/tiktok/financeiro"
+                linkLabel="Ver financeiro"
+              />
+            )}
+          </div>
+        </Card>
       </section>
-
-      {(visionario || tiktok) && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {visionario && (
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground">Visionário Dev</h2>
-                <Link href="/visionario" className="flex items-center gap-1 text-xs text-primary hover:underline">
-                  Ver detalhes <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <MoneyCard label="Faturamento" amount={visionario.faturamento} icon={Rocket} className="[&_p]:text-[11px]" />
-                <MoneyCard label="Lucro" amount={visionario.lucro} tone="success" />
-                <MoneyCard label="A receber" amount={visionario.aReceber} tone="warning" />
-              </div>
-            </section>
-          )}
-
-          {tiktok && (
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground">TikTok</h2>
-                <Link href="/tiktok" className="flex items-center gap-1 text-xs text-primary hover:underline">
-                  Ver detalhes <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <MoneyCard label="Ganhos" amount={tiktok.entradasMes} icon={Video} />
-                <MoneyCard label="Gastos" amount={tiktok.saidasMes} tone="destructive" />
-                <MoneyCard
-                  label="Lucro"
-                  amount={tiktok.entradasMes - tiktok.saidasMes}
-                  tone="success"
-                />
-              </div>
-            </section>
-          )}
-        </div>
-      )}
 
       {/* Progresso da semana */}
       <Card className="p-4">
@@ -246,82 +294,87 @@ export default function DashboardPage() {
         <p className="mt-1.5 text-right text-xs font-medium text-primary">{weekPct}%</p>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Contas próximas do vencimento */}
-        <Card className="p-4">
-          <p className="text-sm font-medium text-foreground">Contas próximas do vencimento</p>
-          <div className="mt-3 flex flex-col gap-2">
-            {upcomingBills.length === 0 ? (
-              <p className="py-2 text-xs text-muted-foreground">Nenhuma conta vencendo em breve.</p>
-            ) : (
-              upcomingBills.map((b) => (
-                <div key={b.id} className="flex items-center justify-between text-sm">
-                  <span className="truncate text-foreground">{b.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{formatCurrency(b.amount)}</span>
-                    <Badge variant={b.days! <= 3 ? "destructive" : "warning"}>{b.days}d</Badge>
+      {/* Precisa da sua atenção */}
+      <section>
+        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Precisa da sua atenção</h2>
+        <Card className="p-2">
+          {attentionItems.length === 0 ? (
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">Tudo em dia por aqui.</p>
+          ) : (
+            <div className="flex flex-col">
+              {attentionItems.slice(0, 8).map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  className="flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-secondary/50"
+                >
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+                      item.urgent ? "bg-destructive/15 text-destructive" : "bg-secondary text-muted-foreground"
+                    }`}
+                  >
+                    <item.icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] text-muted-foreground">{item.label}</p>
+                    <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
                   </div>
-                </div>
-              ))
-            )}
-          </div>
+                  <span
+                    className={`shrink-0 text-xs font-medium ${
+                      item.urgent ? "text-destructive" : "text-muted-foreground"
+                    }`}
+                  >
+                    {item.meta}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
         </Card>
+      </section>
+    </div>
+  );
+}
 
-        {/* Clientes com pagamento pendente */}
-        {canAccessVisionario && (
-          <Card className="p-4">
-            <p className="text-sm font-medium text-foreground">Pagamentos pendentes</p>
-            <div className="mt-3 flex flex-col gap-2">
-              {pendingClients.length === 0 ? (
-                <p className="py-2 text-xs text-muted-foreground">Todos os clientes em dia.</p>
-              ) : (
-                pendingClients.map(({ client, payment }) => (
-                  <Link
-                    key={client.id}
-                    href={`/visionario/clientes/${client.id}`}
-                    className="flex items-center justify-between text-sm hover:text-primary"
-                  >
-                    <span className="truncate">{client.name}</span>
-                    <StatusBadge status={payment!.status} />
-                  </Link>
-                ))
-              )}
-            </div>
-          </Card>
-        )}
-
-        {/* Trabalhos próximos do prazo (atribuídos a mim) */}
-        {canAccessVisionario && (
-          <Card className="p-4">
-            <p className="text-sm font-medium text-foreground">Meus trabalhos próximos do prazo</p>
-            <div className="mt-3 flex flex-col gap-2">
-              {upcomingWork.length === 0 ? (
-                <p className="py-2 text-xs text-muted-foreground">Nenhum prazo próximo.</p>
-              ) : (
-                upcomingWork.map((w) => (
-                  <Link
-                    key={w.id}
-                    href="/visionario/trabalhos"
-                    className="flex items-center justify-between text-sm hover:text-primary"
-                  >
-                    <span className="flex items-center gap-1.5 truncate">
-                      {w.days !== null && w.days < 0 ? (
-                        <AlertTriangle className="h-3 w-3 shrink-0 text-destructive" />
-                      ) : (
-                        <Briefcase className="h-3 w-3 shrink-0 text-muted-foreground" />
-                      )}
-                      {w.title}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {w.dueDate && formatDate(w.dueDate)}
-                    </span>
-                  </Link>
-                ))
-              )}
-            </div>
-          </Card>
-        )}
+function FinanceColumn({
+  title,
+  icon: Icon,
+  rows,
+  href,
+  linkLabel,
+}: {
+  title: string;
+  icon: LucideIcon;
+  rows: { label: string; value: number; tone?: "success" | "destructive" | "warning" }[];
+  href: string;
+  linkLabel: string;
+}) {
+  const toneClass: Record<string, string> = {
+    success: "text-success",
+    destructive: "text-destructive",
+    warning: "text-warning",
+  };
+  return (
+    <div className="flex flex-col gap-2 pt-4 first:pt-0 sm:pt-0 sm:px-4 sm:first:pl-0 sm:last:pr-0">
+      <div className="flex items-center gap-1.5">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
       </div>
+      <div className="flex flex-col gap-1">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-2">
+            <span className="text-xs text-muted-foreground">{row.label}</span>
+            <span
+              className={`text-sm font-semibold tabular-nums whitespace-nowrap ${row.tone ? toneClass[row.tone] : "text-foreground"}`}
+            >
+              {formatCurrency(row.value)}
+            </span>
+          </div>
+        ))}
+      </div>
+      <Link href={href} className="flex items-center gap-1 text-xs text-primary hover:underline">
+        {linkLabel} <ArrowRight className="h-3 w-3" />
+      </Link>
     </div>
   );
 }

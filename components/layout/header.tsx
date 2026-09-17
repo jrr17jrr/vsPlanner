@@ -38,7 +38,7 @@ export function Header() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
                 <Sparkles className="h-4 w-4 text-primary" />
               </div>
-              VSLead
+              VSPlanner
             </SheetTitle>
           </SheetHeader>
           <div className="px-3 pt-3">

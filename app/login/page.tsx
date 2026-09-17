@@ -37,7 +37,7 @@ export default function LoginPage() {
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15">
             <Sparkles className="h-6 w-6 text-primary" />
           </div>
-          <h1 className="text-xl font-semibold text-foreground">VSLead</h1>
+          <h1 className="text-xl font-semibold text-foreground">VSPlanner</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Central para organizar sua vida pessoal e seus negócios.
           </p>

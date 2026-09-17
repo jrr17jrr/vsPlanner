@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VSLead",
+  title: "VSPlanner",
   description: "Central para organizar vida pessoal e negócios",
 };
 
