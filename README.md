@@ -1,4 +1,4 @@
-# VSLead
+# VSPlanner
 
 Central para organizar vida pessoal e negócios (Visionário Dev, TikTok) — primeira versão de front-end funcional, com dados mock e persistência local, pronta para futuramente conectar ao Supabase e publicar na Vercel.
 
@@ -49,12 +49,29 @@ A sessão (usuário logado) fica em `store/session-store.ts` (`vslead:session:v1
 
 Não existem cálculos duplicados: dashboards, gráficos e listagens sempre leem de `lib/selectors.ts`, que centraliza as fórmulas financeiras (saldo, faturamento, MRR, comissões, lucro etc.) a partir das mesmas coleções — então marcar um pagamento como pago, por exemplo, atualiza cards, gráficos e listas ao mesmo tempo.
 
-### Como conectar o Supabase no futuro
+### Backend real (Supabase) — em andamento, por fases
 
-1. As interfaces em `types/entities.ts` já espelham o formato de tabelas Postgres (`profiles`, `spaces`, `space_members`, `activities`, `tasks`, `financial_accounts`, `transactions`, `financial_goals`, `clients`, `services`, `client_services`, `client_payments`, `client_sites`, `work_items`, `vendors`, `sales`, `commissions`, `expenses`, `notifications`).
-2. Trocar a implementação de `store/db-store.ts` (e `session-store.ts`) por chamadas ao `@supabase/supabase-js` / Supabase Auth, mantendo os mesmos nomes de hooks (`useDbStore`, `useAuth`) — as telas não precisam mudar.
-3. Implementar Row Level Security no Postgres espelhando `lib/permissions.ts`: usuário só acessa espaços em que é membro (`space_members`), `role: 'super_admin'` precisa ser validado no backend (nunca só na UI), dinheiro pessoal é privado ao dono do espaço, dados de negócio são restritos aos membros do espaço correspondente.
-4. Preencher `.env.local` a partir de `.env.example` com `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+O front descrito acima continua 100% funcional em mock/localStorage — nada
+disso foi desconectado ainda. A migração para um backend real está sendo
+feita por fases, para não quebrar o que já funciona:
+
+- **Fase 1 (feita)** — fundação: Supabase Auth, tabelas `profiles`, `spaces`,
+  `space_members`, RLS e as funções de segurança que a sustentam. Ver
+  `supabase/migrations/001_initial_auth_spaces.sql` e o passo a passo em
+  **`SUPABASE_SETUP.md`**. A camada de cliente/repositórios já existe em
+  `lib/supabase/` (`client.ts`, `server.ts`, `repositories/`), mas ainda não
+  é chamada por nenhuma tela — é código preparado, não conectado.
+- **Fase 2 (a fazer)** — substituir o login mock (`store/session-store.ts`)
+  pelo Supabase Auth real e ligar a proteção de rotas / `SpaceSwitcher` aos
+  dados reais de `profiles`/`spaces`.
+- **Fases seguintes** — migrar módulo a módulo (Rotina, Trabalho, Financeiro,
+  Visionário Dev, TikTok) de `store/db-store.ts` (mock) para tabelas reais,
+  espelhando os tipos já existentes em `types/entities.ts`.
+
+Ao migrar cada módulo, a ideia geral é: RLS no Postgres espelhando
+`lib/permissions.ts` (usuário só acessa espaços dos quais é membro,
+`system_role`/permissões sempre validados no banco, nunca só na UI, dinheiro
+pessoal privado ao dono, dados de negócio restritos aos membros do espaço).
 
 ## Stack
 
