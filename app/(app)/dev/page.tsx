@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ShieldCheck, User2 } from "lucide-react";
+import { ShieldCheck, User2, Layers, ArrowRight } from "lucide-react";
 import { requireSuperAdmin } from "@/lib/supabase/dal";
 import { adminListUsers } from "@/lib/supabase/repositories/admin.repository";
 import {
@@ -12,7 +12,9 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CreateUserDialog } from "@/components/dev/create-user-dialog";
+import { UserStatusControl } from "@/components/dev/user-status-control";
 import { ActiveSpaceSwitcher } from "@/components/dev/active-space-switcher";
 import { initials, formatDate } from "@/lib/format";
 
@@ -35,7 +37,16 @@ export default async function PainelDevUsuariosPage() {
       <PageHeader
         title="Painel Dev — Usuários"
         description="Administração real de usuários e acessos (Supabase Auth)."
-        actions={<CreateUserDialog />}
+        actions={
+          <>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/dev/spaces">
+                <Layers className="h-4 w-4" /> Gerenciar espaços
+              </Link>
+            </Button>
+            <CreateUserDialog />
+          </>
+        }
       />
 
       <ActiveSpaceSwitcher mySpaces={mySpaces} active={activeSpaceInfo.space} />
@@ -45,11 +56,11 @@ export default async function PainelDevUsuariosPage() {
         <div className="flex flex-col gap-2">
           {users.map((u) => {
             const memberships = allMembers.filter((m) => m.user_id === u.id);
+            const isSelf = u.id === actor.id;
             return (
-              <Link
+              <div
                 key={u.id}
-                href={`/dev/usuarios/${u.id}`}
-                className="flex flex-col gap-3 rounded-lg border border-border p-3 transition-colors hover:border-primary/50 hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <Avatar className="h-10 w-10 shrink-0">
@@ -60,7 +71,7 @@ export default async function PainelDevUsuariosPage() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">
                       {u.name}
-                      {u.id === actor.id && (
+                      {isSelf && (
                         <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                           (você)
                         </span>
@@ -81,27 +92,37 @@ export default async function PainelDevUsuariosPage() {
                   ))}
                 </div>
 
-                <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <Badge variant={u.system_role === "super_admin" ? "default" : "secondary"}>
-                    {u.system_role === "super_admin" ? (
-                      <>
-                        <ShieldCheck className="h-3 w-3" /> super_admin
-                      </>
-                    ) : (
-                      <>
-                        <User2 className="h-3 w-3" /> user
-                      </>
-                    )}
-                  </Badge>
-                  <Badge variant={u.status === "active" ? "success" : "destructive"}>
-                    {u.status}
-                  </Badge>
-                  <span>desde {formatDate(u.created_at)}</span>
-                  <span>
-                    último acesso: {u.last_sign_in_at ? formatDate(u.last_sign_in_at) : "nunca"}
-                  </span>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant={u.system_role === "super_admin" ? "default" : "secondary"}>
+                      {u.system_role === "super_admin" ? (
+                        <>
+                          <ShieldCheck className="h-3 w-3" /> super_admin
+                        </>
+                      ) : (
+                        <>
+                          <User2 className="h-3 w-3" /> user
+                        </>
+                      )}
+                    </Badge>
+                    <Badge variant={u.status === "active" ? "success" : "destructive"}>
+                      {u.status}
+                    </Badge>
+                    <span>desde {formatDate(u.created_at)}</span>
+                    <span>
+                      último acesso: {u.last_sign_in_at ? formatDate(u.last_sign_in_at) : "nunca"}
+                    </span>
+                  </div>
+
+                  <UserStatusControl userId={u.id} status={u.status} isSelf={isSelf} />
+
+                  <Button asChild size="sm">
+                    <Link href={`/dev/usuarios/${u.id}`}>
+                      Gerenciar <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>

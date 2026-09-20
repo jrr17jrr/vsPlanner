@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { UserPlus } from "lucide-react";
 import {
   Dialog,
   DialogTrigger,
@@ -62,7 +61,7 @@ export function CreateUserDialog() {
     >
       <DialogTrigger asChild>
         <Button size="sm">
-          <UserPlus className="h-4 w-4" /> Novo usuário
+          + Novo usuário
         </Button>
       </DialogTrigger>
       <DialogContent>
