@@ -202,6 +202,42 @@ export type ClientService = {
 };
 
 /**
+ * Espelha `public.work_items` (migration 006 — ainda NÃO executada).
+ * "Responsáveis" não é campo nenhum aqui: é a relação real em
+ * `WorkItemAssignee` (múltiplos, mesma arquitetura de `MeetingParticipant`).
+ * `source_meeting_id` liga a reunião que gerou este trabalho, quando
+ * aplicável (seção "Atividades geradas" da tela de reunião).
+ */
+export type WorkItemPriority = "baixa" | "media" | "alta";
+export type WorkItemStatus = "pendente" | "em_andamento" | "aguardando_cliente" | "concluido";
+
+export type WorkItem = {
+  id: string;
+  space_id: string;
+  title: string;
+  description: string | null;
+  client_id: string | null;
+  service_id: string | null;
+  source_meeting_id: string | null;
+  due_date: string | null; // date (yyyy-mm-dd)
+  priority: WorkItemPriority;
+  status: WorkItemStatus;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Espelha `public.work_item_assignees` (migration 006). */
+export type WorkItemAssignee = {
+  id: string;
+  work_item_id: string;
+  space_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+/**
  * Retorno de `admin_list_users()` (migration 002) — profile + `email` e
  * `last_sign_in_at` de `auth.users` (inacessíveis diretamente pelo client,
  * mesmo com RLS, por isso vêm de uma função `security definer`).
@@ -302,6 +338,18 @@ export type Database = {
           created_by: string;
         };
         Update: Partial<Omit<ClientService, "id">>;
+        Relationships: [];
+      };
+      work_items: {
+        Row: WorkItem;
+        Insert: Partial<WorkItem> & { space_id: string; title: string; created_by: string };
+        Update: Partial<Omit<WorkItem, "id">>;
+        Relationships: [];
+      };
+      work_item_assignees: {
+        Row: WorkItemAssignee;
+        Insert: Partial<WorkItemAssignee> & { work_item_id: string; user_id: string };
+        Update: Partial<Omit<WorkItemAssignee, "id">>;
         Relationships: [];
       };
     };

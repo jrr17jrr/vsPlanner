@@ -6,6 +6,7 @@ import {
   listMeetingParticipants,
   listSpaceMemberProfiles,
 } from "@/lib/supabase/repositories/meetings.repository";
+import { listClients, getClient } from "@/lib/supabase/repositories/clients.repository";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { MeetingDetailClient } from "@/components/visionario/reunioes/meeting-detail-client";
 
@@ -25,9 +26,11 @@ export default async function ReuniaoDetalhesPage({
     notFound();
   }
 
-  const [participants, members, canEdit, canDelete, canConclude] = await Promise.all([
+  const [participants, members, clients, linkedClient, canEdit, canDelete, canConclude] = await Promise.all([
     listMeetingParticipants(meeting.id),
     listSpaceMemberProfiles(space.id),
+    listClients(space.id),
+    meeting.client_id ? getClient(meeting.client_id) : Promise.resolve(null),
     hasModulePermission(space.id, "reunioes", "edit"),
     hasModulePermission(space.id, "reunioes", "delete"),
     hasModulePermission(space.id, "reunioes", "conclude"),
@@ -38,6 +41,8 @@ export default async function ReuniaoDetalhesPage({
       meeting={meeting}
       participantUserIds={participants.map((p) => p.user_id)}
       members={members}
+      clients={clients}
+      linkedClient={linkedClient}
       currentUserId={profile.id}
       permissions={{ canEdit, canDelete, canConclude }}
     />

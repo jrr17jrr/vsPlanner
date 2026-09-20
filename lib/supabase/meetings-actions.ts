@@ -20,6 +20,8 @@ export type MeetingFormInput = {
   description?: string;
   agenda?: string;
   notes?: string;
+  /** Cliente real (clients.id, migration 005) — opcional, reunião pode ser avulsa. */
+  clientId?: string;
   clientName?: string;
   contactName?: string;
   contactPhone?: string;
@@ -54,6 +56,32 @@ function validateInput(input: MeetingFormInput): string | null {
   return null;
 }
 
+/**
+ * `clientId`, quando informado, precisa mesmo ser um cliente do MESMO
+ * space — a FK de `meetings.client_id` só garante que o id existe em
+ * `clients`, não que é do space certo. Sem essa checagem, um `clientId`
+ * de outro space (nunca deveria acontecer pela UI, mas nunca confiar só
+ * nisso) ficaria silenciosamente misturado aqui.
+ */
+async function assertClientBelongsToSpace(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  clientId: string | undefined,
+  spaceId: string
+): Promise<string | null> {
+  if (!clientId) return null;
+
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id")
+    .eq("id", clientId)
+    .eq("space_id", spaceId)
+    .maybeSingle();
+
+  if (error) return error.message;
+  if (!data) return "Cliente selecionado não pertence a este espaço.";
+  return null;
+}
+
 export async function createMeetingAction(input: MeetingFormInput): Promise<MeetingActionState> {
   const { profile, space } = await requireModulePermission(VISIONARIO_DEV_SLUG, "reunioes", "create");
 
@@ -61,6 +89,9 @@ export async function createMeetingAction(input: MeetingFormInput): Promise<Meet
   if (validationError) return { error: validationError };
 
   const supabase = await createSupabaseServerClient();
+
+  const clientError = await assertClientBelongsToSpace(supabase, input.clientId, space.id);
+  if (clientError) return { error: clientError };
 
   const { data: meeting, error } = await supabase
     .from("meetings")
@@ -70,6 +101,7 @@ export async function createMeetingAction(input: MeetingFormInput): Promise<Meet
       description: input.description?.trim() || null,
       agenda: input.agenda?.trim() || null,
       notes: input.notes?.trim() || null,
+      client_id: input.clientId || null,
       client_name: input.clientName?.trim() || null,
       contact_name: input.contactName?.trim() || null,
       contact_phone: input.contactPhone?.trim() || null,
@@ -109,6 +141,9 @@ export async function updateMeetingAction(
 
   const supabase = await createSupabaseServerClient();
 
+  const clientError = await assertClientBelongsToSpace(supabase, input.clientId, space.id);
+  if (clientError) return { error: clientError };
+
   const { data, error } = await supabase
     .from("meetings")
     .update({
@@ -116,6 +151,7 @@ export async function updateMeetingAction(
       description: input.description?.trim() || null,
       agenda: input.agenda?.trim() || null,
       notes: input.notes?.trim() || null,
+      client_id: input.clientId || null,
       client_name: input.clientName?.trim() || null,
       contact_name: input.contactName?.trim() || null,
       contact_phone: input.contactPhone?.trim() || null,

@@ -11,7 +11,7 @@ import { MeetingFormDialog } from "@/components/visionario/reunioes/meeting-form
 import { MeetingCard } from "@/components/visionario/reunioes/meeting-card";
 import { toDateKey, formatDateShort } from "@/lib/format";
 import { startOfWeekMonday, addDays } from "@/lib/dates";
-import type { Meeting, MeetingParticipant, SpaceMemberProfile } from "@/types/database.types";
+import type { Client, Meeting, MeetingParticipant, SpaceMemberProfile } from "@/types/database.types";
 
 type FilterKey = "proximas" | "hoje" | "realizadas" | "canceladas" | "todas";
 
@@ -27,12 +27,14 @@ export function ReunioesPageClient({
   meetings,
   participants,
   members,
+  clients,
   currentUserId,
   permissions,
 }: {
   meetings: Meeting[];
   participants: MeetingParticipant[];
   members: SpaceMemberProfile[];
+  clients: Client[];
   currentUserId: string;
   permissions: { canCreate: boolean; canEdit: boolean; canDelete: boolean; canConclude: boolean };
 }) {
@@ -162,6 +164,7 @@ export function ReunioesPageClient({
           open={formOpen}
           onOpenChange={setFormOpen}
           members={members}
+          clients={clients}
           currentUserId={currentUserId}
         />
       )}

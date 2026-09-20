@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Pencil, CheckCircle2, Ban, Trash2, MapPin, Users, User, ListTodo } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -15,18 +16,22 @@ import { MeetingFormDialog } from "@/components/visionario/reunioes/meeting-form
 import { ConcludeMeetingDialog } from "@/components/visionario/reunioes/conclude-meeting-dialog";
 import { cancelMeetingAction, deleteMeetingAction } from "@/lib/supabase/meetings-actions";
 import { formatDateLong } from "@/lib/format";
-import type { Meeting, SpaceMemberProfile } from "@/types/database.types";
+import type { Client, Meeting, SpaceMemberProfile } from "@/types/database.types";
 
 export function MeetingDetailClient({
   meeting,
   participantUserIds,
   members,
+  clients,
+  linkedClient,
   currentUserId,
   permissions,
 }: {
   meeting: Meeting;
   participantUserIds: string[];
   members: SpaceMemberProfile[];
+  clients: Client[];
+  linkedClient: Client | null;
   currentUserId: string;
   permissions: { canEdit: boolean; canDelete: boolean; canConclude: boolean };
 }) {
@@ -42,7 +47,7 @@ export function MeetingDetailClient({
     .filter((n): n is string => !!n);
 
   const isOpenMeeting = meeting.status === "agendada" || meeting.status === "em_andamento";
-  const hasClientInfo = meeting.client_name || meeting.contact_name || meeting.contact_phone;
+  const hasClientInfo = linkedClient || meeting.client_name || meeting.contact_name || meeting.contact_phone;
   const hasAgendaInfo = meeting.agenda || meeting.description;
 
   return (
@@ -67,11 +72,23 @@ export function MeetingDetailClient({
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reunião</p>
           {hasClientInfo ? (
             <div className="flex flex-col gap-2 text-sm">
-              {meeting.client_name && (
+              {linkedClient ? (
                 <div>
                   <p className="text-xs text-muted-foreground">Cliente</p>
-                  <p className="text-foreground">{meeting.client_name}</p>
+                  <Link
+                    href={`/visionario/clientes/${linkedClient.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    {linkedClient.name}
+                  </Link>
                 </div>
+              ) : (
+                meeting.client_name && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Cliente</p>
+                    <p className="text-foreground">{meeting.client_name}</p>
+                  </div>
+                )
               )}
               {meeting.contact_name && (
                 <div>
@@ -272,6 +289,7 @@ export function MeetingDetailClient({
           meeting={meeting}
           currentParticipantIds={participantUserIds}
           members={members}
+          clients={clients}
           currentUserId={currentUserId}
         />
       )}

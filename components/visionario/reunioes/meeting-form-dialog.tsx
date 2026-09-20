@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toDateKey } from "@/lib/format";
 import { createMeetingAction, updateMeetingAction, type MeetingFormInput } from "@/lib/supabase/meetings-actions";
-import type { Meeting, SpaceMemberProfile } from "@/types/database.types";
+import type { Client, Meeting, SpaceMemberProfile } from "@/types/database.types";
 
 interface Props {
   open: boolean;
@@ -20,6 +20,8 @@ interface Props {
   currentParticipantIds?: string[];
   members: SpaceMemberProfile[];
   currentUserId: string;
+  /** Clientes reais do Visionário Dev — lista vazia se ainda não usa Clientes real. */
+  clients?: Client[];
   onSaved?: (meetingId: string) => void;
 }
 
@@ -30,6 +32,7 @@ export function MeetingFormDialog({
   currentParticipantIds,
   members,
   currentUserId,
+  clients,
   onSaved,
 }: Props) {
   return (
@@ -42,6 +45,7 @@ export function MeetingFormDialog({
           currentParticipantIds={currentParticipantIds ?? []}
           members={members}
           currentUserId={currentUserId}
+          clients={clients ?? []}
           onSaved={onSaved}
         />
       )}
@@ -55,9 +59,14 @@ function MeetingForm({
   currentParticipantIds,
   members,
   currentUserId,
+  clients,
   onSaved,
-}: Omit<Props, "open" | "currentParticipantIds"> & { currentParticipantIds: string[] }) {
+}: Omit<Props, "open" | "currentParticipantIds" | "clients"> & {
+  currentParticipantIds: string[];
+  clients: Client[];
+}) {
   const [title, setTitle] = useState(meeting?.title ?? "");
+  const [clientId, setClientId] = useState(meeting?.client_id ?? "");
   const [clientName, setClientName] = useState(meeting?.client_name ?? "");
   const [contactName, setContactName] = useState(meeting?.contact_name ?? "");
   const [contactPhone, setContactPhone] = useState(meeting?.contact_phone ?? "");
@@ -77,6 +86,20 @@ function MeetingForm({
 
   function toggleParticipant(id: string) {
     setParticipantIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  }
+
+  function handleClientChange(id: string) {
+    if (id === "avulso") {
+      setClientId("");
+      return;
+    }
+    setClientId(id);
+    const client = clients.find((c) => c.id === id);
+    if (!client) return;
+    // Aproveita os dados do cliente — só preenche o que ainda está vazio,
+    // nunca sobrescreve algo que já foi digitado manualmente.
+    setClientName((prev) => prev || client.name);
+    setContactPhone((prev) => prev || client.whatsapp || client.phone || "");
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -99,6 +122,7 @@ function MeetingForm({
       description: description || undefined,
       agenda: agenda || undefined,
       notes: notes || undefined,
+      clientId: clientId || undefined,
       clientName: clientName || undefined,
       contactName: contactName || undefined,
       contactPhone: contactPhone || undefined,
@@ -143,15 +167,37 @@ function MeetingForm({
           />
         </div>
 
+        {clients.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <Label>Cliente cadastrado</Label>
+            <Select value={clientId || "avulso"} onValueChange={handleClientChange} disabled={pending}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="avulso">Avulso / sem cliente cadastrado</SelectItem>
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                    {c.company ? ` (${c.company})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="meeting-client">Cliente / nome do cliente</Label>
+            <Label htmlFor="meeting-client">
+              {clientId ? "Nome do cliente (exibição)" : "Cliente / nome do cliente"}
+            </Label>
             <Input
               id="meeting-client"
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
               disabled={pending}
-              placeholder="Opcional"
+              placeholder="Opcional — ainda não é cliente cadastrado"
             />
           </div>
           <div className="flex flex-col gap-1.5">
