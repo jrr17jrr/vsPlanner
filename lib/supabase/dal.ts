@@ -3,8 +3,9 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { listMySpaces } from "@/lib/supabase/repositories/spaces.repository";
+import { listMySpaces, ensureVisionarioDevSpace } from "@/lib/supabase/repositories/spaces.repository";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
+import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import type { ModulePermissionAction, ModulePermissionModule, Profile, Space } from "@/types/database.types";
 
 /**
@@ -74,12 +75,40 @@ export async function requireSuperAdmin(): Promise<{
 }
 
 /**
- * Guard de módulo (Fase B — Reuniões e módulos seguintes): acha o space
- * pelo `slug` (nunca um UUID fixo — `listMySpaces()` já é filtrado por RLS,
- * então um slug de um space ao qual o usuário não pertence simplesmente não
- * aparece na lista) e confere `has_module_permission()` no servidor antes
- * de deixar renderizar. Sem a permissão pedida (`view` por padrão),
- * redireciona — nunca deixa a página nem tentar buscar dados.
+ * Acha um space pelo `slug` (nunca um UUID fixo — `listMySpaces()` já é
+ * filtrado por RLS, então um slug de um space ao qual o usuário não
+ * pertence simplesmente não aparece na lista). Para o workspace oficial
+ * "Visionário Dev" especificamente: se ainda não existir, tenta criar
+ * automaticamente (`ensureVisionarioDevSpace` — só funciona se quem está
+ * navegando for super_admin; para qualquer outra pessoa, continua
+ * simplesmente não encontrando nada). Isso elimina a necessidade de criar
+ * o space manualmente pelo Painel Dev.
+ */
+async function resolveSpaceBySlug(
+  spaceSlug: string,
+  profile: Profile
+): Promise<Space | undefined> {
+  const mySpaces = await listMySpaces();
+  const found = mySpaces.find((s) => s.slug === spaceSlug);
+  if (found) return found;
+
+  if (spaceSlug === VISIONARIO_DEV_SLUG) {
+    const bootstrapped = await ensureVisionarioDevSpace(
+      profile.id,
+      profile.system_role === "super_admin"
+    );
+    if (bootstrapped) return bootstrapped;
+  }
+
+  return undefined;
+}
+
+/**
+ * Guard de módulo (Fase B — Reuniões e módulos seguintes): resolve o space
+ * (com bootstrap automático do Visionário Dev quando aplicável) e confere
+ * `has_module_permission()` no servidor antes de deixar renderizar. Sem a
+ * permissão pedida (`view` por padrão), redireciona — nunca deixa a
+ * página nem tentar buscar dados.
  */
 export async function requireModulePermission(
   spaceSlug: string,
@@ -88,8 +117,7 @@ export async function requireModulePermission(
 ): Promise<{ profile: Profile; email: string | null; space: Space }> {
   const { profile, email } = await requireActiveProfile();
 
-  const mySpaces = await listMySpaces();
-  const space = mySpaces.find((s) => s.slug === spaceSlug);
+  const space = await resolveSpaceBySlug(spaceSlug, profile);
 
   if (!space) {
     redirect("/hoje");
@@ -101,4 +129,17 @@ export async function requireModulePermission(
   }
 
   return { profile, email, space };
+}
+
+/**
+ * Igual a `resolveSpaceBySlug`, mas exportado pra quem só precisa achar o
+ * space (com bootstrap) sem exigir uma permissão específica — hoje usado
+ * pelo layout (pra decidir o que mostrar no menu) e pelo "Hoje" (pra saber
+ * se existe Visionário Dev antes de buscar reuniões do dia).
+ */
+export async function findOrBootstrapSpace(
+  spaceSlug: string,
+  profile: Profile
+): Promise<Space | undefined> {
+  return resolveSpaceBySlug(spaceSlug, profile);
 }

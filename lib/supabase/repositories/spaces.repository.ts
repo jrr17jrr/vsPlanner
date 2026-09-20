@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import type { Space, SpaceMember } from "@/types/database.types";
 
 /**
@@ -23,6 +24,72 @@ export const listMySpaces = cache(async (): Promise<Space[]> => {
   if (error) throw error;
   return data ?? [];
 });
+
+/**
+ * Garante que o workspace oficial "Visionário Dev" existe — sem exigir um
+ * clique manual no Painel Dev. Idempotente: se já existe (por qualquer
+ * dono), só retorna ele, nunca cria um segundo. Só cria quando quem está
+ * navegando é super_admin — um membro comum sendo o primeiro a visitar uma
+ * página do Visionário antes do space existir NÃO deve virar dono do
+ * workspace da empresa sem querer.
+ *
+ * Usa `spaces_insert_own` (migration 001, `owner_id = auth.uid()`) — a
+ * mesma RLS normal, sessão do usuário, nunca Service Role. Depois da
+ * migration 005 (constraint `unique(slug)`), uma corrida entre duas
+ * requisições simultâneas faz a segunda falhar por violação de unicidade
+ * em vez de duplicar; o catch abaixo já trata isso reconsultando em vez de
+ * propagar o erro.
+ */
+export async function ensureVisionarioDevSpace(
+  actingProfileId: string,
+  isSuperAdmin: boolean
+): Promise<Space | null> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data: existing, error: findError } = await supabase
+    .from("spaces")
+    .select("*")
+    .eq("slug", VISIONARIO_DEV_SLUG)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (findError) throw findError;
+  if (existing) return existing;
+  if (!isSuperAdmin) return null;
+
+  const { data: created, error: createError } = await supabase
+    .from("spaces")
+    .insert({ name: "Visionário Dev", slug: VISIONARIO_DEV_SLUG, type: "business", owner_id: actingProfileId })
+    .select("*")
+    .single();
+
+  if (createError) {
+    // Possível corrida com outra requisição criando ao mesmo tempo —
+    // reconsulta antes de propagar o erro.
+    const { data: raceWinner } = await supabase
+      .from("spaces")
+      .select("*")
+      .eq("slug", VISIONARIO_DEV_SLUG)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (raceWinner) return raceWinner;
+    throw createError;
+  }
+
+  const { error: memberError } = await supabase
+    .from("space_members")
+    .insert({ space_id: created.id, user_id: actingProfileId, role: "owner" });
+
+  if (memberError) {
+    // Não deixa um space sem a membership do próprio dono — desfaz.
+    await supabase.from("spaces").delete().eq("id", created.id);
+    throw memberError;
+  }
+
+  return created;
+}
 
 export async function getSpace(spaceId: string): Promise<Space | null> {
   const supabase = await createSupabaseServerClient();

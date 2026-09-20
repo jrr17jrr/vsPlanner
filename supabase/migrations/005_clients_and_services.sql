@@ -3,11 +3,23 @@
 -- reais.
 -- Migration: 005_clients_and_services.sql
 --
--- NÃO altera nada das migrations 001/002/003/004. Só ADICIONA três
--- tabelas novas: `clients`, `services`, `client_services`.
+-- NÃO altera nada das migrations 001/002/003/004 (nenhuma tabela/policy/
+-- trigger antiga é modificada). Esta versão foi corrigida ANTES da
+-- primeira execução (autorizado pelo usuário) para incluir mais duas
+-- coisas pequenas, agrupadas aqui em vez de virarem migrations 006/007
+-- separadas:
 --
--- Migra os campos ÚTEIS do mock (`types/entities.ts` → `Client`/`Service`/
--- `ClientService`) para o Postgres. NÃO traz `dueDay`/`pricingMode`/
+--   0a. `unique (slug)` em `spaces` — o bootstrap automático do space
+--       "Visionário Dev" (feito em código, ver `ensureVisionarioDevSpace`)
+--       depende de nunca poder existir dois spaces com o mesmo slug.
+--   0b. `meetings.client_id` — a ligação real Reuniões→Clientes (era a
+--       "Etapa 4" do plano original); só podia existir depois de `clients`
+--       ser criada, então faz sentido vir na mesma migration que cria
+--       `clients`, não numa 006 isolada logo em seguida.
+--
+-- Fora isso, cria três tabelas novas: `clients`, `services`,
+-- `client_services`. Migra os campos ÚTEIS do mock (`types/entities.ts` →
+-- `Client`/`Service`/`ClientService`). NÃO traz `dueDay`/`pricingMode`/
 -- `packagePrice` do mock `Client` — esses três campos descreviam cobrança
 -- (quando vence, se é pacote/individual) num nível que agora pertence a
 -- `client_services` (por serviço contratado, não por cliente como um
@@ -21,6 +33,21 @@
 -- COMO EXECUTAR: Supabase Dashboard → SQL Editor → New query → colar este
 -- arquivo inteiro → Run.
 -- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 0. Correções pequenas em cima de tabelas já existentes (001/003)
+-- -----------------------------------------------------------------------------
+
+-- 0a. Slug único — sem isso, o bootstrap automático do Visionário Dev
+-- (código da aplicação: verifica se já existe, cria se não existir) teria
+-- uma janela teórica de corrida (duas requisições simultâneas criando
+-- dois spaces "visionario-dev"). Com a constraint, a segunda tentativa
+-- simplesmente falha com um erro de unicidade, e o código já trata isso
+-- reconsultando em vez de duplicar.
+alter table public.spaces
+  drop constraint if exists spaces_slug_key;
+alter table public.spaces
+  add constraint spaces_slug_key unique (slug);
 
 -- -----------------------------------------------------------------------------
 -- 1. Clientes
@@ -268,13 +295,34 @@ create policy client_services_delete
 
 grant select, insert, update, delete on public.client_services to authenticated;
 
+-- -----------------------------------------------------------------------------
+-- 4. Reuniões → Clientes (a "Etapa 4" original, incorporada aqui)
+--
+-- `client_name` (migration 003) continua existindo — texto livre,
+-- preservado para reuniões antigas e para quando o contato ainda não é um
+-- cliente cadastrado. `client_id` é a ligação real, nova, nullable (uma
+-- reunião pode não ter cliente). Nenhuma policy de `meetings` muda — RLS
+-- continua sendo só `has_module_permission(space_id, 'reunioes', ação)`,
+-- e a FK por si só não abre nenhum acesso novo (só é populável com um
+-- `client_id` que passe pela RLS de `clients` de qualquer forma).
+-- -----------------------------------------------------------------------------
+
+alter table public.meetings
+  add column if not exists client_id uuid references public.clients (id) on delete set null;
+
+comment on column public.meetings.client_id is
+  'Ligação real com clients (Fase E, incorporada na migration 005). '
+  'client_name continua existindo para reuniões sem cliente cadastrado ou '
+  'criadas antes desta coluna.';
+
+create index if not exists idx_meetings_client_id on public.meetings (client_id);
+
 -- =============================================================================
 -- Fim da migration 005.
 --
--- O que NÃO mudou: nada em 001/002/003/004. Nenhuma policy/trigger/função
--- antiga foi tocada.
---
--- Próximo passo (Etapa 4, migration separada — "não altere migration
--- antiga"): meetings.client_id uuid references clients(id), preservando
--- client_name durante a transição.
+-- O que NÃO mudou: nenhuma tabela/policy/trigger/função das migrations
+-- 001/002/003/004 foi removida ou teve seu comportamento alterado — a
+-- única adição a uma tabela já existente é a constraint de slug único em
+-- `spaces` e a nova coluna nullable `meetings.client_id`, que não afeta
+-- nenhuma policy de RLS existente.
 -- =============================================================================

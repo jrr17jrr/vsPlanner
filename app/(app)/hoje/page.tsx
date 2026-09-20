@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowRight, Sun, Briefcase, ListChecks, CalendarPlus } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/shared/empty-state";
 import { RoutineItem } from "@/components/shared/routine-item";
 import { ChecklistItem, PriorityBadge } from "@/components/shared/checklist-item";
+import { TodayMeetingItem } from "@/components/visionario/reunioes/today-meeting-item";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ActivityFormDialog } from "@/components/forms/activity-form-dialog";
 import { QuickTaskDialog } from "@/components/forms/quick-task-dialog";
@@ -20,7 +21,9 @@ import { WorkTaskFormDialog } from "@/components/forms/work-task-form-dialog";
 import { getOccurrencesForDay } from "@/lib/routine";
 import { periodOfDay, PERIOD_LABELS } from "@/lib/day-planner";
 import { toDateKey, formatDateLong } from "@/lib/format";
+import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
 import type { Activity, Task, WorkTask } from "@/types/entities";
+import type { Meeting } from "@/types/database.types";
 
 export default function HojePage() {
   const { profile, personalSpace } = useAuth();
@@ -29,6 +32,36 @@ export default function HojePage() {
   const workTasks = useDbStore((s) => s.workTasks);
   const update = useDbStore((s) => s.update);
   const remove = useDbStore((s) => s.remove);
+
+  // Reuniões (Supabase real) do dia em que sou participante — carregadas à
+  // parte porque "Hoje" ainda é majoritariamente mock/client-side; a busca
+  // é assíncrona e não trava o resto da página (rotina/tarefas aparecem
+  // imediatamente, reuniões chegam quando a resposta voltar). Mesma linha
+  // de `meetings` pra todo participante autorizado — nada é duplicado por
+  // usuário aqui.
+  const [todayMeetings, setTodayMeetings] = useState<Meeting[]>([]);
+  const [meetingParticipantNames, setMeetingParticipantNames] = useState<Record<string, string[]>>({});
+  const [meetingsLoaded, setMeetingsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTodayMeetingsForHoje()
+      .then((result) => {
+        if (cancelled) return;
+        setTodayMeetings(result.meetings);
+        setMeetingParticipantNames(result.participantNamesByMeeting);
+      })
+      .catch(() => {
+        // Falha silenciosa: "Hoje" continua funcionando com rotina/tarefas
+        // mesmo se a busca de reuniões falhar (rede, etc.).
+      })
+      .finally(() => {
+        if (!cancelled) setMeetingsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [activityFormOpen, setActivityFormOpen] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
@@ -54,13 +87,18 @@ export default function HojePage() {
 
   if (!profile || !personalSpace) return null;
 
-  // Progresso geral do dia (rotina + tarefas + trabalho)
+  // Progresso geral do dia (rotina + tarefas + trabalho). Reuniões não
+  // entram no percentual — "concluir" uma reunião é um fluxo próprio (tela
+  // da reunião), não um toggle daqui — mas contam pra decidir se há algo
+  // planejado hoje (evita mostrar "nada planejado" e depois a reunião
+  // aparecer de repente quando a busca assíncrona terminar).
   const totalItems = occ.length + todayTasks.length + todayWorkTasks.length;
   const doneItems =
     occ.filter((o) => o.completed).length +
     todayTasks.filter((t) => t.status === "concluida").length +
     todayWorkTasks.filter((t) => t.status === "concluida").length;
   const pct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
+  const nothingPlanned = totalItems === 0 && todayMeetings.length === 0 && meetingsLoaded;
 
   const agora = occ.find((o) => {
     if (!o.activity.endTime) return false;
@@ -68,13 +106,16 @@ export default function HojePage() {
   });
   const proximo = occ.find((o) => !o.completed && o.activity.startTime > nowHHMM) ?? occ.find((o) => !o.completed);
 
-  // Linha do tempo: ocorrências de rotina + tarefas pessoais com horário
+  // Linha do tempo: ocorrências de rotina + tarefas pessoais com horário +
+  // reuniões reais (Supabase) de hoje em que sou participante.
   type TimelineEntry =
     | { kind: "activity"; time: string; occ: (typeof occ)[number] }
-    | { kind: "task"; time: string; task: Task };
+    | { kind: "task"; time: string; task: Task }
+    | { kind: "meeting"; time: string; meeting: Meeting };
   const timeline: TimelineEntry[] = [
     ...occ.map((o) => ({ kind: "activity" as const, time: o.activity.startTime, occ: o })),
     ...timedTasks.map((t) => ({ kind: "task" as const, time: t.scheduledTime!, task: t })),
+    ...todayMeetings.map((m) => ({ kind: "meeting" as const, time: m.start_time, meeting: m })),
   ].sort((a, b) => a.time.localeCompare(b.time));
 
   const periods: Array<"manha" | "tarde" | "noite"> = ["manha", "tarde", "noite"];
@@ -165,17 +206,29 @@ export default function HojePage() {
           <section key={period}>
             <h2 className="mb-2 text-sm font-medium text-muted-foreground">{PERIOD_LABELS[period]}</h2>
             <div className="flex flex-col gap-2">
-              {items.map((entry) =>
-                entry.kind === "activity" ? (
-                  <RoutineItem
-                    key={`${entry.occ.activity.id}-${entry.occ.date}`}
-                    activity={entry.occ.activity}
-                    completed={entry.occ.completed}
-                    onToggle={() => toggleActivity(entry.occ.activity, entry.occ.date)}
-                    onEdit={() => setActivityFormOpen(true)}
-                    onDelete={() => setDeletingActivity(entry.occ.activity)}
-                  />
-                ) : (
+              {items.map((entry) => {
+                if (entry.kind === "activity") {
+                  return (
+                    <RoutineItem
+                      key={`${entry.occ.activity.id}-${entry.occ.date}`}
+                      activity={entry.occ.activity}
+                      completed={entry.occ.completed}
+                      onToggle={() => toggleActivity(entry.occ.activity, entry.occ.date)}
+                      onEdit={() => setActivityFormOpen(true)}
+                      onDelete={() => setDeletingActivity(entry.occ.activity)}
+                    />
+                  );
+                }
+                if (entry.kind === "meeting") {
+                  return (
+                    <TodayMeetingItem
+                      key={entry.meeting.id}
+                      meeting={entry.meeting}
+                      participantNames={meetingParticipantNames[entry.meeting.id] ?? []}
+                    />
+                  );
+                }
+                return (
                   <ChecklistItem
                     key={entry.task.id}
                     title={entry.task.title}
@@ -187,8 +240,8 @@ export default function HojePage() {
                     onMove={(d) => update("tasks", entry.task.id, { dueDate: d })}
                     badges={<span className="text-[11px] text-muted-foreground">{entry.task.category}</span>}
                   />
-                )
-              )}
+                );
+              })}
             </div>
           </section>
         )
@@ -263,7 +316,7 @@ export default function HojePage() {
         )}
       </section>
 
-      {totalItems === 0 && (
+      {nothingPlanned && (
         <EmptyState
           icon={Sun}
           title="Nada planejado para hoje"

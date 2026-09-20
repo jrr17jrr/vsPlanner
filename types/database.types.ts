@@ -78,7 +78,7 @@ export type ModulePermissionAction = "view" | "create" | "edit" | "delete" | "co
 
 export type MeetingStatus = "agendada" | "em_andamento" | "realizada" | "cancelada";
 
-/** Espelha `public.meetings` (migration 003). */
+/** Espelha `public.meetings` (migration 003 + `client_id` da migration 005). */
 export type Meeting = {
   id: string;
   space_id: string;
@@ -86,6 +86,7 @@ export type Meeting = {
   description: string | null;
   agenda: string | null;
   notes: string | null;
+  client_id: string | null;
   client_name: string | null;
   contact_name: string | null;
   contact_phone: string | null;
@@ -118,6 +119,86 @@ export type SpaceMemberProfile = {
   id: string;
   name: string;
   avatar_url: string | null;
+};
+
+/**
+ * Espelha `public.space_module_permissions` (migration 003) — overrides
+ * pontuais de permissão por módulo/ação, por membership. Ausência de linha
+ * pra um (space_member, module, action) = usa o padrão da role (ver
+ * `defaultModulePermission()` em `lib/module-permissions.ts`, espelho em
+ * JS de `default_module_permission()` no Postgres).
+ */
+export type SpaceModulePermission = {
+  id: string;
+  space_member_id: string;
+  module: ModulePermissionModule;
+  action: ModulePermissionAction;
+  allowed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Espelha `public.clients` (migration 005). */
+export type ClientStatus = "ativo" | "inativo";
+
+export type Client = {
+  id: string;
+  space_id: string;
+  name: string;
+  company: string | null;
+  status: ClientStatus;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  instagram: string | null;
+  tiktok: string | null;
+  facebook: string | null;
+  website: string | null;
+  notes: string | null;
+  joined_at: string; // date
+  responsible_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Espelha `public.services` (migration 005). */
+export type ServiceBillingType = "unico" | "mensal";
+export type ServiceStatus = "ativo" | "inativo";
+
+export type Service = {
+  id: string;
+  space_id: string;
+  name: string;
+  description: string | null;
+  default_price: number;
+  billing_type: ServiceBillingType;
+  status: ServiceStatus;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Espelha `public.client_services` (migration 005) — o "contrato". */
+export type ClientServiceBillingType = "unico" | "recorrente";
+export type ClientServiceFrequency = "semanal" | "mensal" | "anual";
+export type ClientServiceStatus = "ativo" | "inativo" | "cancelado";
+
+export type ClientService = {
+  id: string;
+  client_id: string;
+  service_id: string;
+  space_id: string;
+  price: number;
+  billing_type: ClientServiceBillingType;
+  frequency: ClientServiceFrequency | null;
+  due_day: number | null;
+  start_date: string;
+  status: ClientServiceStatus;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 };
 
 /**
@@ -181,6 +262,46 @@ export type Database = {
         Row: MeetingParticipant;
         Insert: Partial<MeetingParticipant> & { meeting_id: string; user_id: string };
         Update: Partial<Omit<MeetingParticipant, "id">>;
+        Relationships: [];
+      };
+      space_module_permissions: {
+        Row: SpaceModulePermission;
+        Insert: Partial<SpaceModulePermission> & {
+          space_member_id: string;
+          module: ModulePermissionModule;
+          action: ModulePermissionAction;
+          allowed: boolean;
+        };
+        Update: Partial<Omit<SpaceModulePermission, "id">>;
+        Relationships: [];
+      };
+      clients: {
+        Row: Client;
+        Insert: Partial<Client> & { space_id: string; name: string; created_by: string };
+        Update: Partial<Omit<Client, "id">>;
+        Relationships: [];
+      };
+      services: {
+        Row: Service;
+        Insert: Partial<Service> & {
+          space_id: string;
+          name: string;
+          billing_type: ServiceBillingType;
+          created_by: string;
+        };
+        Update: Partial<Omit<Service, "id">>;
+        Relationships: [];
+      };
+      client_services: {
+        Row: ClientService;
+        Insert: Partial<ClientService> & {
+          client_id: string;
+          service_id: string;
+          price: number;
+          billing_type: ClientServiceBillingType;
+          created_by: string;
+        };
+        Update: Partial<Omit<ClientService, "id">>;
         Relationships: [];
       };
     };

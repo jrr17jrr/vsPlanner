@@ -1,9 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireModulePermission } from "@/lib/supabase/dal";
+import { requireModulePermission, requireActiveProfile, findOrBootstrapSpace } from "@/lib/supabase/dal";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
+import { listSpaceMemberProfiles } from "@/lib/supabase/repositories/meetings.repository";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
+import { toDateKey } from "@/lib/format";
+import type { Meeting } from "@/types/database.types";
 
 export type MeetingActionState = {
   error?: string;
@@ -213,6 +217,86 @@ export async function cancelMeetingAction(meetingId: string): Promise<MeetingAct
   revalidatePath("/visionario/reunioes");
   revalidatePath(`/visionario/reunioes/${meetingId}`);
   return { success: "Reunião cancelada." };
+}
+
+/**
+ * Reuniões de hoje em que o usuário atual é participante — usada pelo
+ * "Hoje" (client component, mock) pra buscar dados reais sob demanda.
+ * Diferente das outras funções deste arquivo, NÃO redireciona quando o
+ * usuário não tem Visionário Dev/permissão — só devolve lista vazia, já
+ * que "Hoje" deve continuar funcionando normalmente pra quem não usa o
+ * Visionário Dev. Nenhum dado é duplicado: é a MESMA linha de `meetings`
+ * lida por qualquer participante autorizado, filtrada por
+ * `meeting_participants.user_id = eu`.
+ */
+export async function getTodayMeetingsForHoje(): Promise<{
+  meetings: Meeting[];
+  participantNamesByMeeting: Record<string, string[]>;
+}> {
+  const { profile } = await requireActiveProfile();
+
+  const space = await findOrBootstrapSpace(VISIONARIO_DEV_SLUG, profile);
+  if (!space) return { meetings: [], participantNamesByMeeting: {} };
+
+  const allowed = await hasModulePermission(space.id, "reunioes", "view");
+  if (!allowed) return { meetings: [], participantNamesByMeeting: {} };
+
+  const supabase = await createSupabaseServerClient();
+  const todayKey = toDateKey(new Date());
+
+  const { data: todayMeetings, error } = await supabase
+    .from("meetings")
+    .select("*")
+    .eq("space_id", space.id)
+    .eq("meeting_date", todayKey)
+    .neq("status", "cancelada")
+    .order("start_time", { ascending: true });
+
+  if (error) throw error;
+  if (!todayMeetings || todayMeetings.length === 0) {
+    return { meetings: [], participantNamesByMeeting: {} };
+  }
+
+  const { data: myParticipations, error: participationError } = await supabase
+    .from("meeting_participants")
+    .select("meeting_id")
+    .eq("user_id", profile.id)
+    .in(
+      "meeting_id",
+      todayMeetings.map((m) => m.id)
+    );
+
+  if (participationError) throw participationError;
+
+  const myMeetingIds = new Set((myParticipations ?? []).map((p) => p.meeting_id));
+  const myMeetings = todayMeetings.filter((m) => myMeetingIds.has(m.id));
+
+  if (myMeetings.length === 0) {
+    return { meetings: [], participantNamesByMeeting: {} };
+  }
+
+  const [members, participantsResult] = await Promise.all([
+    listSpaceMemberProfiles(space.id),
+    supabase
+      .from("meeting_participants")
+      .select("meeting_id, user_id")
+      .in(
+        "meeting_id",
+        myMeetings.map((m) => m.id)
+      ),
+  ]);
+
+  if (participantsResult.error) throw participantsResult.error;
+
+  const nameById = new Map(members.map((m) => [m.id, m.name]));
+  const namesByMeeting: Record<string, string[]> = {};
+  for (const p of participantsResult.data ?? []) {
+    const name = nameById.get(p.user_id);
+    if (!name) continue;
+    namesByMeeting[p.meeting_id] = [...(namesByMeeting[p.meeting_id] ?? []), name];
+  }
+
+  return { meetings: myMeetings, participantNamesByMeeting: namesByMeeting };
 }
 
 export async function deleteMeetingAction(meetingId: string): Promise<MeetingActionState> {
