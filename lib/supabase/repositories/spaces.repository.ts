@@ -42,3 +42,35 @@ export async function listSpaceMembers(spaceId: string): Promise<SpaceMember[]> 
   if (error) throw error;
   return data ?? [];
 }
+
+/**
+ * Todas as memberships de um usuário específico (não só o logado) — usada
+ * no Painel Dev para mostrar a quais espaços um usuário pertence e com
+ * qual role. RLS: só retorna algo se quem chama for super_admin ou membro
+ * de algum space em comum (ver `space_members_select_member_or_admin`).
+ */
+export async function listSpaceMembersForUser(userId: string): Promise<SpaceMember[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("space_members")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Todas as memberships de todos os espaços — usada pelo Painel Dev para
+ * montar a listagem de usuários (agrupando em memória por `user_id`) sem
+ * disparar uma query por usuário. Só retorna algo com RLS liberando (na
+ * prática, só o super_admin vê a base inteira).
+ */
+export async function listAllSpaceMembers(): Promise<SpaceMember[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.from("space_members").select("*");
+
+  if (error) throw error;
+  return data ?? [];
+}

@@ -1,90 +1,110 @@
-"use client";
-
-import { toast } from "sonner";
-import { ShieldAlert, Users, Building2, UserPlus, UserX } from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
-import { useDbStore } from "@/store/db-store";
+import Link from "next/link";
+import { ShieldCheck, User2 } from "lucide-react";
+import { requireSuperAdmin } from "@/lib/supabase/dal";
+import { adminListUsers } from "@/lib/supabase/repositories/admin.repository";
+import {
+  listMySpaces,
+  listAllSpaceMembers,
+  listSpaceMembersForUser,
+} from "@/lib/supabase/repositories/spaces.repository";
+import { getActiveSpace } from "@/lib/supabase/space-context";
 import { PageHeader } from "@/components/shared/page-header";
-import { MetricCard } from "@/components/shared/metric-card";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { CreateUserDialog } from "@/components/dev/create-user-dialog";
+import { ActiveSpaceSwitcher } from "@/components/dev/active-space-switcher";
 import { initials, formatDate } from "@/lib/format";
 
-// O gate de acesso (system_role === "super_admin") é server-side, em
-// app/(app)/dev/layout.tsx — quem chega a renderizar esta página já passou
-// por ele. `profile` aqui é o profile MOCK, só para o conteúdo (ainda não
-// migrado) desta tela de administração de exemplo.
-export default function PainelDevPage() {
-  const { profile } = useAuth();
-  const profiles = useDbStore((s) => s.profiles);
-  const spaces = useDbStore((s) => s.spaces);
-  const update = useDbStore((s) => s.update);
+export default async function PainelDevUsuariosPage() {
+  const { profile: actor } = await requireSuperAdmin();
 
-  const activeUsers = profiles.filter((p) => p.status === "ativo").length;
-  const blockedUsers = profiles.filter((p) => p.status === "bloqueado").length;
+  const [users, allSpaces, allMembers, myMemberships, activeSpaceInfo] = await Promise.all([
+    adminListUsers(),
+    listMySpaces(),
+    listAllSpaceMembers(),
+    listSpaceMembersForUser(actor.id),
+    getActiveSpace(),
+  ]);
+
+  const spaceNameById = new Map(allSpaces.map((s) => [s.id, s.name]));
+  const mySpaces = allSpaces.filter((s) => myMemberships.some((m) => m.space_id === s.id));
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Painel Dev"
-        description="Administração da plataforma — visível apenas para super admin."
+        title="Painel Dev — Usuários"
+        description="Administração real de usuários e acessos (Supabase Auth)."
+        actions={<CreateUserDialog />}
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <MetricCard label="Usuários" value={profiles.length} icon={Users} />
-        <MetricCard label="Usuários ativos" value={activeUsers} icon={UserPlus} tone="success" />
-        <MetricCard label="Espaços" value={spaces.length} icon={Building2} />
-        <MetricCard label="Novos usuários (30d)" value={0} />
-        <MetricCard label="Contas bloqueadas" value={blockedUsers} icon={UserX} tone={blockedUsers > 0 ? "destructive" : "default"} />
-      </div>
+      <ActiveSpaceSwitcher mySpaces={mySpaces} active={activeSpaceInfo.space} />
 
       <Card className="p-4">
-        <p className="mb-3 text-sm font-medium text-foreground">Usuários da plataforma</p>
+        <p className="mb-3 text-sm font-medium text-foreground">Usuários ({users.length})</p>
         <div className="flex flex-col gap-2">
-          {profiles.map((p) => (
-            <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <Avatar className="h-9 w-9 shrink-0">
-                  <AvatarFallback className="bg-primary/15 text-primary">{initials(p.name)}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{p.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{p.email} · desde {formatDate(p.createdAt)}</p>
+          {users.map((u) => {
+            const memberships = allMembers.filter((m) => m.user_id === u.id);
+            return (
+              <Link
+                key={u.id}
+                href={`/dev/usuarios/${u.id}`}
+                className="flex flex-col gap-3 rounded-lg border border-border p-3 transition-colors hover:border-primary/50 hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <Avatar className="h-10 w-10 shrink-0">
+                    <AvatarFallback className="bg-primary/15 text-primary">
+                      {initials(u.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {u.name}
+                      {u.id === actor.id && (
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                          (você)
+                        </span>
+                      )}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Badge variant={p.role === "super_admin" ? "default" : "secondary"}>
-                  {p.role === "super_admin" ? "super_admin" : "user"}
-                </Badge>
-                <Badge variant={p.status === "ativo" ? "success" : "destructive"}>{p.status}</Badge>
-                {p.id !== profile?.id && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const next = p.status === "ativo" ? "bloqueado" : "ativo";
-                      update("profiles", p.id, { status: next });
-                      toast.success(next === "ativo" ? "Conta ativada." : "Conta bloqueada.");
-                    }}
-                  >
-                    {p.status === "ativo" ? "Bloquear" : "Ativar"}
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
 
-      <Card className="flex items-start gap-3 border-dashed p-4">
-        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <p className="text-xs text-muted-foreground">
-          Estrutura preparada para funcionalidades futuras de SaaS: planos, assinaturas, trial e métricas de
-          uso. Quando o Supabase for conectado, a role <code>super_admin</code> precisa ser validada no
-          backend (RLS), nunca apenas nesta tela.
-        </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {memberships.length === 0 && (
+                    <span className="text-xs text-muted-foreground">sem espaços</span>
+                  )}
+                  {memberships.map((m) => (
+                    <Badge key={m.id} variant="secondary">
+                      {spaceNameById.get(m.space_id) ?? "?"} · {m.role}
+                    </Badge>
+                  ))}
+                </div>
+
+                <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant={u.system_role === "super_admin" ? "default" : "secondary"}>
+                    {u.system_role === "super_admin" ? (
+                      <>
+                        <ShieldCheck className="h-3 w-3" /> super_admin
+                      </>
+                    ) : (
+                      <>
+                        <User2 className="h-3 w-3" /> user
+                      </>
+                    )}
+                  </Badge>
+                  <Badge variant={u.status === "active" ? "success" : "destructive"}>
+                    {u.status}
+                  </Badge>
+                  <span>desde {formatDate(u.created_at)}</span>
+                  <span>
+                    último acesso: {u.last_sign_in_at ? formatDate(u.last_sign_in_at) : "nunca"}
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       </Card>
     </div>
   );

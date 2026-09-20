@@ -2,10 +2,27 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Profile } from "@/types/database.types";
 
 /**
- * Fase 1 — camada de acesso a dados real (Supabase), isolada em
- * repositórios para a UI nunca fazer `supabase.from(...)` diretamente
- * (ver seção 30 do pedido). Ainda não é chamada por nenhuma tela.
+ * Camada de acesso a dados real (Supabase), isolada em repositórios para a
+ * UI nunca fazer `supabase.from(...)` diretamente.
  */
+
+/**
+ * Busca o profile de QUALQUER usuário por id (não só o do usuário logado).
+ * Usada pelo Painel Dev — RLS (`profiles_select_own_or_admin`) só deixa
+ * isso retornar algo quando quem chama é o dono do profile ou super_admin;
+ * não é uma checagem extra, é a mesma policy da migration 001.
+ */
+export async function getProfileById(id: string): Promise<Profile | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
 
 export async function getMyProfile(): Promise<Profile | null> {
   const supabase = await createSupabaseServerClient();
@@ -33,14 +50,9 @@ export async function updateMyProfile(
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Usuário não autenticado.");
 
-  // Cast explícito: esta versão do @supabase/postgrest-js não infere o tipo
-  // de `Update` corretamente a partir do `Database` genérico neste ponto
-  // específico (select/insert inferem bem; só este `update` encadeado não).
-  // `patch` já é tipado por `Partial<Pick<Profile, ...>>` na assinatura desta
-  // função, então o cast aqui não perde segurança de tipos.
   const { data, error } = await supabase
     .from("profiles")
-    .update(patch as never)
+    .update(patch)
     .eq("id", user.id)
     .select("*")
     .single();

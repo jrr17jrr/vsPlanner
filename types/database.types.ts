@@ -60,6 +60,24 @@ export type SpaceMember = {
 };
 
 /**
+ * Retorno de `admin_list_users()` (migration 002) — profile + `email` e
+ * `last_sign_in_at` de `auth.users` (inacessíveis diretamente pelo client,
+ * mesmo com RLS, por isso vêm de uma função `security definer`).
+ */
+export type AdminUserRow = {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  phone: string | null;
+  system_role: SystemRole;
+  status: ProfileStatus;
+  created_at: string;
+  updated_at: string;
+  email: string | null;
+  last_sign_in_at: string | null;
+};
+
+/**
  * Formato mínimo esperado pelo `@supabase/ssr` / `@supabase/supabase-js`
  * para tipar `createClient<Database>()`. Cobre só as tabelas da Fase 1 —
  * cresce conforme novos módulos forem migrados do mock.
@@ -87,7 +105,12 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      admin_list_users: {
+        Args: Record<string, never>;
+        Returns: AdminUserRow[];
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

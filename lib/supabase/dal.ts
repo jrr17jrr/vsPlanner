@@ -53,3 +53,20 @@ export const requireActiveProfile = cache(async (): Promise<{
 
   return { profile, email: user.email ?? null };
 });
+
+/**
+ * Guard para tudo que é administrativo (Painel Dev): páginas E Server
+ * Actions. Nunca confiar em `/dev` estar "escondida" — toda action
+ * privilegiada chama isto de novo, no servidor, antes de mexer em
+ * qualquer dado de outro usuário.
+ */
+export async function requireSuperAdmin(): Promise<{
+  profile: Profile;
+  email: string | null;
+}> {
+  const result = await requireActiveProfile();
+  if (result.profile.system_role !== "super_admin") {
+    redirect("/hoje");
+  }
+  return result;
+}
