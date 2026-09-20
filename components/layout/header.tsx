@@ -21,13 +21,26 @@ import { NavContent } from "@/components/layout/nav-content";
 import { SpaceSwitcher } from "@/components/shared/space-switcher";
 import { GlobalSearch } from "@/components/shared/global-search";
 import { NotificationsBell } from "@/components/shared/notifications-bell";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuthProfile } from "@/components/providers/auth-profile-provider";
+import { useSessionStore } from "@/store/session-store";
+import { logoutAction } from "@/lib/supabase/actions";
 import { initials } from "@/lib/format";
 
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { profile, logout } = useAuth();
+  // Identidade REAL (Supabase `profiles`) — req. 11: menu usa o usuário
+  // real, não o mock.
+  const { profile, email } = useAuthProfile();
+  const mockLogout = useSessionStore((s) => s.logout);
   const router = useRouter();
+
+  function handleLogout() {
+    // Limpa a persona mock associada (ver app-shell.tsx) — não é
+    // estritamente necessário (o servidor já encerrou a sessão real), mas
+    // evita reaproveitar a mesma persona numa próxima conta.
+    mockLogout();
+    void logoutAction();
+  }
 
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur sm:px-4">
@@ -67,34 +80,26 @@ export function Header() {
           <button className="flex items-center gap-2 rounded-full p-0.5 transition-colors hover:bg-secondary">
             <Avatar className="h-8 w-8">
               <AvatarFallback className="bg-primary/15 text-primary">
-                {profile ? initials(profile.name) : "??"}
+                {initials(profile.name)}
               </AvatarFallback>
             </Avatar>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel>
-            <p className="text-sm font-medium">{profile?.name}</p>
-            <p className="text-xs font-normal text-muted-foreground">{profile?.email}</p>
+            <p className="text-sm font-medium">{profile.name}</p>
+            {email && <p className="text-xs font-normal text-muted-foreground">{email}</p>}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => router.push("/configuracoes")}>
             <Settings className="h-4 w-4" /> Configurações
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => {
-              logout();
-              router.push("/login");
-            }}
-          >
+          <DropdownMenuItem onClick={handleLogout}>
             <UserCog className="h-4 w-4" /> Trocar de conta
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onClick={() => {
-              logout();
-              router.push("/login");
-            }}
+            onClick={handleLogout}
             className="text-destructive focus:text-destructive"
           >
             <LogOut className="h-4 w-4" /> Sair

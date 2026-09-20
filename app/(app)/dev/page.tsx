@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ShieldAlert, Users, Building2, UserPlus, UserX } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -14,21 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { initials, formatDate } from "@/lib/format";
 
+// O gate de acesso (system_role === "super_admin") é server-side, em
+// app/(app)/dev/layout.tsx — quem chega a renderizar esta página já passou
+// por ele. `profile` aqui é o profile MOCK, só para o conteúdo (ainda não
+// migrado) desta tela de administração de exemplo.
 export default function PainelDevPage() {
-  const { isSuperAdmin, profile } = useAuth();
+  const { profile } = useAuth();
   const profiles = useDbStore((s) => s.profiles);
   const spaces = useDbStore((s) => s.spaces);
   const update = useDbStore((s) => s.update);
-  const router = useRouter();
-
-  useEffect(() => {
-    if (profile && !isSuperAdmin) {
-      toast.error("Acesso restrito ao super admin.");
-      router.replace("/");
-    }
-  }, [profile, isSuperAdmin, router]);
-
-  if (!isSuperAdmin) return null;
 
   const activeUsers = profiles.filter((p) => p.status === "ativo").length;
   const blockedUsers = profiles.filter((p) => p.status === "bloqueado").length;

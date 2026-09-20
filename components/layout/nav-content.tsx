@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
+import { useAuthProfile } from "@/components/providers/auth-profile-provider";
 import { NAV_GROUPS, NAV_HOME, NAV_DEV_PANEL, type NavItem } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +34,11 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
 }
 
 export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
-  const { canAccessVisionario, canAccessTiktok, isSuperAdmin } = useAuth();
+  const { canAccessVisionario, canAccessTiktok } = useAuth();
+  // system_role REAL (Supabase) — req. 10: o gate do /dev não pode ser
+  // baseado no role mock.
+  const { profile } = useAuthProfile();
+  const isSuperAdmin = profile.system_role === "super_admin";
 
   return (
     <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-2 no-scrollbar">

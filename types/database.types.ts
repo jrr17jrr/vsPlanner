@@ -19,7 +19,18 @@ export type ProfileStatus = "active" | "blocked";
 export type SpaceType = "personal" | "business" | "tiktok" | "other";
 export type SpaceRole = "owner" | "admin" | "member" | "viewer";
 
-export interface Profile {
+// IMPORTANTE: `type`, não `interface`. O parser de `select()` do
+// @supabase/postgrest-js resolve o tipo de retorno via conditional types
+// profundos sobre `Schema['Tables'][T]['Row']`; quando `Row` é uma
+// `interface` nomeada (em vez de um `type` com objeto literal — a mesma
+// convenção que `supabase gen types typescript` sempre gera), essa cadeia
+// de conditional types "trava" e resolve silenciosamente para `never` em
+// vez de dar erro de compilação. Não há sinal em lugar nenhum — só builda
+// exatamente com o comportamento de sempre até algo tentar ler um campo do
+// resultado (`profile.status`, por exemplo), quando aí vira
+// "Property 'x' does not exist on type 'never'". Comprovado isolando o
+// problema em um arquivo mínimo antes de aplicar esta correção.
+export type Profile = {
   id: string; // uuid, = auth.users.id
   name: string;
   avatar_url: string | null;
@@ -28,9 +39,9 @@ export interface Profile {
   status: ProfileStatus;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface Space {
+export type Space = {
   id: string; // uuid
   name: string;
   slug: string;
@@ -38,22 +49,22 @@ export interface Space {
   owner_id: string; // uuid, references profiles.id
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface SpaceMember {
+export type SpaceMember = {
   id: string; // uuid
   space_id: string;
   user_id: string;
   role: SpaceRole;
   created_at: string;
-}
+};
 
 /**
  * Formato mínimo esperado pelo `@supabase/ssr` / `@supabase/supabase-js`
  * para tipar `createClient<Database>()`. Cobre só as tabelas da Fase 1 —
  * cresce conforme novos módulos forem migrados do mock.
  */
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       profiles: {
@@ -80,4 +91,4 @@ export interface Database {
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
-}
+};

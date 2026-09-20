@@ -1,20 +1,33 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { useAuth } from "@/hooks/use-auth";
+import { useSessionStore } from "@/store/session-store";
+import { USER_RICARDO } from "@/mock/ids";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, profile } = useAuth();
-  const router = useRouter();
+  // A autenticação real já foi validada no servidor (ver
+  // app/(app)/layout.tsx) antes deste componente renderizar. `profile` e
+  // `personalSpace` aqui são o profile/space MOCK (store/db-store.ts) —
+  // ainda usados por rotina/tarefas/trabalho/financeiro/etc, que não foram
+  // migrados nesta fase (só a autenticação foi).
+  const { profile, personalSpace } = useAuth();
+  const mockUserId = useSessionStore((s) => s.userId);
+  const mockLogin = useSessionStore((s) => s.login);
 
   useEffect(() => {
-    if (!isAuthenticated) router.replace("/login");
-  }, [isAuthenticated, router]);
+    // Ainda não existe uma persona mock por usuário Supabase, então todo
+    // usuário real autenticado usa a persona mock padrão (Ricardo) para que
+    // os módulos não migrados continuem funcionando como estão (pedido
+    // explícito desta fase). Revisar quando esses módulos migrarem.
+    if (!mockUserId) {
+      mockLogin(USER_RICARDO);
+    }
+  }, [mockUserId, mockLogin]);
 
-  if (!isAuthenticated || !profile) {
+  if (!profile || !personalSpace) {
     return (
       <div className="flex h-dvh w-full items-center justify-center bg-background">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
