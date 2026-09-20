@@ -5,6 +5,7 @@ import { adminListUsers } from "@/lib/supabase/repositories/admin.repository";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { CreateSpaceDialog } from "@/components/dev/create-space-dialog";
 
 export default async function AdminSpacesPage() {
   await requireSuperAdmin();
@@ -22,6 +23,7 @@ export default async function AdminSpacesPage() {
       <PageHeader
         title="Painel Dev — Spaces"
         description="Administração de espaços, proprietários e memberships."
+        actions={<CreateSpaceDialog />}
       />
 
       <Card className="p-4">
@@ -38,7 +40,8 @@ export default async function AdminSpacesPage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{s.name}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {s.type} · dono: {userNameById.get(s.owner_id) ?? s.owner_id}
+                    slug: <code className="text-foreground">{s.slug}</code> · {s.type} · dono:{" "}
+                    {userNameById.get(s.owner_id) ?? s.owner_id}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">

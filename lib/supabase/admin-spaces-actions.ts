@@ -3,12 +3,60 @@
 import { revalidatePath } from "next/cache";
 import { requireSuperAdmin } from "@/lib/supabase/dal";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { SpaceRole } from "@/types/database.types";
+import type { SpaceRole, SpaceType } from "@/types/database.types";
 
 export type AdminActionState = {
   error?: string;
   success?: string;
 };
+
+/**
+ * `spaces_insert_own` (migration 001) só permite `owner_id = auth.uid()` —
+ * nem super_admin tem bypass nessa policy (de propósito: criar um space
+ * "para" outra pessoa não é algo que exista hoje). Por isso quem chama
+ * esta action sempre vira o dono do space criado. Depois do insert em
+ * `spaces`, criamos também a membership 'owner' correspondente — sem ela,
+ * `space_role_of()`/`has_module_permission()` não encontrariam role
+ * nenhuma para o próprio dono. Se esse segundo insert falhar, desfazemos o
+ * space pra não deixar um registro órfão.
+ */
+export async function createSpaceAction(input: {
+  name: string;
+  slug: string;
+  type: SpaceType;
+}): Promise<AdminActionState & { spaceId?: string }> {
+  const { profile } = await requireSuperAdmin();
+
+  const name = input.name.trim();
+  const slug = input.slug.trim().toLowerCase();
+
+  if (!name) return { error: "Nome é obrigatório." };
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return { error: "Slug deve conter só letras minúsculas, números e hífen (ex: visionario-dev)." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: space, error } = await supabase
+    .from("spaces")
+    .insert({ name, slug, type: input.type, owner_id: profile.id })
+    .select("id")
+    .single();
+
+  if (error) return { error: error.message };
+
+  const { error: memberError } = await supabase
+    .from("space_members")
+    .insert({ space_id: space.id, user_id: profile.id, role: "owner" });
+
+  if (memberError) {
+    await supabase.from("spaces").delete().eq("id", space.id);
+    return { error: memberError.message };
+  }
+
+  revalidatePath("/dev/spaces");
+  return { success: "Espaço criado.", spaceId: space.id };
+}
 
 /**
  * Conceder acesso é um upsert em `space_members` (unique em
