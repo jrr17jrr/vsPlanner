@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Space, SpaceMember } from "@/types/database.types";
 
@@ -5,10 +6,14 @@ import type { Space, SpaceMember } from "@/types/database.types";
  * Fase 1 — leitura de espaços e membros. O RLS garante que só retornam
  * espaços dos quais o usuário autenticado é membro (ou todos, se
  * super_admin — ver policies em `supabase/migrations/001_initial_auth_spaces.sql`).
- * Ainda não é chamada por nenhuma tela.
  */
 
-export async function listMySpaces(): Promise<Space[]> {
+/**
+ * `cache()` deduplica dentro do mesmo request: o layout de `(app)` (pra
+ * decidir o que mostrar no menu) e a página de um módulo do Visionário
+ * (pra achar o space certo) chamam isso sem disparar duas queries.
+ */
+export const listMySpaces = cache(async (): Promise<Space[]> => {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("spaces")
@@ -17,7 +22,7 @@ export async function listMySpaces(): Promise<Space[]> {
 
   if (error) throw error;
   return data ?? [];
-}
+});
 
 export async function getSpace(spaceId: string): Promise<Space | null> {
   const supabase = await createSupabaseServerClient();

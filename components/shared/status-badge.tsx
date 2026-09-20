@@ -20,6 +20,9 @@ const STATUS_MAP: Record<string, { label: string; variant: Variant }> = {
   media: { label: "Média", variant: "warning" },
   alta: { label: "Alta", variant: "destructive" },
   em_dia: { label: "Em dia", variant: "success" },
+  agendada: { label: "Agendada", variant: "secondary" },
+  realizada: { label: "Realizada", variant: "success" },
+  cancelada: { label: "Cancelada", variant: "destructive" },
 };
 
 export function StatusBadge({

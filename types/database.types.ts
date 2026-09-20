@@ -60,6 +60,67 @@ export type SpaceMember = {
 };
 
 /**
+ * Módulos/ações do sistema de permissões por módulo (migration 003).
+ * Terceiro conceito, separado de `SystemRole` (plataforma) e `SpaceRole`
+ * (role bruta no space) — ver `has_module_permission()`.
+ */
+export type ModulePermissionModule =
+  | "visao_geral"
+  | "clientes"
+  | "servicos"
+  | "trabalhos"
+  | "reunioes"
+  | "vendedores"
+  | "financeiro"
+  | "sites";
+
+export type ModulePermissionAction = "view" | "create" | "edit" | "delete" | "conclude";
+
+export type MeetingStatus = "agendada" | "em_andamento" | "realizada" | "cancelada";
+
+/** Espelha `public.meetings` (migration 003). */
+export type Meeting = {
+  id: string;
+  space_id: string;
+  title: string;
+  description: string | null;
+  agenda: string | null;
+  notes: string | null;
+  client_name: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  meeting_date: string; // date (yyyy-mm-dd)
+  start_time: string; // time (HH:mm:ss)
+  end_time: string | null;
+  location: string | null;
+  meeting_link: string | null;
+  status: MeetingStatus;
+  responsible_id: string;
+  summary: string | null;
+  decisions: string | null;
+  final_notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Espelha `public.meeting_participants` (migration 003). */
+export type MeetingParticipant = {
+  id: string;
+  meeting_id: string;
+  space_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+/** Retorno de `space_member_profiles()` (migration 004). */
+export type SpaceMemberProfile = {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+};
+
+/**
  * Retorno de `admin_list_users()` (migration 002) — profile + `email` e
  * `last_sign_in_at` de `auth.users` (inacessíveis diretamente pelo client,
  * mesmo com RLS, por isso vêm de uma função `security definer`).
@@ -103,12 +164,39 @@ export type Database = {
         Update: Partial<Omit<SpaceMember, "id">>;
         Relationships: [];
       };
+      meetings: {
+        Row: Meeting;
+        Insert: Partial<Meeting> & {
+          space_id: string;
+          title: string;
+          meeting_date: string;
+          start_time: string;
+          responsible_id: string;
+          created_by: string;
+        };
+        Update: Partial<Omit<Meeting, "id">>;
+        Relationships: [];
+      };
+      meeting_participants: {
+        Row: MeetingParticipant;
+        Insert: Partial<MeetingParticipant> & { meeting_id: string; user_id: string };
+        Update: Partial<Omit<MeetingParticipant, "id">>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
       admin_list_users: {
         Args: Record<string, never>;
         Returns: AdminUserRow[];
+      };
+      has_module_permission: {
+        Args: { p_space_id: string; p_module: string; p_action: string };
+        Returns: boolean;
+      };
+      space_member_profiles: {
+        Args: { p_space_id: string };
+        Returns: SpaceMemberProfile[];
       };
     };
     Enums: Record<string, never>;

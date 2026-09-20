@@ -7,6 +7,8 @@ interface AuthProfileContextValue {
   /** Profile REAL (Supabase `public.profiles`), não o mock de `store/db-store.ts`. */
   profile: Profile;
   email: string | null;
+  /** `has_module_permission(visionario.id, 'reunioes', 'view')` — decide o item no menu. */
+  canViewVisionarioReunioes: boolean;
 }
 
 const AuthProfileContext = createContext<AuthProfileContextValue | null>(null);
@@ -14,10 +16,11 @@ const AuthProfileContext = createContext<AuthProfileContextValue | null>(null);
 export function AuthProfileProvider({
   profile,
   email,
+  canViewVisionarioReunioes,
   children,
 }: AuthProfileContextValue & { children: React.ReactNode }) {
   return (
-    <AuthProfileContext.Provider value={{ profile, email }}>
+    <AuthProfileContext.Provider value={{ profile, email, canViewVisionarioReunioes }}>
       {children}
     </AuthProfileContext.Provider>
   );

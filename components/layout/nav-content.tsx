@@ -37,7 +37,7 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   const { canAccessVisionario, canAccessTiktok } = useAuth();
   // system_role REAL (Supabase) — req. 10: o gate do /dev não pode ser
   // baseado no role mock.
-  const { profile } = useAuthProfile();
+  const { profile, canViewVisionarioReunioes } = useAuthProfile();
   const isSuperAdmin = profile.system_role === "super_admin";
 
   return (
@@ -47,13 +47,22 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       {NAV_GROUPS.map((group) => {
         if (group.requires === "visionario" && !canAccessVisionario) return null;
         if (group.requires === "tiktok" && !canAccessTiktok) return null;
+        // "Reuniões" usa permissão real por módulo (migration 003), não o
+        // gate mock do resto do grupo — sem reunioes.view, some do menu
+        // mesmo que o resto do Visionário Dev continue visível.
+        const items =
+          group.label === "Visionário Dev"
+            ? group.items.filter(
+                (item) => item.href !== "/visionario/reunioes" || canViewVisionarioReunioes
+              )
+            : group.items;
         return (
           <div key={group.label}>
             <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
               {group.label}
             </p>
             <div className="flex flex-col gap-0.5">
-              {group.items.map((item) => (
+              {items.map((item) => (
                 <NavLink key={item.href} item={item} onNavigate={onNavigate} />
               ))}
             </div>

@@ -3,7 +3,9 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Profile } from "@/types/database.types";
+import { listMySpaces } from "@/lib/supabase/repositories/spaces.repository";
+import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
+import type { ModulePermissionAction, ModulePermissionModule, Profile, Space } from "@/types/database.types";
 
 /**
  * Data Access Layer (Fase 2) — checagem de sessão/autorização real, sempre
@@ -69,4 +71,34 @@ export async function requireSuperAdmin(): Promise<{
     redirect("/hoje");
   }
   return result;
+}
+
+/**
+ * Guard de módulo (Fase B — Reuniões e módulos seguintes): acha o space
+ * pelo `slug` (nunca um UUID fixo — `listMySpaces()` já é filtrado por RLS,
+ * então um slug de um space ao qual o usuário não pertence simplesmente não
+ * aparece na lista) e confere `has_module_permission()` no servidor antes
+ * de deixar renderizar. Sem a permissão pedida (`view` por padrão),
+ * redireciona — nunca deixa a página nem tentar buscar dados.
+ */
+export async function requireModulePermission(
+  spaceSlug: string,
+  moduleKey: ModulePermissionModule,
+  action: ModulePermissionAction = "view"
+): Promise<{ profile: Profile; email: string | null; space: Space }> {
+  const { profile, email } = await requireActiveProfile();
+
+  const mySpaces = await listMySpaces();
+  const space = mySpaces.find((s) => s.slug === spaceSlug);
+
+  if (!space) {
+    redirect("/hoje");
+  }
+
+  const allowed = await hasModulePermission(space.id, moduleKey, action);
+  if (!allowed) {
+    redirect("/visionario");
+  }
+
+  return { profile, email, space };
 }
