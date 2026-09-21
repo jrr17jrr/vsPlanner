@@ -1,17 +1,7 @@
 /**
- * Tipos do banco real (Supabase/Postgres) — Fase 1 (fundação).
- *
- * Espelham exatamente `supabase/migrations/001_initial_auth_spaces.sql`.
- * Ainda NÃO são usados pelo app (que continua rodando sobre
- * `mock/seed.ts` + `store/db-store.ts`). Isso é código preparado para a
- * Fase 2, quando o login mock for substituído pelo Supabase Auth.
- *
- * Não confundir com `types/entities.ts` (modelos do mock, em português —
- * `role`, `status: 'ativo'|'bloqueado'` etc.). Os nomes de campo aqui
- * seguem a migration real (`system_role`, `status: 'active'|'blocked'`,
- * snake_case). A camada que migrar cada módulo do mock para o Supabase
- * (Fase 2+) é responsável por fazer esse mapeamento — não fizemos esse
- * mapeamento ainda de propósito.
+ * Tipos do banco real (Supabase/Postgres). Espelham as migrations em
+ * `supabase/migrations/`, sempre com `type` (não `interface`) — ver o
+ * comentário em `Profile` abaixo para o motivo exato.
  */
 
 export type SystemRole = "super_admin" | "user";
@@ -238,6 +228,297 @@ export type WorkItemAssignee = {
 };
 
 /**
+ * Financeiro real (migration 007). Três camadas, nunca uma tabela só:
+ * origem (a decisão) → cobrança (o que é devido, valor congelado) →
+ * pagamento (o que de fato mexeu o caixa, N por cobrança). Pendente/
+ * parcial/pago NUNCA é campo — é sempre calculado a partir da soma de
+ * `FinancialPayment` ligados a cada `FinancialCharge` (ver
+ * `lib/financial-calc.ts`).
+ */
+export type FinancialKind = "entrada" | "saida";
+export type FinancialOriginType = "unico" | "parcelado" | "recorrente";
+export type FinancialRecurrenceFrequency =
+  | "semanal"
+  | "mensal"
+  | "a_cada_x_meses"
+  | "trimestral"
+  | "semestral"
+  | "anual"
+  | "customizado";
+export type FinancialRecurrenceEndType = "nunca" | "em_data" | "apos_ocorrencias";
+export type FinancialChargeStatus = "ativo" | "cancelado";
+export type FinancialPaymentMethod = "pix" | "dinheiro" | "debito" | "credito" | "boleto" | "transferencia" | "outro";
+
+export type FinancialAccount = {
+  id: string;
+  space_id: string;
+  name: string;
+  initial_balance: number;
+  initial_balance_date: string;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialCategory = {
+  id: string;
+  space_id: string;
+  kind: FinancialKind;
+  name: string;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialReferenceType = {
+  id: string;
+  space_id: string;
+  name: string;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialOrigin = {
+  id: string;
+  space_id: string;
+  kind: FinancialKind;
+  origin_type: FinancialOriginType;
+  description: string;
+  client_id: string | null;
+  client_service_id: string | null;
+  reference_type_id: string | null;
+  category_id: string | null;
+  supplier_name: string | null;
+  installment_count: number | null;
+  recurrence_frequency: FinancialRecurrenceFrequency | null;
+  recurrence_interval: number | null;
+  recurrence_end_type: FinancialRecurrenceEndType | null;
+  recurrence_end_date: string | null;
+  recurrence_end_occurrences: number | null;
+  is_active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialCharge = {
+  id: string;
+  space_id: string;
+  origin_id: string;
+  kind: FinancialKind;
+  description: string;
+  client_id: string | null;
+  client_service_id: string | null;
+  reference_type_id: string | null;
+  category_id: string | null;
+  supplier_name: string | null;
+  installment_number: number | null;
+  installment_total: number | null;
+  original_amount: number;
+  discount_amount: number;
+  addition_amount: number;
+  amount: number;
+  due_date: string;
+  competency_date: string | null;
+  status: FinancialChargeStatus;
+  notes: string | null;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialPayment = {
+  id: string;
+  space_id: string;
+  charge_id: string;
+  amount: number;
+  payment_date: string;
+  payment_method: FinancialPaymentMethod;
+  account_id: string;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Módulos pessoais reais (migration 008) — Tarefas, Rotina, Trabalho/CLT,
+ * Metas. RLS é `user_id = auth.uid()` direto (space Pessoal é sempre de
+ * um usuário só, sem papéis/permissão por módulo).
+ */
+export type TaskPriority = "baixa" | "media" | "alta";
+export type TaskStatus = "pendente" | "concluida";
+
+export type Task = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  scheduled_time: string | null;
+  priority: TaskPriority;
+  status: TaskStatus;
+  category: string | null;
+  notes: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Espelha `public.activities` — rotina recorrente. "Concluída" nunca é
+ * campo aqui, é sempre uma linha em `ActivityCompletion` por data (ver
+ * abaixo) — marcar hoje nunca afeta ontem/amanhã.
+ */
+export type Activity = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  title: string;
+  category: string | null;
+  /** 0=domingo .. 6=sábado (Date.getDay()). */
+  weekdays: number[];
+  start_time: string;
+  end_time: string | null;
+  is_active: boolean;
+  sort_order: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ActivityCompletion = {
+  id: string;
+  activity_id: string;
+  user_id: string;
+  occurrence_date: string;
+  completed_at: string;
+};
+
+export type PersonalWorkTaskPriority = "baixa" | "normal" | "alta" | "urgente";
+export type PersonalWorkTaskStatus = "pendente" | "concluida";
+
+/** Espelha `public.personal_work_tasks` — Trabalho/CLT pessoal, nunca confundir com `WorkItem` (Visionário Dev). */
+export type PersonalWorkTask = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  scheduled_time: string | null;
+  priority: PersonalWorkTaskPriority;
+  status: PersonalWorkTaskStatus;
+  notes: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoalStatus = "em_andamento" | "concluida" | "cancelada";
+
+export type Goal = {
+  id: string;
+  space_id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  target_value: number | null;
+  current_value: number;
+  target_date: string | null;
+  status: GoalStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Vendedores/Vendas/Comissões (migration 008) — colaborativo, Visionário
+ * Dev, RLS via `has_module_permission(space_id, 'vendedores', ação)`.
+ */
+export type VendorStatus = "ativo" | "inativo";
+
+export type Vendor = {
+  id: string;
+  space_id: string;
+  name: string;
+  contact_name: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  status: VendorStatus;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SaleStatus = "pendente" | "confirmada" | "cancelada";
+
+/** Registro comercial — NUNCA gera `financial_charges` automático (evita contar receita duas vezes). */
+export type Sale = {
+  id: string;
+  space_id: string;
+  vendor_id: string;
+  client_id: string | null;
+  service_id: string | null;
+  amount: number;
+  sale_date: string;
+  status: SaleStatus;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CommissionStatus = "pendente" | "paga";
+
+export type Commission = {
+  id: string;
+  space_id: string;
+  sale_id: string;
+  vendor_id: string;
+  percentage: number | null;
+  amount: number;
+  status: CommissionStatus;
+  due_date: string | null;
+  paid_date: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Espelha `public.client_sites` (migration 008) — Sites & Domínios, colaborativo, módulo `sites`. */
+export type ClientSiteStatus = "ativo" | "desenvolvimento" | "aguardando_cliente" | "vencendo" | "expirado" | "cancelado";
+
+export type ClientSite = {
+  id: string;
+  space_id: string;
+  client_id: string | null;
+  project_name: string;
+  url: string | null;
+  domain: string | null;
+  registrar: string | null;
+  hosting_provider: string | null;
+  plan: string | null;
+  contracted_at: string | null;
+  due_date: string | null;
+  price: number | null;
+  status: ClientSiteStatus;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
  * Retorno de `admin_list_users()` (migration 002) — profile + `email` e
  * `last_sign_in_at` de `auth.users` (inacessíveis diretamente pelo client,
  * mesmo com RLS, por isso vêm de uma função `security definer`).
@@ -350,6 +631,116 @@ export type Database = {
         Row: WorkItemAssignee;
         Insert: Partial<WorkItemAssignee> & { work_item_id: string; user_id: string };
         Update: Partial<Omit<WorkItemAssignee, "id">>;
+        Relationships: [];
+      };
+      financial_accounts: {
+        Row: FinancialAccount;
+        Insert: Partial<FinancialAccount> & { space_id: string; name: string; created_by: string };
+        Update: Partial<Omit<FinancialAccount, "id">>;
+        Relationships: [];
+      };
+      financial_categories: {
+        Row: FinancialCategory;
+        Insert: Partial<FinancialCategory> & { space_id: string; kind: FinancialKind; name: string; created_by: string };
+        Update: Partial<Omit<FinancialCategory, "id">>;
+        Relationships: [];
+      };
+      financial_reference_types: {
+        Row: FinancialReferenceType;
+        Insert: Partial<FinancialReferenceType> & { space_id: string; name: string; created_by: string };
+        Update: Partial<Omit<FinancialReferenceType, "id">>;
+        Relationships: [];
+      };
+      financial_origins: {
+        Row: FinancialOrigin;
+        Insert: Partial<FinancialOrigin> & {
+          space_id: string;
+          kind: FinancialKind;
+          origin_type: FinancialOriginType;
+          description: string;
+          created_by: string;
+        };
+        Update: Partial<Omit<FinancialOrigin, "id">>;
+        Relationships: [];
+      };
+      financial_charges: {
+        Row: FinancialCharge;
+        Insert: Partial<FinancialCharge> & {
+          origin_id: string;
+          kind: FinancialKind;
+          description: string;
+          original_amount: number;
+          due_date: string;
+          created_by: string;
+        };
+        Update: Partial<Omit<FinancialCharge, "id">>;
+        Relationships: [];
+      };
+      financial_payments: {
+        Row: FinancialPayment;
+        Insert: Partial<FinancialPayment> & {
+          charge_id: string;
+          amount: number;
+          payment_date: string;
+          payment_method: FinancialPaymentMethod;
+          account_id: string;
+          created_by: string;
+        };
+        Update: Partial<Omit<FinancialPayment, "id">>;
+        Relationships: [];
+      };
+      tasks: {
+        Row: Task;
+        Insert: Partial<Task> & { space_id: string; user_id: string; title: string };
+        Update: Partial<Omit<Task, "id">>;
+        Relationships: [];
+      };
+      activities: {
+        Row: Activity;
+        Insert: Partial<Activity> & { space_id: string; user_id: string; title: string; start_time: string };
+        Update: Partial<Omit<Activity, "id">>;
+        Relationships: [];
+      };
+      activity_completions: {
+        Row: ActivityCompletion;
+        Insert: Partial<ActivityCompletion> & { activity_id: string; user_id: string; occurrence_date: string };
+        Update: Partial<Omit<ActivityCompletion, "id">>;
+        Relationships: [];
+      };
+      personal_work_tasks: {
+        Row: PersonalWorkTask;
+        Insert: Partial<PersonalWorkTask> & { space_id: string; user_id: string; title: string };
+        Update: Partial<Omit<PersonalWorkTask, "id">>;
+        Relationships: [];
+      };
+      goals: {
+        Row: Goal;
+        Insert: Partial<Goal> & { space_id: string; user_id: string; title: string };
+        Update: Partial<Omit<Goal, "id">>;
+        Relationships: [];
+      };
+      vendors: {
+        Row: Vendor;
+        Insert: Partial<Vendor> & { space_id: string; name: string; created_by: string };
+        Update: Partial<Omit<Vendor, "id">>;
+        Relationships: [];
+      };
+      sales: {
+        Row: Sale;
+        Insert: Partial<Sale> & { space_id: string; vendor_id: string; amount: number; sale_date: string; created_by: string };
+        Update: Partial<Omit<Sale, "id">>;
+        Relationships: [];
+      };
+      commissions: {
+        Row: Commission;
+        Insert: Partial<Commission> & { space_id: string; sale_id: string; vendor_id: string; amount: number; created_by: string };
+        Update: Partial<Omit<Commission, "id">>;
+        Relationships: [];
+      };
+      client_sites: {
+        Row: ClientSite;
+        Insert: Partial<ClientSite> & { space_id: string; project_name: string; created_by: string };
+        Update: Partial<Omit<ClientSite, "id">>;
         Relationships: [];
       };
     };

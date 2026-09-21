@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/hooks/use-auth";
 import { useAuthProfile } from "@/components/providers/auth-profile-provider";
 import { NAV_GROUPS, NAV_HOME, NAV_DEV_PANEL, type NavItem } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -34,10 +33,11 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
 }
 
 export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
-  const { canAccessVisionario, canAccessTiktok } = useAuth();
-  // system_role REAL (Supabase) — req. 10: o gate do /dev não pode ser
-  // baseado no role mock.
-  const { profile, canViewVisionarioReunioes } = useAuthProfile();
+  // Tudo real (ver app/(app)/layout.tsx): system_role, acesso a
+  // Visionário Dev/TikTok e a permissão de CADA módulo vêm da sessão
+  // Supabase de quem está navegando, nunca de uma persona mock fixa.
+  const { profile, canAccessVisionario, canAccessTiktok, visionarioModulePermissions, tiktokModulePermissions } =
+    useAuthProfile();
   const isSuperAdmin = profile.system_role === "super_admin";
 
   return (
@@ -47,15 +47,16 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       {NAV_GROUPS.map((group) => {
         if (group.requires === "visionario" && !canAccessVisionario) return null;
         if (group.requires === "tiktok" && !canAccessTiktok) return null;
-        // "Reuniões" usa permissão real por módulo (migration 003), não o
-        // gate mock do resto do grupo — sem reunioes.view, some do menu
-        // mesmo que o resto do Visionário Dev continue visível.
-        const items =
-          group.label === "Visionário Dev"
-            ? group.items.filter(
-                (item) => item.href !== "/visionario/reunioes" || canViewVisionarioReunioes
-              )
-            : group.items;
+        // Cada item com `module` só aparece se `has_module_permission`
+        // (real, calculada no layout) permitir — nunca só "faz parte do
+        // space". É o que faz Financeiro sumir do menu pra quem tem
+        // Clientes/Reuniões/Trabalhos mas não Financeiro.
+        const permissions =
+          group.requires === "visionario" ? visionarioModulePermissions : group.requires === "tiktok" ? tiktokModulePermissions : undefined;
+        const items = permissions
+          ? group.items.filter((item) => !item.module || permissions[item.module])
+          : group.items;
+        if (items.length === 0) return null;
         return (
           <div key={group.label}>
             <p className="px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">

@@ -7,9 +7,9 @@ import type { Database } from "@/types/database.types";
 /**
  * Cliente Supabase para uso em Client Components ("use client").
  *
- * Fase 1 — ainda não é importado por nenhuma tela do app (o app continua
- * rodando sobre o mock/localStorage). Preparado para a Fase 2, quando o
- * login mock for substituído pelo Supabase Auth real.
+ * Nenhuma tela usa isto hoje — toda leitura/escrita passa por Server
+ * Components/Server Actions (`lib/supabase/server.ts`). Fica preparado
+ * caso algum fluxo precise rodar direto no navegador (ex.: realtime).
  */
 export function createSupabaseBrowserClient() {
   const { url, anonKey } = getSupabaseEnv();

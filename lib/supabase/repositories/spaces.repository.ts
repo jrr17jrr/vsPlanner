@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
-import type { Space, SpaceMember } from "@/types/database.types";
+import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG } from "@/lib/space-slugs";
+import type { Space, SpaceMember, SpaceType } from "@/types/database.types";
 
 /**
  * Fase 1 — leitura de espaços e membros. O RLS garante que só retornam
@@ -26,30 +26,40 @@ export const listMySpaces = cache(async (): Promise<Space[]> => {
 });
 
 /**
- * Garante que o workspace oficial "Visionário Dev" existe — sem exigir um
- * clique manual no Painel Dev. Idempotente: se já existe (por qualquer
- * dono), só retorna ele, nunca cria um segundo. Só cria quando quem está
- * navegando é super_admin — um membro comum sendo o primeiro a visitar uma
- * página do Visionário antes do space existir NÃO deve virar dono do
- * workspace da empresa sem querer.
+ * Registro dos spaces "oficiais" de negócio que devem existir
+ * automaticamente pra um super_admin, sem clique manual no Painel Dev —
+ * hoje Visionário Dev (compartilhado com o sócio) e TikTok (privado).
+ * Adicionar um novo space oficial no futuro é só adicionar uma linha aqui.
+ */
+const BUSINESS_SPACES: Record<string, { name: string; type: SpaceType }> = {
+  [VISIONARIO_DEV_SLUG]: { name: "Visionário Dev", type: "business" },
+  [TIKTOK_SLUG]: { name: "TikTok", type: "tiktok" },
+};
+
+/**
+ * Garante que um workspace oficial (Visionário Dev, TikTok, ...) existe —
+ * sem exigir um clique manual no Painel Dev. Idempotente: se já existe
+ * (por qualquer dono), só retorna ele, nunca cria um segundo. Só cria
+ * quando quem está navegando é super_admin — um membro comum sendo o
+ * primeiro a visitar uma página antes do space existir NÃO deve virar
+ * dono do workspace sem querer.
  *
  * Usa `spaces_insert_own` (migration 001, `owner_id = auth.uid()`) — a
- * mesma RLS normal, sessão do usuário, nunca Service Role. Depois da
- * migration 005 (constraint `unique(slug)`), uma corrida entre duas
- * requisições simultâneas faz a segunda falhar por violação de unicidade
- * em vez de duplicar; o catch abaixo já trata isso reconsultando em vez de
- * propagar o erro.
+ * mesma RLS normal, sessão do usuário, nunca Service Role. Constraint
+ * `unique(slug)` (migration 005) faz uma corrida entre duas requisições
+ * simultâneas falhar por violação de unicidade em vez de duplicar; o
+ * catch abaixo já trata isso reconsultando em vez de propagar o erro.
  */
-export async function ensureVisionarioDevSpace(
-  actingProfileId: string,
-  isSuperAdmin: boolean
-): Promise<Space | null> {
+export async function ensureBusinessSpace(slug: string, actingProfileId: string, isSuperAdmin: boolean): Promise<Space | null> {
+  const definition = BUSINESS_SPACES[slug];
+  if (!definition) return null;
+
   const supabase = await createSupabaseServerClient();
 
   const { data: existing, error: findError } = await supabase
     .from("spaces")
     .select("*")
-    .eq("slug", VISIONARIO_DEV_SLUG)
+    .eq("slug", slug)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -60,7 +70,7 @@ export async function ensureVisionarioDevSpace(
 
   const { data: created, error: createError } = await supabase
     .from("spaces")
-    .insert({ name: "Visionário Dev", slug: VISIONARIO_DEV_SLUG, type: "business", owner_id: actingProfileId })
+    .insert({ name: definition.name, slug, type: definition.type, owner_id: actingProfileId })
     .select("*")
     .single();
 
@@ -70,7 +80,7 @@ export async function ensureVisionarioDevSpace(
     const { data: raceWinner } = await supabase
       .from("spaces")
       .select("*")
-      .eq("slug", VISIONARIO_DEV_SLUG)
+      .eq("slug", slug)
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle();
@@ -89,6 +99,26 @@ export async function ensureVisionarioDevSpace(
   }
 
   return created;
+}
+
+/**
+ * O space Pessoal de um usuário sempre existe (criado por
+ * `handle_new_user`, migration 001, no momento do cadastro) — nunca
+ * precisa de bootstrap. Resolvido por `owner_id` + `type='personal'`, não
+ * por slug fixo (o slug do Pessoal é `pessoal-<uuid>`, único por usuário).
+ */
+export async function getPersonalSpace(profileId: string): Promise<Space | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("spaces")
+    .select("*")
+    .eq("owner_id", profileId)
+    .eq("type", "personal")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
 
 export async function getSpace(spaceId: string): Promise<Space | null> {

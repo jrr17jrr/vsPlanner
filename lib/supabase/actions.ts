@@ -63,9 +63,9 @@ async function performLogin(formData: FormData): Promise<LoginActionState | null
       return { error: "Esta conta está bloqueada. Fale com um administrador." };
     }
 
-    // Carrega os spaces do usuário (RLS) como parte do bootstrap pós-login.
-    // Best-effort: uma falha aqui não deve impedir o acesso — o SpaceSwitcher
-    // continua sobre os spaces mock até essa migração acontecer.
+    // Carrega os spaces do usuário (RLS) como parte do bootstrap pós-login
+    // — puro aquecimento, o layout já resolve os spaces de novo ao
+    // renderizar. Best-effort: uma falha aqui não deve impedir o acesso.
     try {
       await listMySpaces();
     } catch {

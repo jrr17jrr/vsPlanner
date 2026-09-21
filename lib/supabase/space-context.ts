@@ -6,9 +6,8 @@ import { listMySpaces } from "@/lib/supabase/repositories/spaces.repository";
 import type { Space } from "@/types/database.types";
 
 /**
- * Contexto de "espaço ativo" REAL (Supabase) — infraestrutura para quando
- * rotina/tarefas/trabalho/financeiro/etc migrarem do mock para os spaces
- * reais (próxima fase). Nenhum módulo mock usa isto ainda.
+ * Contexto de "espaço ativo" (cookie) — usado pelo Painel Dev pra saber
+ * qual space o super_admin está inspecionando.
  *
  * `listMySpaces()` já é filtrado por RLS: para um usuário comum, só os
  * spaces dos quais ele é dono/membro; a validação de "o cookie aponta pra

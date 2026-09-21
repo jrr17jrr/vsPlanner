@@ -12,11 +12,9 @@ export function getSupabaseEnv() {
 
   if (!url || !anonKey) {
     throw new Error(
-      "Supabase ainda não está configurado: defina NEXT_PUBLIC_SUPABASE_URL e " +
+      "Supabase não está configurado: defina NEXT_PUBLIC_SUPABASE_URL e " +
         "NEXT_PUBLIC_SUPABASE_ANON_KEY em .env.local (veja SUPABASE_SETUP.md). " +
-        "O restante do app continua funcionando normalmente com os dados mock " +
-        "— este erro só aparece se algo tentar usar o cliente Supabase antes " +
-        "da Fase 1 estar configurada."
+        "Todo o app depende do Supabase real — sem essas variáveis, nada funciona."
     );
   }
 

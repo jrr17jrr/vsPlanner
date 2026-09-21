@@ -3,10 +3,12 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { listMySpaces, ensureVisionarioDevSpace } from "@/lib/supabase/repositories/spaces.repository";
+import { listMySpaces, ensureBusinessSpace, getPersonalSpace } from "@/lib/supabase/repositories/spaces.repository";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
-import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
+import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG, type FinancialScope } from "@/lib/space-slugs";
 import type { ModulePermissionAction, ModulePermissionModule, Profile, Space } from "@/types/database.types";
+
+const BOOTSTRAPPABLE_SLUGS = new Set([VISIONARIO_DEV_SLUG, TIKTOK_SLUG]);
 
 /**
  * Data Access Layer (Fase 2) — checagem de sessão/autorização real, sempre
@@ -77,9 +79,9 @@ export async function requireSuperAdmin(): Promise<{
 /**
  * Acha um space pelo `slug` (nunca um UUID fixo — `listMySpaces()` já é
  * filtrado por RLS, então um slug de um space ao qual o usuário não
- * pertence simplesmente não aparece na lista). Para o workspace oficial
- * "Visionário Dev" especificamente: se ainda não existir, tenta criar
- * automaticamente (`ensureVisionarioDevSpace` — só funciona se quem está
+ * pertence simplesmente não aparece na lista). Para os workspaces
+ * oficiais (Visionário Dev, TikTok): se ainda não existir, tenta criar
+ * automaticamente (`ensureBusinessSpace` — só funciona se quem está
  * navegando for super_admin; para qualquer outra pessoa, continua
  * simplesmente não encontrando nada). Isso elimina a necessidade de criar
  * o space manualmente pelo Painel Dev.
@@ -92,8 +94,9 @@ async function resolveSpaceBySlug(
   const found = mySpaces.find((s) => s.slug === spaceSlug);
   if (found) return found;
 
-  if (spaceSlug === VISIONARIO_DEV_SLUG) {
-    const bootstrapped = await ensureVisionarioDevSpace(
+  if (BOOTSTRAPPABLE_SLUGS.has(spaceSlug)) {
+    const bootstrapped = await ensureBusinessSpace(
+      spaceSlug,
       profile.id,
       profile.system_role === "super_admin"
     );
@@ -142,4 +145,44 @@ export async function findOrBootstrapSpace(
   profile: Profile
 ): Promise<Space | undefined> {
   return resolveSpaceBySlug(spaceSlug, profile);
+}
+
+/**
+ * O space Pessoal do usuário autenticado — sempre existe (criado no
+ * cadastro, migration 001), nunca precisa de bootstrap nem de slug fixo.
+ * Redireciona pro login só no caso teoricamente impossível de faltar
+ * (sessão válida sem o space que `handle_new_user` deveria ter criado).
+ */
+export async function requirePersonalSpace(): Promise<{ profile: Profile; email: string | null; space: Space }> {
+  const { profile, email } = await requireActiveProfile();
+  const space = await getPersonalSpace(profile.id);
+  if (!space) {
+    redirect("/login?erro=espaco_pessoal_nao_encontrado");
+  }
+  return { profile, email, space };
+}
+
+/**
+ * Financeiro é a MESMA arquitetura (migration 007) nos três espaços —
+ * só muda qual space é resolvido. Visionário Dev e TikTok passam pelo
+ * guard normal de módulo (`has_module_permission`, com bootstrap
+ * automático); Pessoal não tem colaboração nem papéis, então só confirma
+ * que o space é mesmo o do usuário (`requirePersonalSpace`) — ainda assim
+ * chama `has_module_permission` por defesa em profundidade, embora
+ * owner/space-de-um-membro-só sempre retorne `true`.
+ */
+export async function requireScopedModulePermission(
+  scope: FinancialScope,
+  moduleKey: ModulePermissionModule,
+  action: ModulePermissionAction = "view"
+): Promise<{ profile: Profile; email: string | null; space: Space }> {
+  if (scope === "pessoal") {
+    const { profile, email, space } = await requirePersonalSpace();
+    const allowed = await hasModulePermission(space.id, moduleKey, action);
+    if (!allowed) redirect("/hoje");
+    return { profile, email, space };
+  }
+
+  const slug = scope === "visionario" ? VISIONARIO_DEV_SLUG : TIKTOK_SLUG;
+  return requireModulePermission(slug, moduleKey, action);
 }

@@ -3,20 +3,20 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pencil, CheckCircle2, Ban, Trash2, MapPin, Users, User, ListTodo } from "lucide-react";
+import { ArrowLeft, Pencil, CheckCircle2, Ban, Trash2, MapPin, Users, User } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { EmptyState } from "@/components/shared/empty-state";
 import { ConfirmActionButton } from "@/components/shared/confirm-action-button";
 import { WhatsAppButton } from "@/components/visionario/reunioes/whatsapp-button";
 import { MeetingLinkButton } from "@/components/visionario/reunioes/meeting-link-button";
 import { MeetingFormDialog } from "@/components/visionario/reunioes/meeting-form-dialog";
 import { ConcludeMeetingDialog } from "@/components/visionario/reunioes/conclude-meeting-dialog";
+import { GeneratedWorkItemsCard } from "@/components/visionario/reunioes/generated-work-items-card";
 import { cancelMeetingAction, deleteMeetingAction } from "@/lib/supabase/meetings-actions";
 import { formatDateLong } from "@/lib/format";
-import type { Client, Meeting, SpaceMemberProfile } from "@/types/database.types";
+import type { Client, Meeting, SpaceMemberProfile, WorkItem } from "@/types/database.types";
 
 export function MeetingDetailClient({
   meeting,
@@ -24,6 +24,9 @@ export function MeetingDetailClient({
   members,
   clients,
   linkedClient,
+  generatedWorkItems,
+  assigneeNamesByWorkItem,
+  canCreateWorkItem,
   currentUserId,
   permissions,
 }: {
@@ -32,6 +35,9 @@ export function MeetingDetailClient({
   members: SpaceMemberProfile[];
   clients: Client[];
   linkedClient: Client | null;
+  generatedWorkItems: WorkItem[];
+  assigneeNamesByWorkItem: Record<string, string[]>;
+  canCreateWorkItem: boolean;
   currentUserId: string;
   permissions: { canEdit: boolean; canDelete: boolean; canConclude: boolean };
 }) {
@@ -232,12 +238,13 @@ export function MeetingDetailClient({
         )}
       </Card>
 
-      <Card className="p-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Atividades geradas
-        </p>
-        <EmptyState icon={ListTodo} title="Nenhuma atividade vinculada." className="border-0 py-6" />
-      </Card>
+      <GeneratedWorkItemsCard
+        meetingId={meeting.id}
+        workItems={generatedWorkItems}
+        members={members}
+        assigneeNamesByWorkItem={assigneeNamesByWorkItem}
+        canCreate={canCreateWorkItem}
+      />
 
       <div className="flex flex-wrap gap-2 border-t border-border pt-4">
         {permissions.canEdit && (

@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
-import { HydrationGate } from "@/components/providers/hydration-gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,7 +31,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <HydrationGate>{children}</HydrationGate>
+        {children}
         <Toaster />
       </body>
     </html>

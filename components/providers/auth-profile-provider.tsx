@@ -1,14 +1,22 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { Profile } from "@/types/database.types";
+import type { ModulePermissionModule, Profile, Space } from "@/types/database.types";
+import type { NotificationItem } from "@/lib/supabase/notifications";
 
 interface AuthProfileContextValue {
-  /** Profile REAL (Supabase `public.profiles`), não o mock de `store/db-store.ts`. */
+  /** Profile REAL (Supabase `public.profiles`), não persona mock. */
   profile: Profile;
   email: string | null;
-  /** `has_module_permission(visionario.id, 'reunioes', 'view')` — decide o item no menu. */
-  canViewVisionarioReunioes: boolean;
+  /** Espaços reais do usuário (RLS já filtra) — usado pelo seletor de espaço. */
+  mySpaces: Space[];
+  canAccessVisionario: boolean;
+  canAccessTiktok: boolean;
+  /** `has_module_permission(space, módulo, 'view')` por módulo — decide o que aparece no menu. */
+  visionarioModulePermissions: Partial<Record<ModulePermissionModule, boolean>>;
+  tiktokModulePermissions: Partial<Record<ModulePermissionModule, boolean>>;
+  /** Calculado ao vivo (ver lib/supabase/notifications.ts) — nunca uma tabela mock. */
+  notifications: NotificationItem[];
 }
 
 const AuthProfileContext = createContext<AuthProfileContextValue | null>(null);
@@ -16,11 +24,27 @@ const AuthProfileContext = createContext<AuthProfileContextValue | null>(null);
 export function AuthProfileProvider({
   profile,
   email,
-  canViewVisionarioReunioes,
+  mySpaces,
+  canAccessVisionario,
+  canAccessTiktok,
+  visionarioModulePermissions,
+  tiktokModulePermissions,
+  notifications,
   children,
 }: AuthProfileContextValue & { children: React.ReactNode }) {
   return (
-    <AuthProfileContext.Provider value={{ profile, email, canViewVisionarioReunioes }}>
+    <AuthProfileContext.Provider
+      value={{
+        profile,
+        email,
+        mySpaces,
+        canAccessVisionario,
+        canAccessTiktok,
+        visionarioModulePermissions,
+        tiktokModulePermissions,
+        notifications,
+      }}
+    >
       {children}
     </AuthProfileContext.Provider>
   );

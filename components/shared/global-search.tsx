@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Users, Briefcase, ListChecks, Layers, Globe } from "lucide-react";
-import { useDbStore } from "@/store/db-store";
+import { toast } from "sonner";
+import { Search, Users, Briefcase, CalendarClock, Layers, Compass, Loader2 } from "lucide-react";
+import { useAuthProfile } from "@/components/providers/auth-profile-provider";
 import {
   Dialog,
   DialogContent,
@@ -12,71 +13,92 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { searchAction, type SearchResult, type SearchResultGroup } from "@/lib/supabase/search-actions";
+import { NAV_HOME, NAV_GROUPS, NAV_DEV_PANEL } from "@/lib/nav";
 
-interface Result {
-  id: string;
-  label: string;
-  sub?: string;
-  href: string;
-  group: string;
-  icon: typeof Search;
-}
+const GROUP_ICON: Record<SearchResultGroup | "Páginas", typeof Search> = {
+  Clientes: Users,
+  Serviços: Layers,
+  Reuniões: CalendarClock,
+  Trabalhos: Briefcase,
+  Páginas: Compass,
+};
 
+type PageResult = { id: string; label: string; href: string; group: "Páginas" };
+
+/**
+ * Busca real: clientes/serviços/reuniões/trabalhos vêm de
+ * `searchAction()` (server, filtrado por space + permissão de módulo —
+ * nunca mock, nunca de outro space). Páginas/módulos são filtrados
+ * localmente contra o menu real (`canAccessVisionario`/`canAccessTiktok`
+ * do contexto real) — nunca mostra um link pra uma página que o usuário
+ * não pode acessar.
+ */
 export function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [dataResults, setDataResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { canAccessVisionario, canAccessTiktok, visionarioModulePermissions, tiktokModulePermissions, profile } = useAuthProfile();
 
-  const clients = useDbStore((s) => s.clients);
-  const workItems = useDbStore((s) => s.workItems);
-  const tasks = useDbStore((s) => s.tasks);
-  const services = useDbStore((s) => s.services);
-  const clientSites = useDbStore((s) => s.clientSites);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) return;
 
-  const results = useMemo<Result[]>(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const out: Result[] = [];
-
-    clients
-      .filter((c) => c.name.toLowerCase().includes(q) || c.company?.toLowerCase().includes(q))
-      .forEach((c) =>
-        out.push({ id: c.id, label: c.name, sub: c.company, href: `/visionario/clientes/${c.id}`, group: "Clientes", icon: Users })
-      );
-
-    workItems
-      .filter((w) => w.title.toLowerCase().includes(q))
-      .forEach((w) =>
-        out.push({ id: w.id, label: w.title, sub: "Trabalho", href: "/visionario/trabalhos", group: "Trabalhos", icon: Briefcase })
-      );
-
-    tasks
-      .filter((t) => t.title.toLowerCase().includes(q))
-      .forEach((t) =>
-        out.push({ id: t.id, label: t.title, sub: "Tarefa", href: "/tarefas", group: "Tarefas", icon: ListChecks })
-      );
-
-    services
-      .filter((s) => s.name.toLowerCase().includes(q))
-      .forEach((s) =>
-        out.push({ id: s.id, label: s.name, sub: "Serviço", href: "/visionario/servicos", group: "Serviços", icon: Layers })
-      );
-
-    clientSites
-      .filter((cs) => cs.siteName?.toLowerCase().includes(q) || cs.domain?.toLowerCase().includes(q))
-      .forEach((cs) =>
-        out.push({
-          id: cs.id,
-          label: cs.siteName ?? cs.domain ?? "Site",
-          sub: cs.domain,
-          href: `/visionario/clientes/${cs.clientId}`,
-          group: "Sites",
-          icon: Globe,
+    const timeout = setTimeout(() => {
+      setLoading(true);
+      searchAction(q)
+        .then((results) => setDataResults(results))
+        .catch((error) => {
+          console.error("[busca] falha ao buscar", error);
+          toast.error("Não foi possível buscar agora.");
+          setDataResults([]);
         })
-      );
+        .finally(() => setLoading(false));
+    }, 300);
 
-    return out.slice(0, 20);
-  }, [query, clients, workItems, tasks, services, clientSites]);
+    return () => clearTimeout(timeout);
+  }, [query]);
+
+  const pageResults = useMemo<PageResult[]>(() => {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const accessible = [NAV_HOME, ...NAV_GROUPS.flatMap((g) => {
+      if (g.requires === "visionario" && !canAccessVisionario) return [];
+      if (g.requires === "tiktok" && !canAccessTiktok) return [];
+      const permissions = g.requires === "visionario" ? visionarioModulePermissions : g.requires === "tiktok" ? tiktokModulePermissions : undefined;
+      return permissions ? g.items.filter((item) => !item.module || permissions[item.module]) : g.items;
+    })];
+    if (profile.system_role === "super_admin") accessible.push(NAV_DEV_PANEL);
+    return accessible
+      .filter((item) => item.label.toLowerCase().includes(q))
+      .map((item) => ({ id: item.href, label: item.label, href: item.href, group: "Páginas" as const }));
+  }, [query, canAccessVisionario, canAccessTiktok, visionarioModulePermissions, tiktokModulePermissions, profile.system_role]);
+
+  const hasQuery = query.trim().length >= 2;
+  // `dataResults` pode ser resíduo de uma busca anterior mais longa — só
+  // conta enquanto a query atual ainda é válida (>= 2 caracteres), sem
+  // precisar "limpar" o state num efeito.
+  const effectiveDataResults = useMemo(() => (hasQuery ? dataResults : []), [hasQuery, dataResults]);
+
+  const groups: Array<[string, Array<SearchResult | PageResult>]> = useMemo(() => {
+    const byGroup = new Map<string, Array<SearchResult | PageResult>>();
+    for (const r of [...pageResults, ...effectiveDataResults]) {
+      const list = byGroup.get(r.group) ?? [];
+      list.push(r);
+      byGroup.set(r.group, list);
+    }
+    return Array.from(byGroup.entries());
+  }, [pageResults, effectiveDataResults]);
+
+  const totalResults = pageResults.length + effectiveDataResults.length;
+
+  function go(href: string) {
+    router.push(href);
+    setOpen(false);
+    setQuery("");
+  }
 
   return (
     <>
@@ -104,31 +126,36 @@ export function GlobalSearch() {
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar clientes, trabalhos, tarefas, serviços, sites…"
+              placeholder="Buscar clientes, reuniões, trabalhos, serviços, páginas…"
               className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
             />
+            {loading && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
           </div>
           <div className="max-h-80 overflow-y-auto">
-            {query && results.length === 0 && (
+            {hasQuery && !loading && totalResults === 0 && (
               <p className="py-6 text-center text-sm text-muted-foreground">
                 Nenhum resultado para &quot;{query}&quot;.
               </p>
             )}
-            {results.map((r) => (
-              <button
-                key={`${r.group}-${r.id}`}
-                onClick={() => {
-                  router.push(r.href);
-                  setOpen(false);
-                  setQuery("");
-                }}
-                className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-secondary/60"
-              >
-                <r.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{r.label}</span>
-                <span className="text-xs text-muted-foreground">{r.group}</span>
-              </button>
-            ))}
+            {groups.map(([group, items]) => {
+              const Icon = GROUP_ICON[group as SearchResultGroup | "Páginas"] ?? Search;
+              return (
+                <div key={group} className="mb-1">
+                  <p className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group}</p>
+                  {items.map((r) => (
+                    <button
+                      key={`${group}-${r.id}`}
+                      onClick={() => go(r.href)}
+                      className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-secondary/60"
+                    >
+                      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate">{r.label}</span>
+                      {"sub" in r && r.sub && <span className="text-xs text-muted-foreground">{r.sub}</span>}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

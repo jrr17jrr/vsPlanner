@@ -19,11 +19,19 @@ import {
   ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
+import type { ModulePermissionModule } from "@/types/database.types";
 
 export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
+  /**
+   * Módulo (Visionário Dev/TikTok) que decide se este item aparece no
+   * menu — checado contra `has_module_permission` real (ver
+   * app/(app)/layout.tsx). Itens sem `module` (Minha Vida, Financeiro
+   * pessoal, Sistema) só dependem de estar autenticado.
+   */
+  module?: ModulePermissionModule;
 }
 
 export interface NavGroup {
@@ -56,22 +64,25 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Visionário Dev",
     requires: "visionario",
     items: [
-      { label: "Visão Geral", href: "/visionario", icon: LayoutDashboard },
-      { label: "Clientes", href: "/visionario/clientes", icon: Users },
-      { label: "Serviços", href: "/visionario/servicos", icon: Layers },
-      { label: "Trabalhos", href: "/visionario/trabalhos", icon: Briefcase },
-      { label: "Reuniões", href: "/visionario/reunioes", icon: Handshake },
-      { label: "Vendedores", href: "/visionario/vendedores", icon: HandCoins },
-      { label: "Financeiro", href: "/visionario/financeiro", icon: LineChart },
-      { label: "Sites & Domínios", href: "/visionario/sites", icon: Globe },
+      { label: "Visão Geral", href: "/visionario", icon: LayoutDashboard, module: "visao_geral" },
+      { label: "Clientes", href: "/visionario/clientes", icon: Users, module: "clientes" },
+      { label: "Serviços", href: "/visionario/servicos", icon: Layers, module: "servicos" },
+      { label: "Trabalhos", href: "/visionario/trabalhos", icon: Briefcase, module: "trabalhos" },
+      { label: "Reuniões", href: "/visionario/reunioes", icon: Handshake, module: "reunioes" },
+      { label: "Vendedores", href: "/visionario/vendedores", icon: HandCoins, module: "vendedores" },
+      { label: "Financeiro", href: "/visionario/financeiro", icon: LineChart, module: "financeiro" },
+      { label: "Sites & Domínios", href: "/visionario/sites", icon: Globe, module: "sites" },
     ],
   },
   {
     label: "TikTok",
     requires: "tiktok",
     items: [
-      { label: "Visão Geral", href: "/tiktok", icon: Video },
-      { label: "Financeiro", href: "/tiktok/financeiro", icon: LineChart },
+      // A "Visão Geral" do TikTok (app/(app)/tiktok/page.tsx) É o
+      // dashboard financeiro — exige financeiro.view igual à própria
+      // página, nunca só acesso ao space.
+      { label: "Visão Geral", href: "/tiktok", icon: Video, module: "financeiro" },
+      { label: "Financeiro", href: "/tiktok/financeiro", icon: LineChart, module: "financeiro" },
     ],
   },
   {

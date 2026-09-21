@@ -1,214 +1,25 @@
-"use client";
+import { requirePersonalSpace } from "@/lib/supabase/dal";
+import { listActivities, listActivityCompletions } from "@/lib/supabase/repositories/personal.repository";
+import { RotinaPageClient } from "@/components/rotina/rotina-page-client";
+import { toDateKey } from "@/lib/format";
 
-import { useMemo, useState } from "react";
-import { Plus, ChevronLeft, ChevronRight, CalendarClock } from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
-import { useDbStore } from "@/store/db-store";
-import { PageHeader } from "@/components/shared/page-header";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { EmptyState } from "@/components/shared/empty-state";
-import { RoutineItem } from "@/components/shared/routine-item";
-import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { ActivityFormDialog } from "@/components/forms/activity-form-dialog";
-import { getOccurrencesForDay } from "@/lib/routine";
-import { toDateKey, weekdayLabel, formatDateShort } from "@/lib/format";
-import type { Activity } from "@/types/entities";
+/**
+ * Busca conclusões num intervalo largo (-90/+90 dias) de uma vez, pra
+ * navegação de semana no client não precisar de round-trip a cada clique
+ * — evita N+1 sem perder a interatividade instantânea que a tela já tinha.
+ */
+export default async function RotinaPage() {
+  const { profile, space } = await requirePersonalSpace();
 
-export default function RotinaPage() {
-  const { profile, personalSpace } = useAuth();
-  const activities = useDbStore((s) => s.activities);
-  const update = useDbStore((s) => s.update);
-  const remove = useDbStore((s) => s.remove);
+  const from = new Date();
+  from.setDate(from.getDate() - 90);
+  const to = new Date();
+  to.setDate(to.getDate() + 90);
 
-  const [tab, setTab] = useState("hoje");
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<Activity | undefined>();
-  const [defaultDate, setDefaultDate] = useState<string | undefined>();
-  const [deleting, setDeleting] = useState<Activity | undefined>();
+  const [activities, completions] = await Promise.all([
+    listActivities(space.id),
+    listActivityCompletions(profile.id, toDateKey(from), toDateKey(to)),
+  ]);
 
-  const myActivities = useMemo(
-    () => activities.filter((a) => a.userId === profile?.id),
-    [activities, profile?.id]
-  );
-
-  const today = new Date();
-  const todayOcc = getOccurrencesForDay(myActivities, today);
-
-  const monday = useMemo(() => {
-    const d = new Date();
-    const day = d.getDay();
-    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1) + weekOffset * 7);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, [weekOffset]);
-
-  const weekDays = useMemo(
-    () =>
-      Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(monday);
-        d.setDate(d.getDate() + i);
-        return d;
-      }),
-    [monday]
-  );
-
-  function openCreate(date?: string) {
-    setEditing(undefined);
-    setDefaultDate(date);
-    setFormOpen(true);
-  }
-
-  function openEdit(activity: Activity) {
-    setEditing(activity);
-    setDefaultDate(undefined);
-    setFormOpen(true);
-  }
-
-  function toggle(activity: Activity, dateKey: string) {
-    const has = activity.completedDates.includes(dateKey);
-    update("activities", activity.id, {
-      completedDates: has
-        ? activity.completedDates.filter((d) => d !== dateKey)
-        : [...activity.completedDates, dateKey],
-    });
-  }
-
-  if (!profile || !personalSpace) return null;
-
-  return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Minha Rotina"
-        description="Organize seus horários, hábitos e compromissos do dia a dia."
-        actions={
-          <Button size="sm" onClick={() => openCreate()}>
-            <Plus className="h-4 w-4" /> Nova atividade
-          </Button>
-        }
-      />
-
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="hoje">Hoje</TabsTrigger>
-          <TabsTrigger value="semana">Semana</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="hoje">
-          <div className="mb-3 flex items-center gap-3">
-            <Progress
-              value={todayOcc.length ? (todayOcc.filter((o) => o.completed).length / todayOcc.length) * 100 : 0}
-              className="max-w-xs"
-            />
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {todayOcc.filter((o) => o.completed).length}/{todayOcc.length} concluídas
-            </span>
-          </div>
-          {todayOcc.length === 0 ? (
-            <EmptyState
-              icon={CalendarClock}
-              title="Nenhuma atividade para hoje"
-              description="Adicione sua primeira atividade do dia."
-              action={
-                <Button size="sm" onClick={() => openCreate(toDateKey(today))}>
-                  <Plus className="h-4 w-4" /> Nova atividade
-                </Button>
-              }
-            />
-          ) : (
-            <div className="flex flex-col gap-2">
-              {todayOcc.map((o) => (
-                <RoutineItem
-                  key={`${o.activity.id}-${o.date}`}
-                  activity={o.activity}
-                  completed={o.completed}
-                  onToggle={() => toggle(o.activity, o.date)}
-                  onEdit={() => openEdit(o.activity)}
-                  onDelete={() => setDeleting(o.activity)}
-                />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="semana">
-          <div className="mb-3 flex items-center justify-between">
-            <Button variant="outline" size="sm" onClick={() => setWeekOffset((w) => w - 1)}>
-              <ChevronLeft className="h-4 w-4" /> Semana anterior
-            </Button>
-            <p className="text-sm font-medium text-foreground">
-              {formatDateShort(weekDays[0])} – {formatDateShort(weekDays[6])}
-              {weekOffset === 0 && <span className="ml-1.5 text-xs text-primary">(atual)</span>}
-            </p>
-            <Button variant="outline" size="sm" onClick={() => setWeekOffset((w) => w + 1)}>
-              Próxima semana <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <div className="flex flex-col gap-4">
-            {weekDays.map((d) => {
-              const occ = getOccurrencesForDay(myActivities, d);
-              const dateKey = toDateKey(d);
-              const isToday = dateKey === toDateKey(today);
-              const dayPct = occ.length ? Math.round((occ.filter((o) => o.completed).length / occ.length) * 100) : null;
-              return (
-                <div key={dateKey}>
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <p className={`text-sm font-semibold ${isToday ? "text-primary" : "text-foreground"}`}>
-                      {weekdayLabel(d.getDay())}
-                    </p>
-                    <span className="text-xs text-muted-foreground">{formatDateShort(d)}</span>
-                    {dayPct !== null && <span className="text-xs font-medium text-primary">{dayPct}%</span>}
-                    <button
-                      onClick={() => openCreate(dateKey)}
-                      className="ml-auto text-xs text-primary hover:underline"
-                    >
-                      + adicionar
-                    </button>
-                  </div>
-                  {occ.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
-                      Sem atividades.
-                    </p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {occ.map((o) => (
-                        <RoutineItem
-                          key={`${o.activity.id}-${o.date}`}
-                          activity={o.activity}
-                          completed={o.completed}
-                          onToggle={() => toggle(o.activity, o.date)}
-                          onEdit={() => openEdit(o.activity)}
-                          onDelete={() => setDeleting(o.activity)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <ActivityFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        activity={editing}
-        spaceId={personalSpace.id}
-        userId={profile.id}
-        defaultDate={defaultDate}
-      />
-
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(open) => !open && setDeleting(undefined)}
-        title="Excluir atividade?"
-        description={`"${deleting?.title}" será removida da sua rotina, incluindo todas as ocorrências recorrentes.`}
-        onConfirm={() => deleting && remove("activities", deleting.id)}
-      />
-    </div>
-  );
+  return <RotinaPageClient activities={activities} completions={completions} />;
 }

@@ -1,41 +1,34 @@
-"use client";
-
-import { useMemo } from "react";
 import Link from "next/link";
 import { TrendingUp, TrendingDown, DollarSign, ArrowRight } from "lucide-react";
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
-} from "recharts";
-import { useAuth } from "@/hooks/use-auth";
-import { useDbStore } from "@/store/db-store";
+import { requireScopedModulePermission } from "@/lib/supabase/dal";
+import { listFinancialCharges, listFinancialPayments } from "@/lib/supabase/repositories/financial.repository";
+import { historicalSeries, monthCashSummary } from "@/lib/financial-calc";
 import { PageHeader } from "@/components/shared/page-header";
 import { MoneyCard } from "@/components/shared/money-card";
-import { ChartCard } from "@/components/shared/chart-card";
-import { formatCurrency, formatDate } from "@/lib/format";
-import { personalFinanceSummary, sum, monthKeyOf } from "@/lib/selectors";
+import { EmptyState } from "@/components/shared/empty-state";
+import { RevenueChart } from "@/components/visionario/financeiro/revenue-chart";
+import { formatCurrency, currentMonthKeySaoPaulo } from "@/lib/format";
 import { monthKeysForPeriod, monthKeyLabel } from "@/lib/periods";
-import { CHART_COLORS } from "@/lib/chart-colors";
 
-export default function TiktokOverviewPage() {
-  const { mySpaces } = useAuth();
-  const transactions = useDbStore((s) => s.transactions);
+/**
+ * Dashboard do TikTok — 100% real, reaproveitando o Financeiro (migration
+ * 007) via `scope: "tiktok"`. Nenhum dado do Visionário Dev ou Pessoal
+ * entra aqui — tudo filtrado pelo `space_id` do TikTok.
+ */
+export default async function TiktokOverviewPage() {
+  const { space } = await requireScopedModulePermission("tiktok", "financeiro", "view");
 
-  const tiktokSpace = mySpaces.find((s) => s.slug === "tiktok");
-  const monthKeys = useMemo(() => monthKeysForPeriod("6m"), []);
+  const [charges, payments] = await Promise.all([listFinancialCharges(space.id), listFinancialPayments(space.id)]);
 
-  if (!tiktokSpace) return null;
+  const monthKeys = monthKeysForPeriod("6m");
+  const series = historicalSeries(charges, monthKeys);
+  const chartData = series.map((s) => ({ month: monthKeyLabel(s.month), Ganhos: s.receita, Gastos: s.despesa, Lucro: s.lucro }));
 
-  const summary = personalFinanceSummary({ transactions }, tiktokSpace.id);
-  const lucro = summary.entradasMes - summary.saidasMes;
+  const cash = monthCashSummary(charges, payments, currentMonthKeySaoPaulo());
+  const currentMonth = series[series.length - 1] ?? { receita: 0, despesa: 0, lucro: 0 };
 
-  const spaceTxns = transactions.filter((t) => t.spaceId === tiktokSpace.id);
-  const chartData = monthKeys.map((key) => {
-    const ganhos = sum(spaceTxns.filter((t) => t.type === "entrada" && monthKeyOf(t.date) === key).map((t) => t.amount));
-    const gastos = sum(spaceTxns.filter((t) => t.type === "saida" && monthKeyOf(t.date) === key).map((t) => t.amount));
-    return { month: monthKeyLabel(key), Ganhos: ganhos, Gastos: gastos, Lucro: ganhos - gastos };
-  });
-
-  const recent = [...spaceTxns].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 6);
+  const recentPayments = [...payments].sort((a, b) => b.payment_date.localeCompare(a.payment_date)).slice(0, 6);
+  const chargeById = new Map(charges.map((c) => [c.id, c]));
 
   return (
     <div className="flex flex-col gap-6">
@@ -50,41 +43,35 @@ export default function TiktokOverviewPage() {
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <MoneyCard label="Ganhos do mês" amount={summary.entradasMes} icon={DollarSign} tone="success" />
-        <MoneyCard label="Gastos do mês" amount={summary.saidasMes} icon={TrendingDown} tone="destructive" />
-        <MoneyCard label="Lucro do mês" amount={lucro} icon={TrendingUp} tone={lucro >= 0 ? "success" : "destructive"} />
+        <MoneyCard label="Ganhos do mês (recebido)" amount={cash.recebido} icon={DollarSign} tone="success" />
+        <MoneyCard label="Gastos do mês (pago)" amount={cash.pago} icon={TrendingDown} tone="destructive" />
+        <MoneyCard label="Lucro do mês (competência)" amount={currentMonth.lucro} icon={TrendingUp} tone={currentMonth.lucro >= 0 ? "success" : "destructive"} />
       </div>
 
-      <ChartCard title="Ganhos, gastos e lucro" description="Últimos 6 meses">
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={chartData}>
-            <CartesianGrid vertical={false} stroke="var(--border)" />
-            <XAxis dataKey="month" tick={{ fill: "var(--muted-foreground)", fontSize: 12 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} width={40} />
-            <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} formatter={(v) => formatCurrency(Number(v))} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="Ganhos" fill={CHART_COLORS[1]} radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Gastos" fill={CHART_COLORS[4]} radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Lucro" fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      <RevenueChart data={chartData} />
 
       <section>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Transações recentes</h2>
-        <div className="flex flex-col gap-2">
-          {recent.map((t) => (
-            <div key={t.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">{t.description}</p>
-                <p className="text-xs text-muted-foreground">{formatDate(t.date)} · {t.category}</p>
-              </div>
-              <span className={`text-sm font-medium ${t.type === "entrada" ? "text-success" : "text-destructive"}`}>
-                {t.type === "entrada" ? "+" : "-"}{formatCurrency(t.amount)}
-              </span>
-            </div>
-          ))}
-        </div>
+        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Pagamentos recentes</h2>
+        {recentPayments.length === 0 ? (
+          <EmptyState title="Nenhuma movimentação encontrada" />
+        ) : (
+          <div className="flex flex-col gap-2">
+            {recentPayments.map((p) => {
+              const charge = chargeById.get(p.charge_id);
+              return (
+                <div key={p.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{charge?.description ?? "Movimentação"}</p>
+                    <p className="text-xs text-muted-foreground">{p.payment_date}</p>
+                  </div>
+                  <span className={`text-sm font-medium ${charge?.kind === "entrada" ? "text-success" : "text-destructive"}`}>
+                    {charge?.kind === "entrada" ? "+" : "-"}{formatCurrency(p.amount)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

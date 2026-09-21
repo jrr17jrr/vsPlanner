@@ -7,6 +7,10 @@ import {
   listSpaceMemberProfiles,
 } from "@/lib/supabase/repositories/meetings.repository";
 import { listClients, getClient } from "@/lib/supabase/repositories/clients.repository";
+import {
+  listWorkItemsForMeeting,
+  listWorkItemAssignees,
+} from "@/lib/supabase/repositories/work-items.repository";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { MeetingDetailClient } from "@/components/visionario/reunioes/meeting-detail-client";
 
@@ -26,15 +30,29 @@ export default async function ReuniaoDetalhesPage({
     notFound();
   }
 
-  const [participants, members, clients, linkedClient, canEdit, canDelete, canConclude] = await Promise.all([
-    listMeetingParticipants(meeting.id),
-    listSpaceMemberProfiles(space.id),
-    listClients(space.id),
-    meeting.client_id ? getClient(meeting.client_id) : Promise.resolve(null),
-    hasModulePermission(space.id, "reunioes", "edit"),
-    hasModulePermission(space.id, "reunioes", "delete"),
-    hasModulePermission(space.id, "reunioes", "conclude"),
-  ]);
+  const [participants, members, clients, linkedClient, generatedWorkItems, canEdit, canDelete, canConclude, canCreateWorkItem] =
+    await Promise.all([
+      listMeetingParticipants(meeting.id),
+      listSpaceMemberProfiles(space.id),
+      listClients(space.id),
+      meeting.client_id ? getClient(meeting.client_id) : Promise.resolve(null),
+      listWorkItemsForMeeting(meeting.id),
+      hasModulePermission(space.id, "reunioes", "edit"),
+      hasModulePermission(space.id, "reunioes", "delete"),
+      hasModulePermission(space.id, "reunioes", "conclude"),
+      hasModulePermission(space.id, "trabalhos", "create"),
+    ]);
+
+  const workItemAssigneesLists = await Promise.all(
+    generatedWorkItems.map((w) => listWorkItemAssignees(w.id))
+  );
+  const nameById = new Map(members.map((m) => [m.id, m.name]));
+  const assigneeNamesByWorkItem: Record<string, string[]> = {};
+  generatedWorkItems.forEach((w, i) => {
+    assigneeNamesByWorkItem[w.id] = workItemAssigneesLists[i]
+      .map((a) => nameById.get(a.user_id))
+      .filter((n): n is string => !!n);
+  });
 
   return (
     <MeetingDetailClient
@@ -43,6 +61,9 @@ export default async function ReuniaoDetalhesPage({
       members={members}
       clients={clients}
       linkedClient={linkedClient}
+      generatedWorkItems={generatedWorkItems}
+      assigneeNamesByWorkItem={assigneeNamesByWorkItem}
+      canCreateWorkItem={canCreateWorkItem}
       currentUserId={profile.id}
       permissions={{ canEdit, canDelete, canConclude }}
     />

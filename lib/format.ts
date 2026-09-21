@@ -62,6 +62,31 @@ export function toDateKey(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * "Hoje" no fuso de São Paulo, sempre — nunca depende do TZ do processo
+ * Node (que localmente é America/Sao_Paulo, mas em produção na Vercel é
+ * UTC por padrão, salvo configuração explícita). `toDateKey(new Date())`
+ * é correto só quando o processo já está no fuso certo; esta função é
+ * correta em qualquer ambiente, porque `Intl` sempre conhece as regras do
+ * fuso IANA independente do TZ do processo. Único helper central de
+ * "hoje" pro lado do servidor — Hoje, Reuniões, Trabalhos, Financeiro e
+ * vencimentos em geral usam esta função, nunca `toDateKey(new Date())`
+ * diretamente, pra nunca haver um bug de "hoje errado" perto da meia-noite.
+ */
+export function todayKeySaoPaulo(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/** Mês atual (yyyy-MM) no fuso de São Paulo — mesma razão de `todayKeySaoPaulo`. */
+export function currentMonthKeySaoPaulo(): string {
+  return todayKeySaoPaulo().slice(0, 7);
+}
+
 export function toCompetencia(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");

@@ -22,23 +22,16 @@ import { SpaceSwitcher } from "@/components/shared/space-switcher";
 import { GlobalSearch } from "@/components/shared/global-search";
 import { NotificationsBell } from "@/components/shared/notifications-bell";
 import { useAuthProfile } from "@/components/providers/auth-profile-provider";
-import { useSessionStore } from "@/store/session-store";
 import { logoutAction } from "@/lib/supabase/actions";
 import { initials } from "@/lib/format";
 
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  // Identidade REAL (Supabase `profiles`) — req. 11: menu usa o usuário
-  // real, não o mock.
+  // Identidade REAL (Supabase `profiles`) — menu usa o usuário real.
   const { profile, email } = useAuthProfile();
-  const mockLogout = useSessionStore((s) => s.logout);
   const router = useRouter();
 
   function handleLogout() {
-    // Limpa a persona mock associada (ver app-shell.tsx) — não é
-    // estritamente necessário (o servidor já encerrou a sessão real), mas
-    // evita reaproveitar a mesma persona numa próxima conta.
-    mockLogout();
     void logoutAction();
   }
 

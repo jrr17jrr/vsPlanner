@@ -6,7 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
 import { listSpaceMemberProfiles } from "@/lib/supabase/repositories/meetings.repository";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
-import { toDateKey } from "@/lib/format";
+import { todayKeySaoPaulo } from "@/lib/format";
 import type { WorkItem, WorkItemPriority } from "@/types/database.types";
 
 export type WorkItemActionState = {
@@ -293,11 +293,10 @@ export async function deleteWorkItemAction(workItemId: string): Promise<WorkItem
 
 /**
  * Trabalhos com prazo hoje em que o usuário atual é responsável — mesmo
- * padrão de `getTodayMeetingsForHoje()`: não redireciona, só devolve lista
- * vazia se não houver Visionário Dev/permissão, pra "Hoje" continuar
- * funcionando pra quem não usa o módulo. Preparado agora; a integração
- * visual em `/hoje` só entra depois que a migration 006 existir de
- * verdade.
+ * padrão de `getTodayMeetingsForHoje()`: chamada direto do Server
+ * Component de `/hoje`, não redireciona, só devolve lista vazia se não
+ * houver Visionário Dev/permissão, pra "Hoje" continuar funcionando pra
+ * quem não usa o módulo.
  */
 export async function getTodayWorkItemsForHoje(): Promise<{
   workItems: WorkItem[];
@@ -312,7 +311,7 @@ export async function getTodayWorkItemsForHoje(): Promise<{
   if (!allowed) return { workItems: [], assigneeNamesByWorkItem: {} };
 
   const supabase = await createSupabaseServerClient();
-  const todayKey = toDateKey(new Date());
+  const todayKey = todayKeySaoPaulo();
 
   const { data: dueTodayItems, error } = await supabase
     .from("work_items")

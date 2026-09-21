@@ -2,8 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { WorkItem, WorkItemAssignee } from "@/types/database.types";
 
 /**
- * Leitura de trabalhos (migration 006 — ainda não executada, este arquivo
- * só é chamado depois que a tabela existir). RLS (`has_module_permission`)
+ * Leitura de trabalhos (migration 006). RLS (`has_module_permission`)
  * já garante que só voltam linhas do space onde o usuário tem
  * `trabalhos.view` — mesma convenção de `meetings.repository.ts`.
  */

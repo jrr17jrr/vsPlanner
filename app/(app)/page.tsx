@@ -1,300 +1,155 @@
-"use client";
-
 import Link from "next/link";
+import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet } from "lucide-react";
+import { requireActiveProfile, findOrBootstrapSpace, requirePersonalSpace } from "@/lib/supabase/dal";
+import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
+import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
+import { getTodayWorkItemsForHoje } from "@/lib/supabase/work-items-actions";
+import { listWorkItems } from "@/lib/supabase/repositories/work-items.repository";
 import {
-  Rocket,
-  Video,
-  ArrowRight,
-  Briefcase,
-  GraduationCap,
-  Wallet,
-  Globe,
-  type LucideIcon,
-} from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
-import { useDbStore } from "@/store/db-store";
+  listFinancialCharges,
+  listFinancialPayments,
+  listFinancialAccounts,
+} from "@/lib/supabase/repositories/financial.repository";
+import { totalBalance, monthSummary, listChargesForKind } from "@/lib/financial-calc";
+import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG } from "@/lib/space-slugs";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
-import {
-  personalFinanceSummary,
-  visionarioFinanceSummary,
-  daysUntil,
-} from "@/lib/selectors";
-import { getOccurrencesForDay, getOccurrences } from "@/lib/routine";
-import { formatCurrency, formatDateLong, toDateKey } from "@/lib/format";
+import { formatCurrency, formatDateLong, todayKeySaoPaulo, currentMonthKeySaoPaulo } from "@/lib/format";
+import type { Space } from "@/types/database.types";
 
-function greeting() {
+function greeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Bom dia";
   if (h < 18) return "Boa tarde";
   return "Boa noite";
 }
 
-export default function DashboardPage() {
-  const { profile, personalSpace, canAccessVisionario, canAccessTiktok } = useAuth();
-  const db = useDbStore((s) => s);
+async function loadFinanceColumn(space: Space) {
+  const allowed = await hasModulePermission(space.id, "financeiro", "view");
+  if (!allowed) return null;
 
-  if (!profile || !personalSpace) return null;
+  const [charges, payments, accounts] = await Promise.all([
+    listFinancialCharges(space.id),
+    listFinancialPayments(space.id),
+    listFinancialAccounts(space.id),
+  ]);
+  const month = monthSummary(charges, currentMonthKeySaoPaulo());
+  const saldo = totalBalance(accounts, payments, new Map(charges.map((c) => [c.id, c.kind])));
+  return { saldo, receita: month.receita, despesa: month.despesa, lucro: month.lucro };
+}
 
-  const today = new Date();
-  const todayKey = toDateKey(today);
-  const todayOccurrences = getOccurrencesForDay(
-    db.activities.filter((a) => a.userId === profile.id),
-    today
-  );
-  const todayTasks = db.tasks.filter((t) => t.userId === profile.id && t.dueDate === todayKey);
-  const todayWorkTasks = db.workTasks.filter((t) => t.userId === profile.id && t.dueDate === todayKey);
+/**
+ * Dashboard raiz — 100% real, montado só com os espaços aos quais o
+ * usuário tem acesso e só com os dados cujo módulo ele tem permissão de
+ * ver. Rotina/Tarefas pessoais ainda não têm backend real (migration
+ * 008 pendente) — por isso "Meu dia" mostra só Reuniões/Trabalhos reais
+ * por enquanto, nunca um percentual calculado a partir de mock.
+ */
+export default async function DashboardPage() {
+  const { profile } = await requireActiveProfile();
+  const { space: personalSpace } = await requirePersonalSpace();
 
-  const total = todayOccurrences.length + todayTasks.length + todayWorkTasks.length;
-  const concluidas =
-    todayOccurrences.filter((o) => o.completed).length +
-    todayTasks.filter((t) => t.status === "concluida").length +
-    todayWorkTasks.filter((t) => t.status === "concluida").length;
-  const pct = total > 0 ? Math.round((concluidas / total) * 100) : 0;
-  const proxima = todayOccurrences.find((o) => !o.completed);
+  const [visionarioSpace, tiktokSpace] = await Promise.all([
+    findOrBootstrapSpace(VISIONARIO_DEV_SLUG, profile),
+    findOrBootstrapSpace(TIKTOK_SLUG, profile),
+  ]);
 
-  const monday = new Date(today);
-  const day = monday.getDay();
-  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(sunday.getDate() + 6);
-  const weekOccurrences = getOccurrences(
-    db.activities.filter((a) => a.userId === profile.id),
-    monday,
-    sunday
-  );
-  const weekConcluidas = weekOccurrences.filter((o) => o.completed).length;
-  const weekPct = weekOccurrences.length > 0 ? Math.round((weekConcluidas / weekOccurrences.length) * 100) : 0;
+  const [meetingsResult, workItemsResult, pessoalFinance, visionarioFinance, tiktokFinance] = await Promise.all([
+    getTodayMeetingsForHoje(),
+    getTodayWorkItemsForHoje(),
+    loadFinanceColumn(personalSpace),
+    visionarioSpace ? loadFinanceColumn(visionarioSpace) : Promise.resolve(null),
+    tiktokSpace ? loadFinanceColumn(tiktokSpace) : Promise.resolve(null),
+  ]);
 
-  // Pendências por área (para priorizar rapidamente)
-  const pendenciasTrabalho = todayWorkTasks.filter((t) => t.status !== "concluida").length;
-  const pendenciasVisionario = canAccessVisionario
-    ? db.workItems.filter((w) => w.responsibleIds.includes(profile.id) && w.status !== "concluido").length
-    : 0;
-  const pendenciasTiktok = canAccessTiktok
-    ? todayOccurrences.filter((o) => o.activity.category === "TikTok" && !o.completed).length
-    : 0;
-  const pendenciasEstudos =
-    todayOccurrences.filter(
-      (o) => ["Faculdade", "Alura", "Curso"].includes(o.activity.category) && !o.completed
-    ).length + todayTasks.filter((t) => t.category === "Faculdade" && t.status !== "concluida").length;
+  const todayKey = todayKeySaoPaulo();
 
-  const pessoal = personalFinanceSummary(db, personalSpace.id);
-
-  const visionarioSpace = db.spaces.find((s) => s.slug === "visionario-dev");
-  const visionario = canAccessVisionario && visionarioSpace
-    ? visionarioFinanceSummary(db, visionarioSpace.id)
-    : null;
-
-  const tiktokSpace = db.spaces.find((s) => s.slug === "tiktok");
-  const tiktok = canAccessTiktok && tiktokSpace
-    ? personalFinanceSummary(db, tiktokSpace.id)
-    : null;
-
-  // ---------------------------------------------------------------------
-  // Precisa da sua atenção — lista única combinando as fontes existentes
-  // ---------------------------------------------------------------------
-  interface AttentionItem {
-    id: string;
-    icon: LucideIcon;
-    label: string;
-    title: string;
-    meta: string;
-    urgent: boolean;
-    days: number;
-    href: string;
-  }
+  type AttentionItem = { id: string; icon: typeof Briefcase; label: string; title: string; meta: string; urgent: boolean; href: string };
   const attentionItems: AttentionItem[] = [];
 
-  db.recurringExpenses
-    .filter((e) => e.spaceId === personalSpace.id && e.active)
-    .forEach((e) => {
-      const days = daysUntil(e.nextDueDate);
-      if (days === null || days > 10) return;
-      attentionItems.push({
-        id: e.id,
-        icon: Wallet,
-        label: "Conta próxima do vencimento",
-        title: `${e.name} — ${formatCurrency(e.amount)}`,
-        meta: days < 0 ? "atrasada" : days === 0 ? "vence hoje" : `vence em ${days}d`,
-        urgent: days <= 3,
-        days,
-        href: "/financeiro",
-      });
+  if (visionarioSpace) {
+    const canViewTrabalhos = await hasModulePermission(visionarioSpace.id, "trabalhos", "view");
+    if (canViewTrabalhos) {
+      const workItems = await listWorkItems(visionarioSpace.id);
+      workItems
+        .filter((w) => w.status !== "concluido" && w.due_date && w.due_date < todayKey)
+        .forEach((w) => {
+          attentionItems.push({
+            id: w.id,
+            icon: Briefcase,
+            label: "Trabalho atrasado",
+            title: w.title,
+            meta: "atrasado",
+            urgent: true,
+            href: "/visionario/trabalhos",
+          });
+        });
+    }
+  }
+
+  meetingsResult.meetings.forEach((m) => {
+    attentionItems.push({
+      id: m.id,
+      icon: CalendarClock,
+      label: "Reunião hoje",
+      title: m.title,
+      meta: m.start_time.slice(0, 5),
+      urgent: false,
+      href: `/visionario/reunioes/${m.id}`,
     });
+  });
 
-  if (canAccessVisionario) {
-    db.clients
-      .filter((c) => c.status === "ativo")
-      .forEach((c) => {
-        const payment = db.clientPayments
-          .filter((p) => p.clientId === c.id)
-          .sort((a, b) => (a.competencia < b.competencia ? 1 : -1))[0];
-        if (!payment || payment.status === "pago") return;
+  for (const [space, href] of [
+    [personalSpace, "/financeiro"],
+    [visionarioSpace, "/visionario/financeiro"],
+    [tiktokSpace, "/tiktok/financeiro"],
+  ] as const) {
+    if (!space) continue;
+    const canView = await hasModulePermission(space.id, "financeiro", "view");
+    if (!canView) continue;
+    const [charges, payments] = await Promise.all([listFinancialCharges(space.id), listFinancialPayments(space.id)]);
+    listChargesForKind(charges, payments, "saida")
+      .filter((r) => r.bucket === "atrasadas")
+      .forEach((r) => {
         attentionItems.push({
-          id: payment.id,
+          id: r.charge.id,
           icon: Wallet,
-          label: "Pagamento pendente",
-          title: `${c.name} — ${formatCurrency(payment.amount)}`,
-          meta: payment.status === "atrasado" ? "atrasado" : "pendente",
-          urgent: payment.status === "atrasado",
-          days: payment.status === "atrasado" ? -1 : 5,
-          href: `/visionario/clientes/${c.id}`,
-        });
-      });
-
-    // Prioriza trabalhos atribuídos a mim — um trabalho só do sócio não é pendência minha.
-    db.workItems
-      .filter((w) => w.status !== "concluido" && w.dueDate && w.responsibleIds.includes(profile.id))
-      .forEach((w) => {
-        const days = daysUntil(w.dueDate);
-        if (days === null) return;
-        attentionItems.push({
-          id: w.id,
-          icon: Briefcase,
-          label: "Trabalho próximo do prazo",
-          title: w.title,
-          meta: days < 0 ? "atrasado" : days === 0 ? "hoje" : days === 1 ? "amanhã" : `em ${days}d`,
-          urgent: days < 0,
-          days,
-          href: "/visionario/trabalhos",
-        });
-      });
-
-    db.clientSites
-      .forEach((site) => {
-        const days = daysUntil(site.domainRenewalDate);
-        if (days === null || days > 30) return;
-        attentionItems.push({
-          id: site.id,
-          icon: Globe,
-          label: "Domínio próximo da renovação",
-          title: site.domain ?? site.siteName ?? "Domínio",
-          meta: days < 0 ? "vencido" : `vence em ${days}d`,
-          urgent: days <= 7,
-          days,
-          href: "/visionario/sites",
+          label: "Conta atrasada",
+          title: `${r.charge.description} — ${formatCurrency(r.remaining)}`,
+          meta: "atrasada",
+          urgent: true,
+          href,
         });
       });
   }
-
-  attentionItems.sort((a, b) => a.days - b.days);
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={`${greeting()}, ${profile.name.split(" ")[0]}`}
-        description={formatDateLong(today)}
-      />
+      <PageHeader title={`${greeting()}, ${profile.name.split(" ")[0]}`} description={formatDateLong(new Date())} />
 
-      {/* Meu Dia */}
       <Card className="p-4">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-foreground">Meu dia</p>
-          <span className="text-sm font-semibold text-primary">
-            {concluidas}/{total} · {pct}%
+          <span className="text-xs text-muted-foreground">
+            {meetingsResult.meetings.length} reunião(ões) · {workItemsResult.workItems.length} trabalho(s)
           </span>
         </div>
-        <Progress value={pct} className="mt-2" />
-
-        {proxima && (
-          <div className="mt-3 flex items-center justify-between rounded-md bg-secondary/40 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Próximo</span>
-            <span className="font-medium text-foreground">
-              {proxima.activity.startTime} — {proxima.activity.title}
-            </span>
-          </div>
-        )}
-
-        {(pendenciasTrabalho > 0 || pendenciasVisionario > 0 || pendenciasTiktok > 0 || pendenciasEstudos > 0) && (
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {pendenciasTrabalho > 0 && (
-              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
-                <Briefcase className="h-3 w-3" /> Trabalho <b className="text-foreground">{pendenciasTrabalho}</b>
-              </span>
-            )}
-            {pendenciasVisionario > 0 && (
-              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
-                <Rocket className="h-3 w-3" /> Visionário <b className="text-foreground">{pendenciasVisionario}</b>
-              </span>
-            )}
-            {pendenciasTiktok > 0 && (
-              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
-                <Video className="h-3 w-3" /> TikTok <b className="text-foreground">{pendenciasTiktok}</b>
-              </span>
-            )}
-            {pendenciasEstudos > 0 && (
-              <span className="flex items-center gap-1 rounded-md bg-secondary/40 px-2 py-1">
-                <GraduationCap className="h-3 w-3" /> Estudos <b className="text-foreground">{pendenciasEstudos}</b>
-              </span>
-            )}
-          </div>
-        )}
-
-        <Button asChild size="sm" className="mt-3 w-full sm:w-auto">
-          <Link href="/hoje">Ver meu dia <ArrowRight className="h-3.5 w-3.5" /></Link>
-        </Button>
+        <Link href="/hoje" className="mt-3 flex items-center gap-1 text-sm text-primary hover:underline">
+          Ver meu dia <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </Card>
 
-      {/* Resumo financeiro */}
       <section>
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Resumo financeiro</h2>
         <Card className="p-4">
           <div className="grid grid-cols-1 gap-4 divide-y divide-border sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
-            <FinanceColumn
-              title="Pessoal"
-              icon={Wallet}
-              rows={[
-                { label: "Saldo atual", value: pessoal.saldo },
-                { label: "Entradas", value: pessoal.entradasMes, tone: "success" },
-                { label: "Gastos", value: pessoal.saidasMes, tone: "destructive" },
-              ]}
-              href="/financeiro"
-              linkLabel="Ver meu dinheiro"
-            />
-            {visionario && (
-              <FinanceColumn
-                title="Visionário Dev"
-                icon={Rocket}
-                rows={[
-                  { label: "Recebido", value: visionario.recebido, tone: "success" },
-                  { label: "A receber", value: visionario.aReceber, tone: "warning" },
-                  { label: "Lucro", value: visionario.lucro, tone: visionario.lucro >= 0 ? "success" : "destructive" },
-                ]}
-                href="/visionario/financeiro"
-                linkLabel="Ver financeiro"
-              />
-            )}
-            {tiktok && (
-              <FinanceColumn
-                title="TikTok"
-                icon={Video}
-                rows={[
-                  { label: "Ganhos", value: tiktok.entradasMes },
-                  { label: "Gastos", value: tiktok.saidasMes, tone: "destructive" },
-                  { label: "Lucro", value: tiktok.entradasMes - tiktok.saidasMes, tone: "success" },
-                ]}
-                href="/tiktok/financeiro"
-                linkLabel="Ver financeiro"
-              />
-            )}
+            <FinanceColumn title="Pessoal" icon={Wallet} data={pessoalFinance} href="/financeiro" />
+            {visionarioSpace && <FinanceColumn title="Visionário Dev" icon={Rocket} data={visionarioFinance} href="/visionario/financeiro" />}
+            {tiktokSpace && <FinanceColumn title="TikTok" icon={Video} data={tiktokFinance} href="/tiktok/financeiro" />}
           </div>
         </Card>
       </section>
 
-      {/* Progresso da semana */}
-      <Card className="p-4">
-        <p className="text-sm font-medium text-foreground">Progresso da semana</p>
-        <p className="text-xs text-muted-foreground">
-          {weekConcluidas} de {weekOccurrences.length} atividades concluídas
-        </p>
-        <Progress value={weekPct} className="mt-3" />
-        <p className="mt-1.5 text-right text-xs font-medium text-primary">{weekPct}%</p>
-      </Card>
-
-      {/* Precisa da sua atenção */}
       <section>
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Precisa da sua atenção</h2>
         <Card className="p-2">
@@ -319,11 +174,7 @@ export default function DashboardPage() {
                     <p className="text-[11px] text-muted-foreground">{item.label}</p>
                     <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
                   </div>
-                  <span
-                    className={`shrink-0 text-xs font-medium ${
-                      item.urgent ? "text-destructive" : "text-muted-foreground"
-                    }`}
-                  >
+                  <span className={`shrink-0 text-xs font-medium ${item.urgent ? "text-destructive" : "text-muted-foreground"}`}>
                     {item.meta}
                   </span>
                 </Link>
@@ -339,42 +190,43 @@ export default function DashboardPage() {
 function FinanceColumn({
   title,
   icon: Icon,
-  rows,
+  data,
   href,
-  linkLabel,
 }: {
   title: string;
-  icon: LucideIcon;
-  rows: { label: string; value: number; tone?: "success" | "destructive" | "warning" }[];
+  icon: typeof Wallet;
+  data: { saldo: number; receita: number; despesa: number; lucro: number } | null;
   href: string;
-  linkLabel: string;
 }) {
-  const toneClass: Record<string, string> = {
-    success: "text-success",
-    destructive: "text-destructive",
-    warning: "text-warning",
-  };
   return (
     <div className="flex flex-col gap-2 pt-4 first:pt-0 sm:pt-0 sm:px-4 sm:first:pl-0 sm:last:pr-0">
       <div className="flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
       </div>
-      <div className="flex flex-col gap-1">
-        {rows.map((row) => (
-          <div key={row.label} className="flex items-baseline justify-between gap-2">
-            <span className="text-xs text-muted-foreground">{row.label}</span>
-            <span
-              className={`text-sm font-semibold tabular-nums whitespace-nowrap ${row.tone ? toneClass[row.tone] : "text-foreground"}`}
-            >
-              {formatCurrency(row.value)}
-            </span>
-          </div>
-        ))}
-      </div>
+      {data ? (
+        <div className="flex flex-col gap-1">
+          <Row label="Saldo atual" value={data.saldo} />
+          <Row label="Receita (mês)" value={data.receita} tone="success" />
+          <Row label="Despesas (mês)" value={data.despesa} tone="destructive" />
+          <Row label="Lucro (mês)" value={data.lucro} tone={data.lucro >= 0 ? "success" : "destructive"} />
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">Sem permissão para ver o financeiro deste espaço.</p>
+      )}
       <Link href={href} className="flex items-center gap-1 text-xs text-primary hover:underline">
-        {linkLabel} <ArrowRight className="h-3 w-3" />
+        Ver financeiro <ArrowRight className="h-3 w-3" />
       </Link>
+    </div>
+  );
+}
+
+function Row({ label, value, tone }: { label: string; value: number; tone?: "success" | "destructive" }) {
+  const toneClass = tone === "success" ? "text-success" : tone === "destructive" ? "text-destructive" : "text-foreground";
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-sm font-semibold tabular-nums whitespace-nowrap ${toneClass}`}>{formatCurrency(value)}</span>
     </div>
   );
 }

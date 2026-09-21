@@ -6,7 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
 import { listSpaceMemberProfiles } from "@/lib/supabase/repositories/meetings.repository";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
-import { toDateKey } from "@/lib/format";
+import { todayKeySaoPaulo } from "@/lib/format";
 import type { Meeting } from "@/types/database.types";
 
 export type MeetingActionState = {
@@ -256,13 +256,16 @@ export async function cancelMeetingAction(meetingId: string): Promise<MeetingAct
 }
 
 /**
- * Reuniões de hoje em que o usuário atual é participante — usada pelo
- * "Hoje" (client component, mock) pra buscar dados reais sob demanda.
- * Diferente das outras funções deste arquivo, NÃO redireciona quando o
- * usuário não tem Visionário Dev/permissão — só devolve lista vazia, já
- * que "Hoje" deve continuar funcionando normalmente pra quem não usa o
- * Visionário Dev. Nenhum dado é duplicado: é a MESMA linha de `meetings`
- * lida por qualquer participante autorizado, filtrada por
+ * Reuniões de hoje em que o usuário atual é participante — chamada
+ * diretamente do Server Component de `/hoje` (nunca de um `useEffect`
+ * client-side): assim, qualquer erro real propaga pro `error.tsx` da
+ * rota em vez de ser engolido por um `.catch()` silencioso, e não existe
+ * "sessão mock vs. sessão real" — é sempre a mesma sessão Supabase que
+ * renderizou a página. Diferente das outras funções deste arquivo, NÃO
+ * redireciona quando o usuário não tem Visionário Dev/permissão — só
+ * devolve lista vazia, já que "Hoje" continua existindo pra quem não usa
+ * o Visionário Dev. Nenhum dado é duplicado: é a MESMA linha de
+ * `meetings` lida por qualquer participante autorizado, filtrada por
  * `meeting_participants.user_id = eu`.
  */
 export async function getTodayMeetingsForHoje(): Promise<{
@@ -278,7 +281,7 @@ export async function getTodayMeetingsForHoje(): Promise<{
   if (!allowed) return { meetings: [], participantNamesByMeeting: {} };
 
   const supabase = await createSupabaseServerClient();
-  const todayKey = toDateKey(new Date());
+  const todayKey = todayKeySaoPaulo();
 
   const { data: todayMeetings, error } = await supabase
     .from("meetings")
@@ -293,43 +296,35 @@ export async function getTodayMeetingsForHoje(): Promise<{
     return { meetings: [], participantNamesByMeeting: {} };
   }
 
-  const { data: myParticipations, error: participationError } = await supabase
+  const { data: participants, error: participantsError } = await supabase
     .from("meeting_participants")
-    .select("meeting_id")
-    .eq("user_id", profile.id)
+    .select("meeting_id, user_id")
     .in(
       "meeting_id",
       todayMeetings.map((m) => m.id)
     );
 
-  if (participationError) throw participationError;
+  if (participantsError) throw participantsError;
 
-  const myMeetingIds = new Set((myParticipations ?? []).map((p) => p.meeting_id));
-  const myMeetings = todayMeetings.filter((m) => myMeetingIds.has(m.id));
+  const participantsByMeetingId = new Map<string, string[]>();
+  for (const p of participants ?? []) {
+    const list = participantsByMeetingId.get(p.meeting_id) ?? [];
+    list.push(p.user_id);
+    participantsByMeetingId.set(p.meeting_id, list);
+  }
 
+  const myMeetings = todayMeetings.filter((m) => (participantsByMeetingId.get(m.id) ?? []).includes(profile.id));
   if (myMeetings.length === 0) {
     return { meetings: [], participantNamesByMeeting: {} };
   }
 
-  const [members, participantsResult] = await Promise.all([
-    listSpaceMemberProfiles(space.id),
-    supabase
-      .from("meeting_participants")
-      .select("meeting_id, user_id")
-      .in(
-        "meeting_id",
-        myMeetings.map((m) => m.id)
-      ),
-  ]);
-
-  if (participantsResult.error) throw participantsResult.error;
-
+  const members = await listSpaceMemberProfiles(space.id);
   const nameById = new Map(members.map((m) => [m.id, m.name]));
   const namesByMeeting: Record<string, string[]> = {};
-  for (const p of participantsResult.data ?? []) {
-    const name = nameById.get(p.user_id);
-    if (!name) continue;
-    namesByMeeting[p.meeting_id] = [...(namesByMeeting[p.meeting_id] ?? []), name];
+  for (const m of myMeetings) {
+    namesByMeeting[m.id] = (participantsByMeetingId.get(m.id) ?? [])
+      .map((userId) => nameById.get(userId))
+      .filter((n): n is string => !!n);
   }
 
   return { meetings: myMeetings, participantNamesByMeeting: namesByMeeting };
