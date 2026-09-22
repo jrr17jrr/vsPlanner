@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Pencil, CheckCircle2, Ban, Trash2, MapPin, Users, User } from "lucide-react";
+import { ArrowLeft, Pencil, CheckCircle2, Ban, Trash2, MapPin, Users, User, CalendarClock } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
@@ -13,9 +13,11 @@ import { WhatsAppButton } from "@/components/visionario/reunioes/whatsapp-button
 import { MeetingLinkButton } from "@/components/visionario/reunioes/meeting-link-button";
 import { MeetingFormDialog } from "@/components/visionario/reunioes/meeting-form-dialog";
 import { ConcludeMeetingDialog } from "@/components/visionario/reunioes/conclude-meeting-dialog";
+import { RescheduleMeetingDialog } from "@/components/visionario/reunioes/reschedule-meeting-dialog";
 import { GeneratedWorkItemsCard } from "@/components/visionario/reunioes/generated-work-items-card";
 import { cancelMeetingAction, deleteMeetingAction } from "@/lib/supabase/meetings-actions";
-import { formatDateLong } from "@/lib/format";
+import { formatDateLong, todayKeySaoPaulo } from "@/lib/format";
+import { isOpenMeeting, isOverdueMeeting } from "@/lib/meeting-status";
 import type { Client, Meeting, SpaceMemberProfile, WorkItem } from "@/types/database.types";
 
 export function MeetingDetailClient({
@@ -44,6 +46,7 @@ export function MeetingDetailClient({
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [concludeOpen, setConcludeOpen] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
 
   const nameById = new Map(members.map((m) => [m.id, m.name]));
   const responsibleName = nameById.get(meeting.responsible_id) ?? "—";
@@ -52,7 +55,8 @@ export function MeetingDetailClient({
     .map((id) => nameById.get(id))
     .filter((n): n is string => !!n);
 
-  const isOpenMeeting = meeting.status === "agendada" || meeting.status === "em_andamento";
+  const open = isOpenMeeting(meeting);
+  const overdue = isOverdueMeeting(meeting, todayKeySaoPaulo());
   const hasClientInfo = linkedClient || meeting.client_name || meeting.contact_name || meeting.contact_phone;
   const hasAgendaInfo = meeting.agenda || meeting.description;
 
@@ -72,6 +76,18 @@ export function MeetingDetailClient({
         description={`${formatDateLong(meeting.meeting_date)} às ${meeting.start_time.slice(0, 5)}`}
         actions={<StatusBadge status={meeting.status} />}
       />
+
+      {overdue && (
+        <Card className="border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
+          A data desta reunião já passou e ela ainda está agendada. Conclua, remarque ou cancele para manter a
+          agenda em dia.
+        </Card>
+      )}
+      {meeting.status === "cancelada" && (
+        <Card className="border-destructive/40 bg-destructive/10 p-3 text-sm text-foreground">
+          Esta reunião foi cancelada. Ela continua no histórico, mas não conta mais na agenda.
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="flex flex-col gap-3 p-4">
@@ -252,12 +268,17 @@ export function MeetingDetailClient({
             <Pencil className="h-4 w-4" /> Editar
           </Button>
         )}
-        {permissions.canConclude && isOpenMeeting && (
+        {permissions.canConclude && open && (
           <Button size="sm" onClick={() => setConcludeOpen(true)}>
             <CheckCircle2 className="h-4 w-4" /> Concluir reunião
           </Button>
         )}
-        {permissions.canEdit && isOpenMeeting && (
+        {permissions.canEdit && open && (
+          <Button variant="outline" size="sm" onClick={() => setRescheduleOpen(true)}>
+            <CalendarClock className="h-4 w-4" /> Adiar / remarcar
+          </Button>
+        )}
+        {permissions.canEdit && open && (
           <ConfirmActionButton
             label={
               <>
@@ -302,6 +323,9 @@ export function MeetingDetailClient({
       )}
       {permissions.canConclude && (
         <ConcludeMeetingDialog open={concludeOpen} onOpenChange={setConcludeOpen} meeting={meeting} />
+      )}
+      {permissions.canEdit && (
+        <RescheduleMeetingDialog open={rescheduleOpen} onOpenChange={setRescheduleOpen} meeting={meeting} />
       )}
     </div>
   );

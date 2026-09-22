@@ -56,6 +56,47 @@ function validateInput(input: MeetingFormInput): string | null {
   return null;
 }
 
+/** Status em que a reunião ainda está "aberta" (pode ser concluída, remarcada ou cancelada). */
+const OPEN_STATUSES = ["agendada", "em_andamento"] as const;
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/;
+
+/**
+ * Tudo que mostra reuniões: a listagem, o detalhe e as telas de "Hoje"
+ * (`/hoje` e `/`, via `getTodayMeetingsForHoje`). Revalidar todas garante
+ * que concluir/cancelar/remarcar reflita na hora nos cards e filtros.
+ */
+function revalidateMeetingPaths(meetingId?: string) {
+  revalidatePath("/visionario/reunioes");
+  if (meetingId) revalidatePath(`/visionario/reunioes/${meetingId}`);
+  revalidatePath("/hoje");
+  revalidatePath("/");
+}
+
+/**
+ * Quando um UPDATE guardado por `status in (agendada, em_andamento)` não
+ * volta linha nenhuma, diferencia "não existe/sem acesso" de "já foi
+ * encerrada" — só pra mensagem de erro ficar útil.
+ */
+async function closedMeetingError(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  meetingId: string,
+  spaceId: string
+): Promise<string> {
+  const { data } = await supabase
+    .from("meetings")
+    .select("status")
+    .eq("id", meetingId)
+    .eq("space_id", spaceId)
+    .maybeSingle();
+
+  if (!data) return "Reunião não encontrada.";
+  if (data.status === "realizada") return "Esta reunião já foi concluída.";
+  if (data.status === "cancelada") return "Esta reunião já foi cancelada.";
+  return "Não foi possível atualizar a reunião. Verifique suas permissões.";
+}
+
 /**
  * `clientId`, quando informado, precisa mesmo ser um cliente do MESMO
  * space — a FK de `meetings.client_id` só garante que o id existe em
@@ -126,7 +167,7 @@ export async function createMeetingAction(input: MeetingFormInput): Promise<Meet
 
   if (participantsError) return { error: participantsError.message };
 
-  revalidatePath("/visionario/reunioes");
+  revalidateMeetingPaths(meeting.id);
   return { success: "Reunião criada.", meetingId: meeting.id };
 }
 
@@ -202,8 +243,7 @@ export async function updateMeetingAction(
     if (removeError) return { error: removeError.message };
   }
 
-  revalidatePath("/visionario/reunioes");
-  revalidatePath(`/visionario/reunioes/${meetingId}`);
+  revalidateMeetingPaths(meetingId);
   return { success: "Reunião atualizada." };
 }
 
@@ -224,14 +264,14 @@ export async function concludeMeetingAction(
     })
     .eq("id", meetingId)
     .eq("space_id", space.id)
+    .in("status", OPEN_STATUSES)
     .select("id")
     .maybeSingle();
 
   if (error) return { error: error.message };
-  if (!data) return { error: "Reunião não encontrada." };
+  if (!data) return { error: await closedMeetingError(supabase, meetingId, space.id) };
 
-  revalidatePath("/visionario/reunioes");
-  revalidatePath(`/visionario/reunioes/${meetingId}`);
+  revalidateMeetingPaths(meetingId);
   return { success: "Reunião concluída." };
 }
 
@@ -244,15 +284,63 @@ export async function cancelMeetingAction(meetingId: string): Promise<MeetingAct
     .update({ status: "cancelada" })
     .eq("id", meetingId)
     .eq("space_id", space.id)
+    .in("status", OPEN_STATUSES)
     .select("id")
     .maybeSingle();
 
   if (error) return { error: error.message };
-  if (!data) return { error: "Reunião não encontrada." };
+  if (!data) return { error: await closedMeetingError(supabase, meetingId, space.id) };
 
-  revalidatePath("/visionario/reunioes");
-  revalidatePath(`/visionario/reunioes/${meetingId}`);
+  revalidateMeetingPaths(meetingId);
   return { success: "Reunião cancelada." };
+}
+
+export type RescheduleMeetingInput = {
+  meetingDate: string; // yyyy-mm-dd
+  startTime: string; // HH:mm
+  endTime?: string;
+};
+
+/**
+ * Adiar/remarcar: só troca data/horário e mantém (ou volta) a reunião como
+ * `agendada` — uma reunião "em andamento" que é remarcada deixa de estar em
+ * andamento. Reuniões já realizadas/canceladas não podem ser remarcadas: o
+ * filtro por status no UPDATE garante isso mesmo sem confiar na UI. Mesma
+ * permissão/RLS de editar (`reunioes.edit`).
+ */
+export async function rescheduleMeetingAction(
+  meetingId: string,
+  input: RescheduleMeetingInput
+): Promise<MeetingActionState> {
+  const { space } = await requireModulePermission(VISIONARIO_DEV_SLUG, "reunioes", "edit");
+
+  if (!DATE_RE.test(input.meetingDate)) return { error: "Informe uma data válida." };
+  if (!TIME_RE.test(input.startTime)) return { error: "Informe o horário inicial." };
+  if (input.endTime && !TIME_RE.test(input.endTime)) return { error: "Horário final inválido." };
+  if (input.endTime && input.endTime.slice(0, 5) <= input.startTime.slice(0, 5)) {
+    return { error: "O horário final precisa ser depois do inicial." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("meetings")
+    .update({
+      meeting_date: input.meetingDate,
+      start_time: input.startTime,
+      end_time: input.endTime || null,
+      status: "agendada",
+    })
+    .eq("id", meetingId)
+    .eq("space_id", space.id)
+    .in("status", OPEN_STATUSES)
+    .select("id")
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!data) return { error: await closedMeetingError(supabase, meetingId, space.id) };
+
+  revalidateMeetingPaths(meetingId);
+  return { success: "Reunião remarcada." };
 }
 
 /**
@@ -342,6 +430,6 @@ export async function deleteMeetingAction(meetingId: string): Promise<MeetingAct
 
   if (error) return { error: error.message };
 
-  revalidatePath("/visionario/reunioes");
+  revalidateMeetingPaths();
   return { success: "Reunião excluída." };
 }
