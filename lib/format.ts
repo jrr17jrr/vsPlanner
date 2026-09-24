@@ -6,6 +6,16 @@ export function formatCurrency(value: number): string {
   });
 }
 
+/**
+ * Lê um valor digitado em pt-BR ("1.234,56", "400,50", "99") ou com ponto
+ * decimal ("400.50"). Retorna NaN se não for número.
+ */
+export function parseMoneyInput(value: string): number {
+  const normalized = value.trim().replace(/\s|R\$/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".");
+  if (normalized === "") return NaN;
+  return Number(normalized);
+}
+
 export function formatCurrencyCompact(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 1_000_000) return `R$ ${(value / 1_000_000).toFixed(1)}M`;

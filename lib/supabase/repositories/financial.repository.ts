@@ -81,12 +81,13 @@ export async function getFinancialCharge(id: string): Promise<FinancialCharge | 
   return data;
 }
 
-export async function listFinancialChargesForClient(clientId: string): Promise<FinancialCharge[]> {
+export async function listFinancialChargesForClient(clientId: string, spaceId: string): Promise<FinancialCharge[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("financial_charges")
     .select("*")
     .eq("client_id", clientId)
+    .eq("space_id", spaceId)
     .order("due_date", { ascending: false });
   if (error) throw error;
   return data ?? [];
@@ -98,6 +99,19 @@ export async function listFinancialChargesByOrigin(originId: string): Promise<Fi
     .from("financial_charges")
     .select("*")
     .eq("origin_id", originId)
+    .order("due_date", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function listFinancialChargesByOrigins(originIds: string[], spaceId: string): Promise<FinancialCharge[]> {
+  if (originIds.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("financial_charges")
+    .select("*")
+    .in("origin_id", originIds)
+    .eq("space_id", spaceId)
     .order("due_date", { ascending: true });
   if (error) throw error;
   return data ?? [];
@@ -115,10 +129,14 @@ export async function listFinancialPayments(spaceId: string): Promise<FinancialP
   return data ?? [];
 }
 
-export async function listFinancialPaymentsForCharges(chargeIds: string[]): Promise<FinancialPayment[]> {
+export async function listFinancialPaymentsForCharges(chargeIds: string[], spaceId: string): Promise<FinancialPayment[]> {
   if (chargeIds.length === 0) return [];
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.from("financial_payments").select("*").in("charge_id", chargeIds);
+  const { data, error } = await supabase
+    .from("financial_payments")
+    .select("*")
+    .in("charge_id", chargeIds)
+    .eq("space_id", spaceId);
   if (error) throw error;
   return data ?? [];
 }

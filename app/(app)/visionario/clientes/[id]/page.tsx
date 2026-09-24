@@ -12,17 +12,20 @@ import { listWorkItemsForClient } from "@/lib/supabase/repositories/work-items.r
 import { listClientSitesForClient } from "@/lib/supabase/repositories/sites.repository";
 import { listSalesForClient } from "@/lib/supabase/repositories/vendors.repository";
 import {
+  listFinancialAccounts,
   listFinancialChargesForClient,
+  listFinancialOrigins,
   listFinancialPaymentsForCharges,
 } from "@/lib/supabase/repositories/financial.repository";
+import { prepareFinancialSpace } from "@/lib/supabase/financial-page-data";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { ClientDetailClient } from "@/components/visionario/clientes/client-detail-client";
 
 /**
  * Cliente 360 — cada bloco extra (trabalhos, financeiro, sites, vendas)
  * só é buscado se o usuário tiver a permissão do módulo correspondente.
- * Sem `financeiro.view`, os dados financeiros do cliente nem chegam a
- * ser consultados aqui.
+ * O resumo financeiro usa as MESMAS cobranças/pagamentos do Financeiro
+ * (filtradas por client_id), nunca uma cópia.
  */
 export default async function ClientDetailPage({
   params,
@@ -30,7 +33,7 @@ export default async function ClientDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { space } = await requireModulePermission(VISIONARIO_DEV_SLUG, "clientes", "view");
+  const { profile, space } = await requireModulePermission(VISIONARIO_DEV_SLUG, "clientes", "view");
 
   const client = await getClient(id);
   if (!client || client.space_id !== space.id) {
@@ -49,6 +52,7 @@ export default async function ClientDetailPage({
     canDeleteContract,
     canViewTrabalhos,
     canViewFinanceiro,
+    canEditFinanceiro,
     canViewSites,
     canViewVendedores,
   ] = await Promise.all([
@@ -63,23 +67,31 @@ export default async function ClientDetailPage({
     hasModulePermission(space.id, "servicos", "delete"),
     hasModulePermission(space.id, "trabalhos", "view"),
     hasModulePermission(space.id, "financeiro", "view"),
+    hasModulePermission(space.id, "financeiro", "edit"),
     hasModulePermission(space.id, "sites", "view"),
     hasModulePermission(space.id, "vendedores", "view"),
   ]);
 
-  const [workItems, sites, sales] = await Promise.all([
+  if (canViewFinanceiro) await prepareFinancialSpace(space, profile.id);
+
+  const [workItems, sites, sales, charges, origins, accounts] = await Promise.all([
     canViewTrabalhos ? listWorkItemsForClient(client.id) : Promise.resolve([]),
     canViewSites ? listClientSitesForClient(client.id) : Promise.resolve([]),
     canViewVendedores ? listSalesForClient(client.id) : Promise.resolve([]),
+    canViewFinanceiro ? listFinancialChargesForClient(client.id, space.id) : Promise.resolve([]),
+    canViewFinanceiro ? listFinancialOrigins(space.id) : Promise.resolve([]),
+    canEditFinanceiro ? listFinancialAccounts(space.id) : Promise.resolve([]),
   ]);
 
-  const charges = canViewFinanceiro ? await listFinancialChargesForClient(client.id) : [];
-  const payments = canViewFinanceiro ? await listFinancialPaymentsForCharges(charges.map((c) => c.id)) : [];
+  const payments = canViewFinanceiro ? await listFinancialPaymentsForCharges(charges.map((c) => c.id), space.id) : [];
+  const contractIdsWithFinance = origins
+    .filter((o) => o.client_service_id && o.is_active)
+    .map((o) => o.client_service_id as string);
 
   return (
     <ClientDetailClient
       client={client}
-      contracts={contracts}
+      contracts={contracts.filter((c) => c.space_id === space.id)}
       services={services}
       meetings={meetings}
       members={members}
@@ -88,6 +100,8 @@ export default async function ClientDetailPage({
       sales={sales}
       charges={charges}
       payments={payments}
+      accounts={accounts}
+      contractIdsWithFinance={contractIdsWithFinance}
       permissions={{
         canEditClient,
         canDeleteClient,
@@ -96,6 +110,7 @@ export default async function ClientDetailPage({
         canDeleteContract,
         canViewTrabalhos,
         canViewFinanceiro,
+        canEditFinanceiro,
         canViewSites,
         canViewVendedores,
       }}

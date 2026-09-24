@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { MoneyCard } from "@/components/shared/money-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { RevenueChart } from "@/components/visionario/financeiro/revenue-chart";
-import { formatCurrency, currentMonthKeySaoPaulo } from "@/lib/format";
+import { formatCurrency, formatDate, currentMonthKeySaoPaulo } from "@/lib/format";
 import { monthKeysForPeriod, monthKeyLabel } from "@/lib/periods";
 
 /**
@@ -62,7 +62,7 @@ export default async function TiktokOverviewPage() {
                 <div key={p.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">{charge?.description ?? "Movimentação"}</p>
-                    <p className="text-xs text-muted-foreground">{p.payment_date}</p>
+                    <p className="text-xs text-muted-foreground">{formatDate(p.payment_date)}</p>
                   </div>
                   <span className={`text-sm font-medium ${charge?.kind === "entrada" ? "text-success" : "text-destructive"}`}>
                     {charge?.kind === "entrada" ? "+" : "-"}{formatCurrency(p.amount)}

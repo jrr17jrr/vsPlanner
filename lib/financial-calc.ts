@@ -1,5 +1,13 @@
-import type { FinancialAccount, FinancialCharge, FinancialOrigin, FinancialPayment } from "@/types/database.types";
+import type {
+  ClientService,
+  FinancialAccount,
+  FinancialCharge,
+  FinancialKind,
+  FinancialOrigin,
+  FinancialPayment,
+} from "@/types/database.types";
 import { toDateKey, todayKeySaoPaulo } from "@/lib/format";
+import { monthlyFactor, nextOccurrence, parseDateKey } from "@/lib/recurrence";
 
 /**
  * Único lugar onde o Financeiro é CALCULADO. Dashboard, gráficos, contas a
@@ -12,20 +20,22 @@ import { toDateKey, todayKeySaoPaulo } from "@/lib/format";
 
 export type ChargePaymentStatus = "cancelado" | "pendente" | "parcial" | "pago";
 
+const roundCents = (value: number) => Math.round(value * 100) / 100;
+
 export function paidAmountFor(chargeId: string, payments: FinancialPayment[]): number {
-  return payments.filter((p) => p.charge_id === chargeId).reduce((sum, p) => sum + p.amount, 0);
+  return roundCents(payments.filter((p) => p.charge_id === chargeId).reduce((sum, p) => sum + Number(p.amount), 0));
 }
 
 export function chargeStatus(charge: FinancialCharge, payments: FinancialPayment[]): ChargePaymentStatus {
   if (charge.status === "cancelado") return "cancelado";
   const paid = paidAmountFor(charge.id, payments);
   if (paid <= 0) return "pendente";
-  if (paid >= charge.amount) return "pago";
+  if (paid >= roundCents(Number(charge.amount))) return "pago";
   return "parcial";
 }
 
 export function remainingAmount(charge: FinancialCharge, payments: FinancialPayment[]): number {
-  return Math.max(0, charge.amount - paidAmountFor(charge.id, payments));
+  return Math.max(0, roundCents(Number(charge.amount) - paidAmountFor(charge.id, payments)));
 }
 
 /**
@@ -182,42 +192,117 @@ export function historicalSeries(charges: FinancialCharge[], monthKeys: string[]
   return monthKeys.map((key) => ({ month: key, ...monthSummary(charges, key) }));
 }
 
-const FREQUENCY_MONTHLY_FACTOR: Record<string, (interval: number | null) => number> = {
-  semanal: () => 52 / 12,
-  mensal: () => 1,
-  a_cada_x_meses: (interval) => 1 / Math.max(1, interval ?? 1),
-  trimestral: () => 1 / 3,
-  semestral: () => 1 / 6,
-  anual: () => 1 / 12,
-  customizado: (interval) => 1 / Math.max(1, interval ?? 1),
-};
+/** Contrato recorrente que conta como receita recorrente AGORA (pausado/encerrado não conta). */
+export function isActiveRecurringContract(contract: ClientService): boolean {
+  return contract.billing_type === "recorrente" && contract.status === "ativo" && !!contract.frequency;
+}
+
+/** Valor mensal equivalente de um contrato (R$1.200/ano → R$100/mês). Único/parcelado = 0. */
+export function contractMonthlyValue(contract: ClientService): number {
+  if (!isActiveRecurringContract(contract)) return 0;
+  return contract.price * monthlyFactor(contract.frequency!);
+}
 
 /**
- * MRR: soma normalizada pra mensal de todas as origens ENTRADA/recorrente
- * ativas, usando o valor da cobrança gerada mais recente de cada origem
- * (o "preço atual") — deliberadamente diferente do histórico já cobrado.
- * MRR responde "quanto eu faturaria por mês hoje", não "quanto eu já
- * faturei" — por isso nunca usa `financial_charges` antigas de origens já
- * reajustadas.
+ * Receita Recorrente Mensal (MRR) — "quanto entra por mês hoje", nunca
+ * "quanto já entrou" (isso é caixa, ver `monthCashSummary`).
+ *
+ * Fonte principal: os CONTRATOS (`client_services`) recorrentes ativos —
+ * é o preço contratado atual, pausado/encerrado fica de fora
+ * automaticamente. Origens de entrada recorrentes SEM contrato (ex.:
+ * salário no Pessoal, parceria fixa no TikTok) também entram, pelo valor
+ * da cobrança mais recente. Uma origem ligada a um contrato presente em
+ * `contracts` nunca é somada duas vezes.
  */
-export function calculateMRR(origins: FinancialOrigin[], charges: FinancialCharge[]) {
-  const recurringActive = origins.filter(
-    (o) => o.kind === "entrada" && o.origin_type === "recorrente" && o.is_active
-  );
-
+export function calculateMRR(origins: FinancialOrigin[], charges: FinancialCharge[], contracts: ClientService[] = []) {
   let mrr = 0;
   let recurringCount = 0;
+
+  const contractIds = new Set(contracts.map((c) => c.id));
+  for (const contract of contracts) {
+    if (!isActiveRecurringContract(contract)) continue;
+    mrr += contractMonthlyValue(contract);
+    recurringCount += 1;
+  }
+
+  const recurringActive = origins.filter(
+    (o) =>
+      o.kind === "entrada" &&
+      o.origin_type === "recorrente" &&
+      o.is_active &&
+      !(o.client_service_id && contractIds.has(o.client_service_id))
+  );
+
   for (const origin of recurringActive) {
     const originCharges = charges
       .filter((c) => c.origin_id === origin.id && c.status !== "cancelado")
       .sort((a, b) => b.due_date.localeCompare(a.due_date));
     const latest = originCharges[0];
     if (!latest) continue;
-    const factor = origin.recurrence_frequency
-      ? FREQUENCY_MONTHLY_FACTOR[origin.recurrence_frequency]?.(origin.recurrence_interval) ?? 1
-      : 1;
+    const factor = origin.recurrence_frequency ? monthlyFactor(origin.recurrence_frequency, origin.recurrence_interval) : 1;
     mrr += latest.amount * factor;
     recurringCount += 1;
   }
-  return { mrr, recurringCount };
+  return { mrr: Math.round(mrr * 100) / 100, recurringCount };
+}
+
+/** Total ainda em aberto (restante, não o valor cheio) de todas as cobranças ativas de um tipo. */
+export function pendingTotal(charges: FinancialCharge[], payments: FinancialPayment[], kind: FinancialKind): number {
+  return charges
+    .filter((c) => c.kind === kind && c.status !== "cancelado")
+    .reduce((sum, c) => sum + remainingAmount(c, payments), 0);
+}
+
+/** Próximas cobranças em aberto (inclui atrasadas no topo), já com restante calculado. */
+export function upcomingOpenCharges(
+  charges: FinancialCharge[],
+  payments: FinancialPayment[],
+  kind: FinancialKind,
+  limit = 5,
+  today: string = todayKeySaoPaulo()
+): ReceivablePayable[] {
+  return listChargesForKind(charges, payments, kind, today)
+    .filter((r) => r.status !== "pago")
+    .slice(0, limit);
+}
+
+/**
+ * Resumo financeiro de um cliente — as MESMAS cobranças/pagamentos do
+ * Financeiro, só filtradas por `client_id` (nada duplicado).
+ */
+export function clientFinancialSummary(
+  contracts: ClientService[],
+  charges: FinancialCharge[],
+  payments: FinancialPayment[]
+) {
+  const active = charges.filter((c) => c.status !== "cancelado" && c.kind === "entrada");
+  const chargeIds = new Set(active.map((c) => c.id));
+  const clientPayments = payments.filter((p) => chargeIds.has(p.charge_id));
+  const pending = active.filter((c) => chargeStatus(c, payments) !== "pago");
+  return {
+    mrr: contracts.reduce((s, c) => s + contractMonthlyValue(c), 0),
+    aReceber: pending.reduce((s, c) => s + remainingAmount(c, payments), 0),
+    totalRecebido: clientPayments.reduce((s, p) => s + p.amount, 0),
+    pendingCount: pending.length,
+    payments: [...clientPayments].sort((a, b) => b.payment_date.localeCompare(a.payment_date)),
+  };
+}
+
+/**
+ * Próxima renovação de um domínio integrado ao financeiro: a cobrança em
+ * aberto mais antiga da origem; se todas já foram pagas, a próxima
+ * ocorrência depois da última. Sem integração, vale `fallback`.
+ */
+export function nextRenewalFromCharges(
+  originCharges: FinancialCharge[],
+  payments: FinancialPayment[],
+  periodMonths: number,
+  fallback: string | null
+): string | null {
+  const active = originCharges.filter((c) => c.status !== "cancelado").sort((a, b) => a.due_date.localeCompare(b.due_date));
+  if (active.length === 0) return fallback;
+  const open = active.find((c) => chargeStatus(c, payments) !== "pago");
+  if (open) return open.due_date;
+  const last = active[active.length - 1];
+  return nextOccurrence(last.due_date, "a_cada_x_meses", periodMonths, parseDateKey(active[0].due_date).d);
 }

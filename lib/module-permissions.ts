@@ -3,7 +3,7 @@ import type { ModulePermissionAction, ModulePermissionModule, SpaceRole } from "
 /**
  * Metadados dos módulos/ações pro Painel Dev renderizar os checkboxes.
  * As ações listadas aqui são só o que faz sentido mostrar por módulo
- * (ex: Sites & Domínios não tem "criar"/"concluir") — o banco aceita as 5
+ * (ex: Clientes não tem "concluir") — o banco aceita as 5
  * ações pra qualquer módulo (migration 003), a restrição é só de UI.
  */
 export const MODULE_PERMISSION_GROUPS: {
@@ -22,7 +22,7 @@ export const MODULE_PERMISSION_GROUPS: {
   { key: "reunioes", label: "Reuniões", actions: ["view", "create", "edit", "conclude", "delete"] },
   { key: "vendedores", label: "Vendedores", actions: ["view", "create", "edit", "delete"] },
   { key: "financeiro", label: "Financeiro", actions: ["view", "create", "edit", "delete"] },
-  { key: "sites", label: "Sites & Domínios", actions: ["view", "edit"] },
+  { key: "sites", label: "Sites e Domínios", actions: ["view", "create", "edit", "delete"] },
 ];
 
 export const MODULE_PERMISSION_ACTION_LABELS: Record<ModulePermissionAction, string> = {

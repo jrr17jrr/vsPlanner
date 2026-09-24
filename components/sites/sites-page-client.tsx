@@ -75,8 +75,8 @@ export function SitesPageClient({
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Sites & Domínios"
-        description="Infraestrutura web de todos os clientes."
+        title="Sites"
+        description="Sites e projetos web dos clientes. Domínios próprios ficam em Domínios."
         actions={
           permissions.canCreate ? (
             <Button size="sm" onClick={() => { setEditing(undefined); setFormOpen(true); }}>

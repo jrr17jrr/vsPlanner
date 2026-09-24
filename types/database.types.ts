@@ -170,8 +170,9 @@ export type Service = {
 };
 
 /** Espelha `public.client_services` (migration 005) — o "contrato". */
-export type ClientServiceBillingType = "unico" | "recorrente";
+export type ClientServiceBillingType = "unico" | "recorrente" | "parcelado";
 export type ClientServiceFrequency = "semanal" | "mensal" | "anual";
+/** `inativo` é exibido como "Pausado" e `cancelado` como "Encerrado" (migration 009). */
 export type ClientServiceStatus = "ativo" | "inativo" | "cancelado";
 
 export type ClientService = {
@@ -184,6 +185,10 @@ export type ClientService = {
   frequency: ClientServiceFrequency | null;
   due_day: number | null;
   start_date: string;
+  /** Migration 009 — só para parcelado (price = valor total). */
+  installment_count: number | null;
+  /** Migration 009 — vencimento do único / 1º vencimento do parcelado. */
+  first_due_date: string | null;
   status: ClientServiceStatus;
   notes: string | null;
   created_by: string;
@@ -519,6 +524,32 @@ export type ClientSite = {
 };
 
 /**
+ * Espelha `public.domains` (migration 009) — domínios que o space possui.
+ * Custos de renovação ficam no Financeiro via `financial_origin_id`.
+ */
+export type DomainStatus = "ativo" | "expirado" | "cancelado" | "transferido";
+
+export type Domain = {
+  id: string;
+  space_id: string;
+  domain: string;
+  registrar: string | null;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  period_months: number;
+  renewal_date: string | null;
+  renewal_price: number | null;
+  status: DomainStatus;
+  notes: string | null;
+  client_id: string | null;
+  site_id: string | null;
+  financial_origin_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
  * Retorno de `admin_list_users()` (migration 002) — profile + `email` e
  * `last_sign_in_at` de `auth.users` (inacessíveis diretamente pelo client,
  * mesmo com RLS, por isso vêm de uma função `security definer`).
@@ -741,6 +772,12 @@ export type Database = {
         Row: ClientSite;
         Insert: Partial<ClientSite> & { space_id: string; project_name: string; created_by: string };
         Update: Partial<Omit<ClientSite, "id">>;
+        Relationships: [];
+      };
+      domains: {
+        Row: Domain;
+        Insert: Partial<Domain> & { space_id: string; domain: string; created_by: string };
+        Update: Partial<Omit<Domain, "id">>;
         Relationships: [];
       };
     };

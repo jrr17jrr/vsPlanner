@@ -72,6 +72,9 @@ function revalidateMeetingPaths(meetingId?: string) {
   if (meetingId) revalidatePath(`/visionario/reunioes/${meetingId}`);
   revalidatePath("/hoje");
   revalidatePath("/");
+  // Visão Geral (próxima reunião / reuniões hoje) e a ficha do cliente.
+  revalidatePath("/visionario");
+  revalidatePath("/visionario/clientes/[id]", "page");
 }
 
 /**

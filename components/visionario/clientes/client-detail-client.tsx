@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,24 +16,57 @@ import {
   Briefcase,
   Wallet,
   ExternalLink,
+  MoreVertical,
+  PauseCircle,
+  PlayCircle,
+  XCircle,
+  Repeat,
+  HandCoins,
+  CheckCircle2,
+  Receipt,
+  Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MoneyCard } from "@/components/shared/money-card";
 import { ConfirmActionButton } from "@/components/shared/confirm-action-button";
+import { AsyncConfirmDialog } from "@/components/shared/async-confirm-dialog";
 import { WhatsAppButton } from "@/components/visionario/reunioes/whatsapp-button";
 import { ClientFormDialog } from "@/components/visionario/clientes/client-form-dialog";
 import { ContractServiceDialog } from "@/components/visionario/clientes/contract-service-dialog";
+import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
 import { deleteClientAction } from "@/lib/supabase/clients-actions";
-import { deleteClientServiceAction } from "@/lib/supabase/client-services-actions";
-import { chargeStatus, remainingAmount } from "@/lib/financial-calc";
-import { formatCurrency, formatDate, formatDateLong, toDateKey } from "@/lib/format";
+import {
+  deleteClientServiceAction,
+  generateContractChargesAction,
+  setClientServiceStatusAction,
+} from "@/lib/supabase/client-services-actions";
+import { chargeStatus, clientFinancialSummary, contractMonthlyValue, remainingAmount } from "@/lib/financial-calc";
+import {
+  CONTRACT_STATUS_BADGE,
+  PAYMENT_METHOD_LABEL,
+  chargeBadgeStatus,
+  contractBillingLabel,
+  contractPriceSuffix,
+} from "@/lib/finance-labels";
+import { firstDueOnOrAfter } from "@/lib/recurrence";
+import { formatCurrency, formatDate, formatDateLong, todayKeySaoPaulo } from "@/lib/format";
 import type {
   Client,
   ClientService,
+  ClientServiceStatus,
+  FinancialAccount,
   FinancialCharge,
   FinancialPayment,
   Meeting,
@@ -44,11 +77,10 @@ import type {
   WorkItem,
 } from "@/types/database.types";
 
-const FREQUENCY_LABEL: Record<string, string> = {
-  semanal: "Semanal",
-  mensal: "Mensal",
-  anual: "Anual",
-};
+type ContractAction =
+  | { type: "status"; contract: ClientService; status: ClientServiceStatus }
+  | { type: "delete"; contract: ClientService }
+  | { type: "generate"; contract: ClientService };
 
 export function ClientDetailClient({
   client,
@@ -61,6 +93,8 @@ export function ClientDetailClient({
   sales,
   charges,
   payments,
+  accounts,
+  contractIdsWithFinance,
   permissions,
 }: {
   client: Client;
@@ -73,6 +107,8 @@ export function ClientDetailClient({
   sales: Sale[];
   charges: FinancialCharge[];
   payments: FinancialPayment[];
+  accounts: FinancialAccount[];
+  contractIdsWithFinance: string[];
   permissions: {
     canEditClient: boolean;
     canDeleteClient: boolean;
@@ -81,6 +117,7 @@ export function ClientDetailClient({
     canDeleteContract: boolean;
     canViewTrabalhos: boolean;
     canViewFinanceiro: boolean;
+    canEditFinanceiro: boolean;
     canViewSites: boolean;
     canViewVendedores: boolean;
   };
@@ -89,27 +126,93 @@ export function ClientDetailClient({
   const [editClientOpen, setEditClientOpen] = useState(false);
   const [contractFormOpen, setContractFormOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<ClientService | undefined>();
+  const [pendingAction, setPendingAction] = useState<ContractAction | null>(null);
+  const [markingCharge, setMarkingCharge] = useState<FinancialCharge | null>(null);
 
-  const activeServices = services.filter((s) => s.status === "ativo");
+  const todayKey = todayKeySaoPaulo();
+  const activeCatalog = services.filter((s) => s.status === "ativo");
+  const serviceById = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
+  const financeLinked = useMemo(() => new Set(contractIdsWithFinance), [contractIdsWithFinance]);
+  const responsibleName = client.responsible_id ? members.find((m) => m.id === client.responsible_id)?.name : undefined;
 
-  const serviceById = new Map(services.map((s) => [s.id, s]));
-  const responsibleName = client.responsible_id
-    ? members.find((m) => m.id === client.responsible_id)?.name
-    : undefined;
+  const summary = useMemo(() => clientFinancialSummary(contracts, charges, payments), [contracts, charges, payments]);
+  const activeContracts = contracts.filter((c) => c.status === "ativo");
 
-  const activeContracts = contracts.filter((c) => c.status !== "cancelado");
-  const monthlyValue = activeContracts
-    .filter((c) => c.billing_type === "recorrente" && c.frequency === "mensal")
-    .reduce((sum, c) => sum + c.price, 0);
+  const openCharges = useMemo(
+    () =>
+      charges
+        .filter((c) => c.kind === "entrada" && c.status !== "cancelado" && chargeStatus(c, payments) !== "pago")
+        .sort((a, b) => a.due_date.localeCompare(b.due_date)),
+    [charges, payments]
+  );
+  const chargeById = useMemo(() => new Map(charges.map((c) => [c.id, c])), [charges]);
 
-  const todayKey = toDateKey(new Date());
+  function nextDueFor(contract: ClientService): string | null {
+    const open = openCharges.find((c) => c.client_service_id === contract.id);
+    if (open) return open.due_date;
+    if (contract.status === "ativo" && contract.billing_type === "recorrente" && contract.due_day) {
+      return firstDueOnOrAfter(todayKey > contract.start_date ? todayKey : contract.start_date, contract.due_day);
+    }
+    return null;
+  }
+
   const nextMeeting = meetings
-    .filter((m) => (m.status === "agendada" || m.status === "em_andamento") && m.meeting_date >= todayKey)
+    .filter((m) => m.status === "agendada" && m.meeting_date >= todayKey)
     .sort((a, b) => (a.meeting_date + a.start_time).localeCompare(b.meeting_date + b.start_time))[0];
-
   const pendingWorkItems = workItems.filter((w) => w.status !== "concluido");
-  const pendingCharges = charges.filter((c) => c.status !== "cancelado" && chargeStatus(c, payments) !== "pago");
-  const pendingAmount = pendingCharges.reduce((sum, c) => sum + remainingAmount(c, payments), 0);
+
+  async function runContractAction(action: ContractAction) {
+    if (action.type === "status") return setClientServiceStatusAction(action.contract.id, client.id, action.status);
+    if (action.type === "generate") return generateContractChargesAction(action.contract.id, client.id);
+    return deleteClientServiceAction(action.contract.id, client.id);
+  }
+
+  const confirmCopy = (() => {
+    if (!pendingAction) return null;
+    const name = serviceById.get(pendingAction.contract.service_id)?.name ?? "serviço";
+    if (pendingAction.type === "delete") {
+      return {
+        title: `Excluir "${name}" deste cliente?`,
+        description:
+          "Só é possível se nenhuma cobrança dele tiver pagamento — nesse caso as cobranças em aberto também são removidas. Com pagamentos, encerre em vez de excluir.",
+        confirmLabel: "Excluir",
+        destructive: true,
+      };
+    }
+    if (pendingAction.type === "generate") {
+      return {
+        title: `Gerar cobranças de "${name}"?`,
+        description:
+          "Este serviço foi contratado antes da integração com o Financeiro. As cobranças começam na competência atual (meses anteriores não são lançados).",
+        confirmLabel: "Gerar cobranças",
+        destructive: false,
+      };
+    }
+    if (pendingAction.status === "cancelado") {
+      return {
+        title: `Encerrar "${name}"?`,
+        description:
+          "Deixa de contar na receita recorrente e as cobranças futuras ainda não pagas são canceladas. Cobranças atrasadas e o histórico de pagamentos são mantidos.",
+        confirmLabel: "Encerrar serviço",
+        destructive: true,
+      };
+    }
+    if (pendingAction.status === "inativo") {
+      return {
+        title: `Pausar "${name}"?`,
+        description:
+          "Deixa de contar na receita recorrente e para de gerar novas cobranças. Ao reativar, a cobrança recomeça na próxima competência.",
+        confirmLabel: "Pausar",
+        destructive: false,
+      };
+    }
+    return {
+      title: `Reativar "${name}"?`,
+      description: "Volta a contar na receita recorrente e as cobranças recomeçam a partir da próxima competência.",
+      confirmLabel: "Reativar",
+      destructive: false,
+    };
+  })();
 
   return (
     <div className="flex flex-col gap-4">
@@ -136,7 +239,7 @@ export function ClientDetailClient({
                   </>
                 }
                 title="Excluir este cliente?"
-                description="Isso remove o cliente permanentemente. Serviços contratados vinculados a ele também são removidos. Não pode ser desfeito."
+                description="Remove o cliente e os serviços contratados dele. Se já houver pagamentos registrados, a exclusão é bloqueada — inative o cliente para manter o histórico."
                 confirmLabel="Excluir"
                 onConfirm={async () => {
                   const result = await deleteClientAction(client.id);
@@ -178,55 +281,58 @@ export function ClientDetailClient({
         <TabsList className="flex-wrap">
           <TabsTrigger value="resumo">Resumo</TabsTrigger>
           <TabsTrigger value="servicos">Serviços contratados</TabsTrigger>
+          {permissions.canViewFinanceiro && <TabsTrigger value="financeiro">Financeiro</TabsTrigger>}
           <TabsTrigger value="reunioes">Reuniões</TabsTrigger>
           {permissions.canViewTrabalhos && <TabsTrigger value="trabalhos">Trabalhos</TabsTrigger>}
-          {permissions.canViewFinanceiro && <TabsTrigger value="financeiro">Financeiro</TabsTrigger>}
           {permissions.canViewSites && <TabsTrigger value="sites">Sites</TabsTrigger>}
           {permissions.canViewVendedores && <TabsTrigger value="vendas">Vendas</TabsTrigger>}
           <TabsTrigger value="observacoes">Observações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="resumo">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MoneyCard
+              label="Receita recorrente"
+              amount={summary.mrr}
+              icon={Repeat}
+              hint={`${activeContracts.length} serviço(s) ativo(s)`}
+            />
+            {permissions.canViewFinanceiro && (
+              <>
+                <MoneyCard
+                  label="A receber"
+                  amount={summary.aReceber}
+                  icon={HandCoins}
+                  tone={summary.aReceber > 0 ? "warning" : "default"}
+                  hint={`${summary.pendingCount} cobrança(s) pendente(s)`}
+                />
+                <MoneyCard label="Total recebido" amount={summary.totalRecebido} icon={Wallet} tone="success" />
+              </>
+            )}
             <Card className="p-4">
-              <p className="text-xs text-muted-foreground">Recorrência mensal</p>
-              <p className="mt-1 text-xl font-semibold text-foreground">{formatCurrency(monthlyValue)}</p>
-              <p className="text-xs text-muted-foreground">{activeContracts.length} serviço(s) ativo(s)</p>
+              <p className="text-xs font-medium text-muted-foreground">Próxima reunião</p>
+              {nextMeeting ? (
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {formatDate(nextMeeting.meeting_date)} às {nextMeeting.start_time.slice(0, 5)}
+                </p>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">Nenhuma agendada</p>
+              )}
             </Card>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Card className="p-4">
               <p className="text-xs text-muted-foreground">Cliente desde</p>
               <p className="mt-1 text-sm font-medium text-foreground">{formatDate(client.joined_at)}</p>
               {responsibleName && <p className="text-xs text-muted-foreground">Responsável: {responsibleName}</p>}
             </Card>
-            <Card className="p-4">
-              <p className="text-xs text-muted-foreground">Próxima reunião</p>
-              {nextMeeting ? (
-                <p className="mt-1 text-sm font-medium text-foreground">
-                  {formatDate(nextMeeting.meeting_date)} às {nextMeeting.start_time.slice(0, 5)}
-                </p>
-              ) : (
-                <p className="mt-1 text-sm text-muted-foreground">Nenhuma agendada</p>
-              )}
-            </Card>
+            {permissions.canViewTrabalhos && (
+              <Card className="p-4">
+                <p className="text-xs text-muted-foreground">Trabalhos pendentes</p>
+                <p className="mt-1 text-lg font-semibold text-foreground">{pendingWorkItems.length}</p>
+              </Card>
+            )}
           </div>
-          {(permissions.canViewTrabalhos || permissions.canViewFinanceiro) && (
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {permissions.canViewTrabalhos && (
-                <Card className="p-4">
-                  <p className="text-xs text-muted-foreground">Trabalhos pendentes</p>
-                  <p className="mt-1 text-lg font-semibold text-foreground">{pendingWorkItems.length}</p>
-                </Card>
-              )}
-              {permissions.canViewFinanceiro && (
-                <Card className="p-4">
-                  <p className="text-xs text-muted-foreground">Pendências financeiras</p>
-                  <p className={`mt-1 text-lg font-semibold ${pendingAmount > 0 ? "text-warning" : "text-foreground"}`}>
-                    {formatCurrency(pendingAmount)}
-                  </p>
-                </Card>
-              )}
-            </div>
-          )}
           <Card className="mt-3 p-4">
             <p className="mb-2 text-sm font-medium text-foreground">Contato</p>
             <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
@@ -240,76 +346,144 @@ export function ClientDetailClient({
                   <Mail className="h-3.5 w-3.5" /> {client.email}
                 </p>
               )}
+              {!client.phone && !client.email && <p className="text-muted-foreground">Nenhum contato cadastrado.</p>}
             </div>
           </Card>
         </TabsContent>
 
         <TabsContent value="servicos">
-          {permissions.canCreateContract && (
-            <div className="mb-2 flex flex-col items-end gap-1">
-              <Button
-                size="sm"
-                disabled={activeServices.length === 0}
-                onClick={() => {
-                  setEditingContract(undefined);
-                  setContractFormOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4" /> Contratar serviço
-              </Button>
-              {activeServices.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Cadastre um serviço ativo no catálogo (Serviços) antes.
-                </p>
-              )}
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Serviços contratados</h2>
+              <p className="text-xs text-muted-foreground">
+                Receita recorrente deste cliente: <span className="font-medium text-foreground">{formatCurrency(summary.mrr)}/mês</span>
+              </p>
             </div>
-          )}
+            {permissions.canCreateContract && (
+              <div className="flex flex-col items-start gap-1 sm:items-end">
+                <Button
+                  size="sm"
+                  disabled={activeCatalog.length === 0}
+                  onClick={() => {
+                    setEditingContract(undefined);
+                    setContractFormOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" /> Adicionar serviço
+                </Button>
+                {activeCatalog.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Cadastre um serviço ativo em{" "}
+                    <Link href="/visionario/servicos" className="text-primary hover:underline">
+                      Serviços
+                    </Link>{" "}
+                    antes.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {contracts.length === 0 ? (
-            <EmptyState title="Nenhum serviço contratado" />
+            <EmptyState icon={Briefcase} title="Nenhum serviço contratado" description="Adicione um serviço para começar a gerar cobranças e receita recorrente." />
           ) : (
             <div className="flex flex-col gap-2">
               {contracts.map((cs) => {
                 const svc = serviceById.get(cs.service_id);
+                const nextDue = nextDueFor(cs);
+                const monthly = contractMonthlyValue(cs);
+                const legacy = permissions.canViewFinanceiro && cs.status === "ativo" && !financeLinked.has(cs.id);
+                const canManage = permissions.canEditContract;
+                const hasMenu = canManage || permissions.canDeleteContract;
                 return (
-                  <div
-                    key={cs.id}
-                    className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{svc?.name ?? "Serviço"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {cs.billing_type === "recorrente"
-                          ? `${FREQUENCY_LABEL[cs.frequency ?? "mensal"]} · vence dia ${cs.due_day}`
-                          : "Pagamento único"}
-                        {" · desde "}
-                        {formatDate(cs.start_date)}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <StatusBadge status={cs.status} />
-                      <span className="text-sm font-medium">{formatCurrency(cs.price)}</span>
-                      {permissions.canEditContract && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => {
-                            setEditingContract(cs);
-                            setContractFormOpen(true);
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
+                  <div key={cs.id} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-medium text-foreground">{svc?.name ?? "Serviço"}</p>
+                        <StatusBadge status={CONTRACT_STATUS_BADGE[cs.status]} />
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{contractBillingLabel(cs)}</p>
+                      <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                        <div className="flex gap-1">
+                          <dt>Início:</dt>
+                          <dd className="text-foreground">{formatDate(cs.start_date)}</dd>
+                        </div>
+                        {nextDue && (
+                          <div className="flex gap-1">
+                            <dt>Próximo vencimento:</dt>
+                            <dd className={nextDue < todayKey ? "text-destructive" : "text-foreground"}>{formatDate(nextDue)}</dd>
+                          </div>
+                        )}
+                        {monthly > 0 && cs.frequency !== "mensal" && (
+                          <div className="flex gap-1">
+                            <dt>Equivale a:</dt>
+                            <dd className="text-foreground">{formatCurrency(monthly)}/mês</dd>
+                          </div>
+                        )}
+                      </dl>
+                      {legacy && (
+                        <p className="mt-1 text-xs text-warning">Sem cobranças no Financeiro (contratado antes da integração).</p>
                       )}
-                      {permissions.canDeleteContract && (
-                        <ConfirmActionButton
-                          label={<Trash2 className="h-3.5 w-3.5" />}
-                          title="Remover este serviço do cliente?"
-                          description="O histórico financeiro (quando existir) não é afetado."
-                          confirmLabel="Remover"
-                          size="icon"
-                          onConfirm={() => deleteClientServiceAction(cs.id, client.id)}
-                        />
+                    </div>
+                    <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
+                      <span className="text-sm font-semibold tabular-nums text-foreground">
+                        {formatCurrency(Number(cs.price))}
+                        <span className="text-xs font-normal text-muted-foreground">{contractPriceSuffix(cs)}</span>
+                      </span>
+                      {hasMenu && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Ações de ${svc?.name ?? "serviço"}`}>
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {canManage && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setEditingContract(cs);
+                                  setContractFormOpen(true);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" /> Editar
+                              </DropdownMenuItem>
+                            )}
+                            {canManage && legacy && permissions.canEditFinanceiro && (
+                              <DropdownMenuItem onClick={() => setPendingAction({ type: "generate", contract: cs })}>
+                                <Link2 className="h-4 w-4" /> Gerar cobranças no Financeiro
+                              </DropdownMenuItem>
+                            )}
+                            {canManage && cs.status === "ativo" && (
+                              <DropdownMenuItem onClick={() => setPendingAction({ type: "status", contract: cs, status: "inativo" })}>
+                                <PauseCircle className="h-4 w-4" /> Pausar
+                              </DropdownMenuItem>
+                            )}
+                            {canManage && cs.status !== "ativo" && (
+                              <DropdownMenuItem onClick={() => setPendingAction({ type: "status", contract: cs, status: "ativo" })}>
+                                <PlayCircle className="h-4 w-4" /> Reativar
+                              </DropdownMenuItem>
+                            )}
+                            {canManage && cs.status !== "cancelado" && (
+                              <DropdownMenuItem
+                                onClick={() => setPendingAction({ type: "status", contract: cs, status: "cancelado" })}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <XCircle className="h-4 w-4" /> Encerrar
+                              </DropdownMenuItem>
+                            )}
+                            {permissions.canDeleteContract && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => setPendingAction({ type: "delete", contract: cs })}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" /> Excluir
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                   </div>
@@ -318,6 +492,81 @@ export function ClientDetailClient({
             </div>
           )}
         </TabsContent>
+
+        {permissions.canViewFinanceiro && (
+          <TabsContent value="financeiro">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <MoneyCard label="Receita recorrente" amount={summary.mrr} icon={Repeat} />
+              <MoneyCard label="A receber" amount={summary.aReceber} icon={HandCoins} tone={summary.aReceber > 0 ? "warning" : "default"} />
+              <MoneyCard label="Total recebido" amount={summary.totalRecebido} icon={Wallet} tone="success" />
+              <Card className="p-4">
+                <p className="text-xs font-medium text-muted-foreground">Cobranças pendentes</p>
+                <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">{summary.pendingCount}</p>
+              </Card>
+            </div>
+
+            <section className="mt-4">
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Cobranças pendentes</h2>
+              {openCharges.length === 0 ? (
+                <EmptyState icon={Receipt} title="Nenhuma cobrança pendente" description="Tudo recebido por aqui." />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {openCharges.map((c) => {
+                    const status = chargeStatus(c, payments);
+                    const remaining = remainingAmount(c, payments);
+                    const overdue = c.due_date < todayKey;
+                    return (
+                      <div key={c.id} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">{c.description}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Vencimento {formatDate(c.due_date)}
+                            {c.installment_number && ` · parcela ${c.installment_number}/${c.installment_total}`}
+                            {status === "parcial" && ` · restante ${formatCurrency(remaining)}`}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
+                          <StatusBadge status={chargeBadgeStatus("entrada", status, overdue)} />
+                          <span className="text-sm font-medium tabular-nums">{formatCurrency(remaining)}</span>
+                          {permissions.canEditFinanceiro && (
+                            <Button size="sm" variant="outline" onClick={() => setMarkingCharge(c)}>
+                              <CheckCircle2 className="h-3.5 w-3.5" /> Marcar como recebido
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="mt-4">
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Histórico de pagamentos</h2>
+              {summary.payments.length === 0 ? (
+                <EmptyState icon={Wallet} title="Nenhum pagamento recebido ainda" />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {summary.payments.map((p) => {
+                    const charge = chargeById.get(p.charge_id);
+                    return (
+                      <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-foreground">{charge?.description ?? "Cobrança"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(p.payment_date)} · {PAYMENT_METHOD_LABEL[p.payment_method]}
+                            {charge && ` · ref. vencimento ${formatDate(charge.due_date)}`}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-sm font-medium tabular-nums text-success">+{formatCurrency(Number(p.amount))}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </TabsContent>
+        )}
 
         <TabsContent value="reunioes">
           {meetings.length === 0 ? (
@@ -367,36 +616,6 @@ export function ClientDetailClient({
           </TabsContent>
         )}
 
-        {permissions.canViewFinanceiro && (
-          <TabsContent value="financeiro">
-            {charges.length === 0 ? (
-              <EmptyState icon={Wallet} title="Nenhuma cobrança registrada para este cliente" />
-            ) : (
-              <div className="flex flex-col gap-2">
-                {charges.map((c) => {
-                  const status = chargeStatus(c, payments);
-                  const remaining = remainingAmount(c, payments);
-                  return (
-                    <div key={c.id} className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{c.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Vencimento {formatDate(c.due_date)}
-                          {status === "parcial" && ` · restante ${formatCurrency(remaining)}`}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <StatusBadge status={c.status === "cancelado" ? "cancelada" : status === "pago" ? "pago" : "pendente"} />
-                        <span className="text-sm font-medium">{formatCurrency(c.amount)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </TabsContent>
-        )}
-
         {permissions.canViewSites && (
           <TabsContent value="sites">
             {sites.length === 0 ? (
@@ -416,7 +635,9 @@ export function ClientDetailClient({
                       <StatusBadge status={s.status} />
                       {s.url && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                          <a href={s.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" /></a>
+                          <a href={s.url} target="_blank" rel="noopener noreferrer" aria-label="Abrir site">
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
                         </Button>
                       )}
                     </div>
@@ -451,9 +672,7 @@ export function ClientDetailClient({
 
         <TabsContent value="observacoes">
           <Card className="p-4">
-            <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-              {client.notes || "Nenhuma observação registrada."}
-            </p>
+            <p className="whitespace-pre-wrap text-sm text-muted-foreground">{client.notes || "Nenhuma observação registrada."}</p>
           </Card>
         </TabsContent>
       </Tabs>
@@ -466,8 +685,29 @@ export function ClientDetailClient({
           open={contractFormOpen}
           onOpenChange={setContractFormOpen}
           clientId={client.id}
-          services={activeServices}
+          services={services}
           contract={editingContract}
+          hasFinance={editingContract ? financeLinked.has(editingContract.id) : false}
+        />
+      )}
+      {pendingAction && confirmCopy && (
+        <AsyncConfirmDialog
+          open
+          onOpenChange={(open) => !open && setPendingAction(null)}
+          title={confirmCopy.title}
+          description={confirmCopy.description}
+          confirmLabel={confirmCopy.confirmLabel}
+          destructive={confirmCopy.destructive}
+          onConfirm={() => runContractAction(pendingAction)}
+        />
+      )}
+      {markingCharge && (
+        <MarkPaymentDialog
+          scope="visionario"
+          charge={markingCharge}
+          remaining={remainingAmount(markingCharge, payments)}
+          accounts={accounts}
+          onOpenChange={(open) => !open && setMarkingCharge(null)}
         />
       )}
     </div>

@@ -23,6 +23,16 @@ const STATUS_MAP: Record<string, { label: string; variant: Variant }> = {
   agendada: { label: "Agendada", variant: "secondary" },
   realizada: { label: "Realizada", variant: "success" },
   cancelada: { label: "Cancelada", variant: "destructive" },
+  cancelado: { label: "Cancelado", variant: "destructive" },
+  recebido: { label: "Recebido", variant: "success" },
+  parcial: { label: "Parcial", variant: "warning" },
+  pausado: { label: "Pausado", variant: "secondary" },
+  encerrado: { label: "Encerrado", variant: "outline" },
+  desenvolvimento: { label: "Em desenvolvimento", variant: "warning" },
+  vencendo: { label: "Vencendo", variant: "warning" },
+  expirado: { label: "Expirado", variant: "destructive" },
+  transferido: { label: "Transferido", variant: "outline" },
+  vence_hoje: { label: "Vence hoje", variant: "warning" },
 };
 
 export function StatusBadge({

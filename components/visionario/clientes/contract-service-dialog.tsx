@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,9 @@ import {
   updateClientServiceAction,
   type ClientServiceFormInput,
 } from "@/lib/supabase/client-services-actions";
-import { toDateKey } from "@/lib/format";
+import { CONTRACT_STATUS_LABEL } from "@/lib/finance-labels";
+import { formatCurrency, formatDate, parseMoneyInput, todayKeySaoPaulo } from "@/lib/format";
+import { firstDueOnOrAfter } from "@/lib/recurrence";
 import type {
   ClientService,
   ClientServiceBillingType,
@@ -28,9 +30,11 @@ interface Props {
   clientId: string;
   services: Service[];
   contract?: ClientService;
+  /** true = o contrato já tem cobranças no Financeiro (mostra o aviso do que muda). */
+  hasFinance?: boolean;
 }
 
-export function ContractServiceDialog({ open, onOpenChange, clientId, services, contract }: Props) {
+export function ContractServiceDialog({ open, onOpenChange, clientId, services, contract, hasFinance }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open && (
@@ -40,44 +44,84 @@ export function ContractServiceDialog({ open, onOpenChange, clientId, services, 
           clientId={clientId}
           services={services}
           contract={contract}
+          hasFinance={hasFinance}
         />
       )}
     </Dialog>
   );
 }
 
-function ContractServiceForm({ onOpenChange, clientId, services, contract }: Omit<Props, "open">) {
-  const [serviceId, setServiceId] = useState(contract?.service_id ?? services[0]?.id ?? "");
+const BILLING_LABEL: Record<ClientServiceBillingType, string> = {
+  unico: "Único",
+  recorrente: "Recorrente",
+  parcelado: "Parcelado",
+};
+
+function ContractServiceForm({ onOpenChange, clientId, services, contract, hasFinance }: Omit<Props, "open">) {
+  const today = todayKeySaoPaulo();
+  // Serviço do contrato pode estar inativo no catálogo — continua selecionável na edição.
+  const initialServiceId = contract?.service_id ?? services.find((s) => s.status === "ativo")?.id ?? "";
+  const selectableServices = services.filter((s) => s.status === "ativo" || s.id === contract?.service_id);
+  const initialService = services.find((s) => s.id === initialServiceId);
+
+  const [serviceId, setServiceId] = useState(initialServiceId);
   const [price, setPrice] = useState(
-    String(contract?.price ?? services.find((s) => s.id === serviceId)?.default_price ?? 0)
+    Number(contract?.price ?? initialService?.default_price ?? 0).toFixed(2).replace(".", ",")
   );
   const [billingType, setBillingType] = useState<ClientServiceBillingType>(
-    contract?.billing_type ?? "unico"
+    contract?.billing_type ?? (initialService?.billing_type === "mensal" ? "recorrente" : "unico")
   );
   const [frequency, setFrequency] = useState<ClientServiceFrequency>(contract?.frequency ?? "mensal");
-  const [dueDay, setDueDay] = useState(String(contract?.due_day ?? 10));
-  const [startDate, setStartDate] = useState(contract?.start_date ?? toDateKey(new Date()));
+  const [dueDay, setDueDay] = useState(String(contract?.due_day ?? Number(today.slice(8, 10))));
+  const [installmentCount, setInstallmentCount] = useState(String(contract?.installment_count ?? 2));
+  const [firstDueDate, setFirstDueDate] = useState(contract?.first_due_date ?? today);
+  const [startDate, setStartDate] = useState(contract?.start_date ?? today);
   const [status, setStatus] = useState<ClientServiceStatus>(contract?.status ?? "ativo");
   const [notes, setNotes] = useState(contract?.notes ?? "");
   const [pending, startTransition] = useTransition();
+
+  const priceNum = parseMoneyInput(price);
+  const dueDayNum = Number(dueDay);
+  const countNum = Number(installmentCount);
 
   function handleServiceChange(id: string) {
     setServiceId(id);
     if (!contract) {
       const svc = services.find((s) => s.id === id);
       if (svc) {
-        setPrice(String(svc.default_price));
+        // Preço padrão é só sugestão — o valor do cliente continua editável.
+        setPrice(Number(svc.default_price).toFixed(2).replace(".", ","));
         setBillingType(svc.billing_type === "mensal" ? "recorrente" : "unico");
       }
     }
   }
 
+  const preview = (() => {
+    if (!Number.isFinite(priceNum) || priceNum <= 0) return null;
+    if (billingType === "recorrente") {
+      if (!(dueDayNum >= 1 && dueDayNum <= 31)) return null;
+      const monthStart = `${today.slice(0, 7)}-01`;
+      const from = startDate > monthStart ? startDate : monthStart;
+      const first = firstDueOnOrAfter(from, dueDayNum);
+      const monthly = frequency === "anual" ? priceNum / 12 : frequency === "semanal" ? (priceNum * 52) / 12 : priceNum;
+      return `Receita recorrente: ${formatCurrency(monthly)}/mês · 1ª cobrança em ${formatDate(first)}`;
+    }
+    if (billingType === "parcelado") {
+      if (!(countNum >= 2)) return null;
+      return `${countNum}x de ${formatCurrency(priceNum / countNum)} · 1ª parcela em ${formatDate(firstDueDate)}`;
+    }
+    return `Cobrança única de ${formatCurrency(priceNum)} em ${formatDate(firstDueDate)}`;
+  })();
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const priceNum = Number(price.replace(",", "."));
-    if (Number.isNaN(priceNum) || priceNum <= 0) {
-      toast.error("Valor precisa ser maior que zero.");
-      return;
+    if (!serviceId) return void toast.error("Escolha um serviço.");
+    if (!Number.isFinite(priceNum) || priceNum <= 0) return void toast.error("Valor precisa ser maior que zero.");
+    if (billingType === "recorrente" && !(dueDayNum >= 1 && dueDayNum <= 31)) {
+      return void toast.error("Dia de vencimento precisa ser entre 1 e 31.");
+    }
+    if (billingType === "parcelado" && !(countNum >= 2 && countNum <= 120)) {
+      return void toast.error("Informe de 2 a 120 parcelas.");
     }
 
     const input: ClientServiceFormInput = {
@@ -85,7 +129,9 @@ function ContractServiceForm({ onOpenChange, clientId, services, contract }: Omi
       price: priceNum,
       billingType,
       frequency: billingType === "recorrente" ? frequency : undefined,
-      dueDay: billingType === "recorrente" ? Number(dueDay) : undefined,
+      dueDay: billingType === "recorrente" ? dueDayNum : undefined,
+      installmentCount: billingType === "parcelado" ? countNum : undefined,
+      firstDueDate: billingType === "recorrente" ? undefined : firstDueDate,
       startDate,
       status,
       notes: notes || undefined,
@@ -100,67 +146,107 @@ function ContractServiceForm({ onOpenChange, clientId, services, contract }: Omi
         toast.error(result.error);
         return;
       }
-      toast.success(result.success ?? (contract ? "Contrato atualizado." : "Serviço contratado."));
+      toast.success(result.success ?? (contract ? "Serviço atualizado." : "Serviço contratado."));
+      if (result.warning) toast.warning(result.warning);
       onOpenChange(false);
     });
   }
 
   return (
-    <DialogContent>
+    <DialogContent className="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle>{contract ? "Editar serviço contratado" : "Contratar serviço"}</DialogTitle>
+        <DialogTitle>{contract ? "Editar serviço contratado" : "Adicionar serviço"}</DialogTitle>
+        <DialogDescription>
+          O preço do catálogo é só sugestão — o valor aqui é o contratado por este cliente.
+        </DialogDescription>
       </DialogHeader>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-3 overflow-y-auto pr-1">
         <div className="flex flex-col gap-1.5">
           <Label>Serviço</Label>
           <Select value={serviceId} onValueChange={handleServiceChange} disabled={pending}>
-            <SelectTrigger>
-              <SelectValue />
+            <SelectTrigger aria-label="Serviço">
+              <SelectValue placeholder="Escolha um serviço" />
             </SelectTrigger>
             <SelectContent>
-              {services.map((s) => (
+              {selectableServices.map((s) => (
                 <SelectItem key={s.id} value={s.id}>
                   {s.name}
+                  {s.default_price > 0 ? ` · ${formatCurrency(s.default_price)}` : ""}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cs-price">Valor</Label>
-            <Input id="cs-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} disabled={pending} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Cobrança</Label>
-            <Select value={billingType} onValueChange={(v) => setBillingType(v as ClientServiceBillingType)} disabled={pending}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unico">Pagamento único</SelectItem>
-                <SelectItem value="recorrente">Recorrente</SelectItem>
-              </SelectContent>
-            </Select>
+        <div className="flex flex-col gap-1.5">
+          <Label>Tipo de cobrança</Label>
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Tipo de cobrança">
+            {(Object.keys(BILLING_LABEL) as ClientServiceBillingType[]).map((t) => (
+              <Button
+                key={t}
+                type="button"
+                size="sm"
+                role="radio"
+                aria-checked={billingType === t}
+                variant={billingType === t ? "default" : "outline"}
+                onClick={() => setBillingType(t)}
+                disabled={pending}
+              >
+                {BILLING_LABEL[t]}
+              </Button>
+            ))}
           </div>
         </div>
 
-        {billingType === "recorrente" && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="cs-price">
+              {billingType === "parcelado" ? "Valor total contratado" : billingType === "recorrente" ? "Valor por cobrança" : "Valor contratado"}
+            </Label>
+            <Input id="cs-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} disabled={pending} />
+          </div>
+
+          {billingType === "recorrente" ? (
             <div className="flex flex-col gap-1.5">
-              <Label>Frequência</Label>
+              <Label>Recorrência</Label>
               <Select value={frequency} onValueChange={(v) => setFrequency(v as ClientServiceFrequency)} disabled={pending}>
-                <SelectTrigger>
+                <SelectTrigger aria-label="Recorrência">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="semanal">Semanal</SelectItem>
                   <SelectItem value="mensal">Mensal</SelectItem>
                   <SelectItem value="anual">Anual</SelectItem>
+                  {contract?.frequency === "semanal" && <SelectItem value="semanal">Semanal</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
+          ) : billingType === "parcelado" ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cs-installments">Parcelas</Label>
+              <Input
+                id="cs-installments"
+                type="number"
+                min={2}
+                max={120}
+                value={installmentCount}
+                onChange={(e) => setInstallmentCount(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cs-first-due">Vencimento</Label>
+              <Input id="cs-first-due" type="date" value={firstDueDate} onChange={(e) => setFirstDueDate(e.target.value)} disabled={pending} />
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="cs-start">Data de início</Label>
+            <Input id="cs-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={pending} />
+          </div>
+          {billingType === "recorrente" ? (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="cs-due-day">Dia de vencimento</Label>
               <Input
@@ -173,34 +259,37 @@ function ContractServiceForm({ onOpenChange, clientId, services, contract }: Omi
                 disabled={pending}
               />
             </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cs-start">Início</Label>
-            <Input
-              id="cs-start"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              disabled={pending}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Status</Label>
-            <Select value={status} onValueChange={(v) => setStatus(v as ClientServiceStatus)} disabled={pending}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ativo">Ativo</SelectItem>
-                <SelectItem value="inativo">Inativo</SelectItem>
-                <SelectItem value="cancelado">Cancelado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          ) : billingType === "parcelado" ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cs-first-due">Vencimento da 1ª parcela</Label>
+              <Input id="cs-first-due" type="date" value={firstDueDate} onChange={(e) => setFirstDueDate(e.target.value)} disabled={pending} />
+            </div>
+          ) : null}
         </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label>Status</Label>
+          <Select value={status} onValueChange={(v) => setStatus(v as ClientServiceStatus)} disabled={pending}>
+            <SelectTrigger aria-label="Status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(CONTRACT_STATUS_LABEL) as ClientServiceStatus[]).map((s) => (
+                <SelectItem key={s} value={s}>
+                  {CONTRACT_STATUS_LABEL[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {preview && <p className="rounded-md bg-secondary px-3 py-2 text-xs text-secondary-foreground">{preview}</p>}
+        {contract && hasFinance && (
+          <p className="text-xs text-muted-foreground">
+            Mudanças de valor valem para as cobranças em aberto a partir de hoje. Mudar tipo, frequência ou vencimento
+            encerra a série atual e começa outra na próxima competência. Pagamentos já registrados nunca são alterados.
+          </p>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="cs-notes">Observações</Label>
@@ -212,7 +301,7 @@ function ContractServiceForm({ onOpenChange, clientId, services, contract }: Omi
             Cancelar
           </Button>
           <Button type="submit" disabled={pending}>
-            {pending ? "Salvando…" : contract ? "Salvar alterações" : "Contratar"}
+            {pending ? "Salvando…" : contract ? "Salvar alterações" : "Adicionar serviço"}
           </Button>
         </DialogFooter>
       </form>

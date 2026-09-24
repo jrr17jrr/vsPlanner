@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireModulePermission } from "@/lib/supabase/dal";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
+import { revalidateFinancialViews } from "@/lib/supabase/finance-core";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import type { ClientStatus } from "@/types/database.types";
 
@@ -111,10 +113,61 @@ export async function deleteClientAction(clientId: string): Promise<ClientAction
   const { space } = await requireModulePermission(VISIONARIO_DEV_SLUG, "clientes", "delete");
 
   const supabase = await createSupabaseServerClient();
+
+  // O financeiro do cliente (origens/cobranças) usa `on delete set null` —
+  // excluir o cliente sem cuidar disso deixaria recorrências "órfãs"
+  // gerando cobrança. Com pagamento registrado, o histórico precisa ficar:
+  // a saída é inativar o cliente.
+  const [canViewFinance, canDeleteFinance] = await Promise.all([
+    hasModulePermission(space.id, "financeiro", "view"),
+    hasModulePermission(space.id, "financeiro", "delete"),
+  ]);
+  if (!canViewFinance) {
+    const { count } = await supabase
+      .from("client_services")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", clientId)
+      .eq("space_id", space.id);
+    if ((count ?? 0) > 0) {
+      return { error: "Este cliente tem serviços contratados — inative o cliente (ou peça a alguém com acesso ao Financeiro para excluir)." };
+    }
+  } else {
+    const { data: origins, error: originsError } = await supabase
+      .from("financial_origins")
+      .select("id")
+      .eq("client_id", clientId)
+      .eq("space_id", space.id);
+    if (originsError) return { error: originsError.message };
+    if ((origins ?? []).length > 0) {
+      const { data: charges } = await supabase.from("financial_charges").select("id").eq("client_id", clientId).eq("space_id", space.id);
+      const chargeIds = (charges ?? []).map((c) => c.id);
+      if (chargeIds.length > 0) {
+        const { count } = await supabase
+          .from("financial_payments")
+          .select("id", { count: "exact", head: true })
+          .in("charge_id", chargeIds);
+        if ((count ?? 0) > 0) {
+          return { error: "Este cliente tem pagamentos registrados — inative o cliente em vez de excluir, para manter o histórico financeiro." };
+        }
+      }
+      if (!canDeleteFinance) return { error: "Este cliente tem cobranças no Financeiro — é preciso permissão de excluir no Financeiro." };
+      const { error: deleteOriginsError } = await supabase
+        .from("financial_origins")
+        .delete()
+        .in(
+          "id",
+          (origins ?? []).map((o) => o.id)
+        )
+        .eq("space_id", space.id);
+      if (deleteOriginsError) return { error: deleteOriginsError.message };
+    }
+  }
+
   const { error } = await supabase.from("clients").delete().eq("id", clientId).eq("space_id", space.id);
 
   if (error) return { error: error.message };
 
   revalidatePath("/visionario/clientes");
+  revalidateFinancialViews("visionario");
   return { success: "Cliente excluído." };
 }

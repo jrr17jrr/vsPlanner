@@ -14,6 +14,7 @@ import {
   HandCoins,
   LineChart,
   Globe,
+  AtSign,
   Video,
   Settings,
   ShieldAlert,
@@ -71,7 +72,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Reuniões", href: "/visionario/reunioes", icon: Handshake, module: "reunioes" },
       { label: "Vendedores", href: "/visionario/vendedores", icon: HandCoins, module: "vendedores" },
       { label: "Financeiro", href: "/visionario/financeiro", icon: LineChart, module: "financeiro" },
-      { label: "Sites & Domínios", href: "/visionario/sites", icon: Globe, module: "sites" },
+      { label: "Sites", href: "/visionario/sites", icon: Globe, module: "sites" },
+      { label: "Domínios", href: "/visionario/dominios", icon: AtSign, module: "sites" },
     ],
   },
   {

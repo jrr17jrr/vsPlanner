@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { RealClientCard } from "@/components/visionario/clientes/real-client-card";
 import { ClientFormDialog } from "@/components/visionario/clientes/client-form-dialog";
+import { contractMonthlyValue } from "@/lib/financial-calc";
 import type { Client, ClientService, Service, SpaceMemberProfile } from "@/types/database.types";
 
 type FilterKey = "todos" | "ativos" | "inativos";
@@ -35,9 +36,8 @@ export function ClientesPageClient({
   const enriched = useMemo(() => {
     return clients.map((client) => {
       const contracts = clientServices.filter((cs) => cs.client_id === client.id && cs.status === "ativo");
-      const monthlyValue = contracts
-        .filter((cs) => cs.billing_type === "recorrente" && cs.frequency === "mensal")
-        .reduce((sum, cs) => sum + cs.price, 0);
+      // Mesma regra da Visão Geral/Financeiro (anual vira /12, pausado/encerrado não conta).
+      const monthlyValue = contracts.reduce((sum, cs) => sum + contractMonthlyValue(cs), 0);
       const serviceNames = contracts
         .map((cs) => serviceNameById.get(cs.service_id))
         .filter((n): n is string => !!n);
