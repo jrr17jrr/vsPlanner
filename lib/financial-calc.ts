@@ -53,10 +53,10 @@ export function accountBalance(
     .filter((p) => p.account_id === account.id && p.payment_date >= account.initial_balance_date)
     .reduce((balance, p) => {
       const kind = chargeKindById.get(p.charge_id);
-      if (kind === "entrada") return balance + p.amount;
-      if (kind === "saida") return balance - p.amount;
+      if (kind === "entrada") return balance + Number(p.amount);
+      if (kind === "saida") return balance - Number(p.amount);
       return balance;
-    }, account.initial_balance);
+    }, Number(account.initial_balance));
 }
 
 export function totalBalance(
@@ -155,8 +155,8 @@ function chargeMonthKey(charge: FinancialCharge): string {
 /** Receita/despesa/lucro por COMPETÊNCIA (não por caixa) — é o que dá "mensalidade de Setembro paga em Outubro" contando em Setembro. */
 export function monthSummary(charges: FinancialCharge[], monthKey: string) {
   const active = charges.filter((c) => c.status !== "cancelado" && chargeMonthKey(c) === monthKey);
-  const receita = active.filter((c) => c.kind === "entrada").reduce((s, c) => s + c.amount, 0);
-  const despesa = active.filter((c) => c.kind === "saida").reduce((s, c) => s + c.amount, 0);
+  const receita = active.filter((c) => c.kind === "entrada").reduce((s, c) => s + Number(c.amount), 0);
+  const despesa = active.filter((c) => c.kind === "saida").reduce((s, c) => s + Number(c.amount), 0);
   return { receita, despesa, lucro: receita - despesa };
 }
 
@@ -166,9 +166,9 @@ export function monthCashSummary(charges: FinancialCharge[], payments: Financial
   const inMonth = payments.filter((p) => monthKeyOfDate(p.payment_date) === monthKey);
   const recebido = inMonth
     .filter((p) => chargeKindById.get(p.charge_id) === "entrada")
-    .reduce((s, p) => s + p.amount, 0);
-  const pago = inMonth.filter((p) => chargeKindById.get(p.charge_id) === "saida").reduce((s, p) => s + p.amount, 0);
-  return { recebido, pago };
+    .reduce((s, p) => s + Number(p.amount), 0);
+  const pago = inMonth.filter((p) => chargeKindById.get(p.charge_id) === "saida").reduce((s, p) => s + Number(p.amount), 0);
+  return { recebido: roundCents(recebido), pago: roundCents(pago) };
 }
 
 function pctChange(current: number, previous: number): number | null {
@@ -253,19 +253,85 @@ export function pendingTotal(charges: FinancialCharge[], payments: FinancialPaym
     .reduce((sum, c) => sum + remainingAmount(c, payments), 0);
 }
 
+export type PendingSummary = {
+  /** Total em aberto: vencimentos do mês atual + atrasados de meses anteriores. Nunca inclui meses futuros. */
+  total: number;
+  /** Parte com vencimento no mês atual. */
+  thisMonth: number;
+  /** Parte de meses anteriores (vencida e ainda em aberto). */
+  fromPreviousMonths: number;
+  /** Tudo que já venceu (antes de hoje) e segue em aberto — base dos alertas. */
+  overdue: number;
+  overdueCount: number;
+};
+
 /**
- * Em aberto do MÊS (yyyy-MM): só vencimentos daquele mês — nunca soma
- * competências futuras (recorrências já geradas para o mês seguinte não
- * entram). O atrasado de meses anteriores vem separado em `overdueBefore`.
+ * "A receber" / "A pagar" — REGRA ÚNICA do sistema:
+ *   cobranças em aberto com vencimento no mês atual
+ *   + vencidas de meses anteriores ainda não pagas.
+ * Competências futuras (outubro, novembro... já geradas por recorrência)
+ * nunca entram. Usa o RESTANTE (pagamento parcial reduz na hora).
  */
-export function pendingInMonth(charges: FinancialCharge[], payments: FinancialPayment[], kind: FinancialKind, monthKey: string) {
-  const open = charges.filter((c) => c.kind === kind && c.status !== "cancelado");
-  const monthStart = `${monthKey}-01`;
-  const inMonth = open.filter((c) => c.due_date.startsWith(monthKey));
-  const before = open.filter((c) => c.due_date < monthStart);
+export function pendingUpToMonth(
+  charges: FinancialCharge[],
+  payments: FinancialPayment[],
+  kind: FinancialKind,
+  monthKey: string,
+  today: string = todayKeySaoPaulo()
+): PendingSummary {
+  const open = charges
+    .filter((c) => c.kind === kind && c.status !== "cancelado" && c.due_date.slice(0, 7) <= monthKey)
+    .map((c) => ({ charge: c, remaining: remainingAmount(c, payments) }))
+    .filter((x) => x.remaining > 0);
+  const sum = (xs: typeof open) => roundCents(xs.reduce((s, x) => s + x.remaining, 0));
+  const overdue = open.filter((x) => x.charge.due_date < today);
   return {
-    month: roundCents(inMonth.reduce((s, c) => s + remainingAmount(c, payments), 0)),
-    overdueBefore: roundCents(before.reduce((s, c) => s + remainingAmount(c, payments), 0)),
+    total: sum(open),
+    thisMonth: sum(open.filter((x) => x.charge.due_date.startsWith(monthKey))),
+    fromPreviousMonths: sum(open.filter((x) => x.charge.due_date.slice(0, 7) < monthKey)),
+    overdue: sum(overdue),
+    overdueCount: overdue.length,
+  };
+}
+
+export type FinancialMonthOverview = {
+  monthKey: string;
+  /** Saldo das contas (não é resultado do mês). */
+  saldo: number;
+  /** Caixa: pagamentos de entrada pela DATA REAL do recebimento no mês. */
+  recebido: number;
+  /** Caixa: pagamentos de saída pela DATA REAL do pagamento no mês. */
+  pago: number;
+  /** recebido − pago. */
+  resultado: number;
+  aReceber: PendingSummary;
+  aPagar: PendingSummary;
+};
+
+/**
+ * Resumo financeiro do mês de UM espaço — a mesma função alimenta a Home
+ * geral, as três páginas de Financeiro (Pessoal, TikTok, Visionário Dev),
+ * o dashboard do Visionário Dev e a Visão Geral do TikTok. Nenhuma tela
+ * recalcula por conta própria, então os números sempre batem.
+ */
+export function financialMonthOverview(
+  accounts: FinancialAccount[],
+  charges: FinancialCharge[],
+  payments: FinancialPayment[],
+  today: string = todayKeySaoPaulo()
+): FinancialMonthOverview {
+  const monthKey = today.slice(0, 7);
+  const cash = monthCashSummary(charges, payments, monthKey);
+  const recebido = roundCents(cash.recebido);
+  const pago = roundCents(cash.pago);
+  return {
+    monthKey,
+    saldo: roundCents(totalBalance(accounts, payments, buildChargeKindMap(charges))),
+    recebido,
+    pago,
+    resultado: roundCents(recebido - pago),
+    aReceber: pendingUpToMonth(charges, payments, "entrada", monthKey, today),
+    aPagar: pendingUpToMonth(charges, payments, "saida", monthKey, today),
   };
 }
 
@@ -277,8 +343,9 @@ export function upcomingOpenCharges(
   limit = 5,
   today: string = todayKeySaoPaulo()
 ): ReceivablePayable[] {
+  // "Próximos" = só vencimentos de hoje em diante; atrasados ficam em A pagar/A receber e nos alertas.
   return listChargesForKind(charges, payments, kind, today)
-    .filter((r) => r.status !== "pago")
+    .filter((r) => r.status !== "pago" && r.charge.due_date >= today)
     .slice(0, limit);
 }
 

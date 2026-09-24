@@ -31,7 +31,7 @@ import { NovaMovimentacaoDialog } from "@/components/visionario/financeiro/nova-
 import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
 import { formatCurrency, formatDate, formatDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ClientBillingStatus } from "@/lib/financial-calc";
+import type { ClientBillingStatus, PendingSummary } from "@/lib/financial-calc";
 import type {
   Client,
   ClientService,
@@ -72,31 +72,32 @@ export type WorkRow = {
   tone: "danger" | "warning" | "info" | "neutral";
 };
 
+export type ChargesBlock = {
+  overdue: ReceivableRow[];
+  /** Só vencimentos de hoje em diante (previsão), nunca misturados com atrasados. */
+  upcoming: ReceivableRow[];
+  upcomingTotalCount: number;
+  /** Caixa do mês pela data real (recebido ou pago). */
+  settledThisMonth: { total: number; count: number };
+};
+
 export type DashboardData = {
   today: string;
+  /** Vem de `financialMonthOverview` — o mesmo cálculo da Home e do Financeiro. */
   finance: {
     mrr: number;
-    /** Em aberto com vencimento no mês atual. */
-    aReceber: number;
-    aPagar: number;
-    /** Em aberto de meses anteriores (atrasado), mostrado à parte. */
-    aReceberAtrasadoAnterior: number;
-    aPagarAtrasadoAnterior: number;
+    saldo: number;
     recebido: number;
     pago: number;
     resultado: number;
-    saldo: number;
-    overdueIn: number;
+    aReceber: PendingSummary;
+    aPagar: PendingSummary;
   } | null;
   activeClientsCount: number | null;
   attention: AttentionItem[];
   attentionScopeVisible: boolean;
-  receivables: {
-    overdue: ReceivableRow[];
-    upcoming: ReceivableRow[];
-    upcomingTotalCount: number;
-    receivedThisMonth: { total: number; count: number };
-  } | null;
+  receivables: ChargesBlock | null;
+  payables: ChargesBlock | null;
   agenda: {
     today: { id: string; title: string; time: string; status: MeetingStatus }[];
     next: { id: string; title: string; date: string; time: string } | null;
@@ -195,8 +196,8 @@ export function VisionarioDashboard({
   const visibleActions = quickActions.filter((a) => a.allowed);
 
   const { finance } = data;
-  const hasMiddleRow = data.receivables || data.agenda;
-  const hasWorkRow = data.work || data.clients;
+  const hasMiddleRow = data.receivables || data.payables;
+  const hasWorkRow = data.agenda || data.work || data.clients;
   const hasBottomRow = data.recurring || data.sites || data.vendors;
 
   return (
@@ -222,34 +223,20 @@ export function VisionarioDashboard({
               <>
                 <MoneyCard label="Receita recorrente mensal" amount={finance.mrr} icon={Repeat} hint="Serviços recorrentes ativos" />
                 <MoneyCard
-                  label="A receber no mês"
-                  amount={finance.aReceber}
+                  label="A receber"
+                  amount={finance.aReceber.total}
                   icon={HandCoins}
                   tone="warning"
-                  hint={
-                    finance.aReceberAtrasadoAnterior > 0
-                      ? `+ ${formatCurrency(finance.aReceberAtrasadoAnterior)} atrasado de meses anteriores`
-                      : "Vencimentos deste mês"
-                  }
+                  hint={pendingHint(finance.aReceber)}
                 />
-                <MoneyCard label="Recebido no mês" amount={finance.recebido} icon={TrendingUp} tone="success" hint="Dinheiro que de fato entrou" />
-                <MoneyCard
-                  label="A pagar no mês"
-                  amount={finance.aPagar}
-                  icon={Receipt}
-                  tone="warning"
-                  hint={
-                    finance.aPagarAtrasadoAnterior > 0
-                      ? `+ ${formatCurrency(finance.aPagarAtrasadoAnterior)} atrasado de meses anteriores`
-                      : "Vencimentos deste mês"
-                  }
-                />
-                <MoneyCard label="Pago no mês" amount={finance.pago} icon={TrendingDown} tone="destructive" hint="Dinheiro que de fato saiu" />
+                <MoneyCard label="Recebido no mês" amount={finance.recebido} icon={TrendingUp} tone="success" hint="Pela data real do recebimento" />
+                <MoneyCard label="A pagar" amount={finance.aPagar.total} icon={Receipt} tone="warning" hint={pendingHint(finance.aPagar)} />
+                <MoneyCard label="Pago no mês" amount={finance.pago} icon={TrendingDown} tone="destructive" hint="Pela data real do pagamento" />
                 <MoneyCard
                   label="Resultado do mês"
                   amount={finance.resultado}
                   icon={DollarSign}
-                  tone={finance.resultado >= 0 ? "success" : "destructive"}
+                  tone={finance.resultado > 0 ? "success" : finance.resultado < 0 ? "destructive" : "default"}
                   hint="Recebido − pago"
                 />
                 <MoneyCard label="Saldo em contas" amount={finance.saldo} icon={Wallet} />
@@ -263,21 +250,19 @@ export function VisionarioDashboard({
       {data.attentionScopeVisible && <AttentionSection items={data.attention} />}
 
       {hasMiddleRow && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {data.receivables && (
-            <ReceivablesPanel
-              className={data.agenda ? "lg:col-span-2" : "lg:col-span-3"}
-              receivables={data.receivables}
-              canPay={permissions.canEditFinanceiro}
-              onPay={setPaying}
-            />
+            <ChargesPanel kind="entrada" block={data.receivables} canPay={permissions.canEditFinanceiro} onPay={setPaying} />
           )}
-          {data.agenda && <AgendaPanel agenda={data.agenda} className={data.receivables ? "" : "lg:col-span-3"} />}
+          {data.payables && (
+            <ChargesPanel kind="saida" block={data.payables} canPay={permissions.canEditFinanceiro} onPay={setPaying} />
+          )}
         </div>
       )}
 
       {hasWorkRow && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {data.agenda && <AgendaPanel agenda={data.agenda} />}
           {data.work && <WorkPanel work={data.work} today={data.today} />}
           {data.clients && <ClientsPanel clients={data.clients} />}
         </div>
@@ -436,43 +421,52 @@ function AttentionSection({ items }: { items: AttentionItem[] }) {
   );
 }
 
-function ReceivablesPanel({
-  receivables,
+function pendingHint(p: PendingSummary): string {
+  if (p.overdue > 0) return `Inclui ${formatCurrency(p.overdue)} atrasado`;
+  return "Vencimentos até o fim do mês";
+}
+
+/** Cobranças (entrada) ou Pagamentos (saída): atrasados x próximos vencimentos, nunca misturados. */
+function ChargesPanel({
+  kind,
+  block,
   canPay,
   onPay,
   className,
 }: {
-  receivables: NonNullable<DashboardData["receivables"]>;
+  kind: "entrada" | "saida";
+  block: ChargesBlock;
   canPay: boolean;
   onPay: (row: ReceivableRow) => void;
   className?: string;
 }) {
-  const { overdue, upcoming, upcomingTotalCount, receivedThisMonth } = receivables;
-  const overdueShown = overdue.slice(0, 5);
+  const isIn = kind === "entrada";
+  const { overdue, upcoming, upcomingTotalCount, settledThisMonth } = block;
+  const overdueShown = overdue.slice(0, 4);
   return (
     <Panel
-      title="Cobranças"
-      icon={HandCoins}
-      href="/visionario/financeiro?aba=a_receber"
+      title={isIn ? "Cobranças" : "Pagamentos"}
+      icon={isIn ? HandCoins : Receipt}
+      href={isIn ? "/visionario/financeiro?aba=a_receber" : "/visionario/financeiro?aba=a_pagar"}
       linkLabel="Ver todas"
       className={className}
       footer={
-        <p className="flex items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
-          <Dot tone="success" /> Recebido no mês:
-          <span className="font-medium text-success">{formatCurrency(receivedThisMonth.total)}</span>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border pt-3 text-xs text-muted-foreground">
+          <Dot tone={isIn ? "success" : "neutral"} /> {isIn ? "Recebido no mês:" : "Pago no mês:"}
+          <span className={cn("font-medium", isIn ? "text-success" : "text-foreground")}>{formatCurrency(settledThisMonth.total)}</span>
           <span>
-            ({receivedThisMonth.count} {receivedThisMonth.count === 1 ? "pagamento" : "pagamentos"})
+            ({settledThisMonth.count} {settledThisMonth.count === 1 ? "lançamento" : "lançamentos"})
           </span>
         </p>
       }
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wide text-destructive">
             Atrasados {overdue.length > 0 && `· ${overdue.length}`}
           </p>
           {overdueShown.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nenhuma cobrança atrasada.</p>
+            <p className="text-xs text-muted-foreground">{isIn ? "Nenhuma cobrança atrasada." : "Nenhum pagamento atrasado."}</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {overdueShown.map((row) => (
@@ -481,15 +475,15 @@ function ReceivablesPanel({
             </ul>
           )}
           {overdue.length > overdueShown.length && (
-            <p className="text-xs text-muted-foreground">+{overdue.length - overdueShown.length} atrasada(s) no Financeiro.</p>
+            <p className="text-xs text-muted-foreground">+{overdue.length - overdueShown.length} atrasado(s) no Financeiro.</p>
           )}
         </div>
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wide text-warning">
-            Próximos recebimentos {upcomingTotalCount > 0 && `· ${upcomingTotalCount}`}
+            {isIn ? "Próximos recebimentos" : "Próximos pagamentos"} {upcomingTotalCount > 0 && `· ${upcomingTotalCount}`}
           </p>
           {upcoming.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Nenhum recebimento pendente.</p>
+            <p className="text-xs text-muted-foreground">{isIn ? "Nenhum recebimento previsto." : "Nenhum pagamento previsto."}</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {upcoming.map((row) => (

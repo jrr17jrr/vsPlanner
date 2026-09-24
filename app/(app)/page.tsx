@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet } from "lucide-react";
+import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet, HandCoins } from "lucide-react";
 import { requireActiveProfile, findOrBootstrapSpace, requirePersonalSpace } from "@/lib/supabase/dal";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
 import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
@@ -10,32 +10,39 @@ import {
   listFinancialPayments,
   listFinancialAccounts,
 } from "@/lib/supabase/repositories/financial.repository";
-import { totalBalance, monthSummary, listChargesForKind } from "@/lib/financial-calc";
+import { financialMonthOverview, type FinancialMonthOverview } from "@/lib/financial-calc";
+import { prepareFinancialSpace } from "@/lib/supabase/financial-page-data";
 import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG } from "@/lib/space-slugs";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
-import { formatCurrency, formatDateLong, todayKeySaoPaulo, currentMonthKeySaoPaulo } from "@/lib/format";
+import { formatCurrency, formatDateLong, todayKeySaoPaulo } from "@/lib/format";
 import type { Space } from "@/types/database.types";
 
 function greeting(): string {
-  const h = new Date().getHours();
+  // Hora de São Paulo (o servidor pode estar em UTC).
+  const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", hour: "numeric", hour12: false }).format(new Date())) % 24;
   if (h < 12) return "Bom dia";
   if (h < 18) return "Boa tarde";
   return "Boa noite";
 }
 
-async function loadFinanceColumn(space: Space) {
+/**
+ * Resumo financeiro de um espaço na Home — EXATAMENTE o mesmo cálculo da
+ * página Financeiro daquele espaço (`financialMonthOverview`), depois de
+ * materializar as recorrências do mesmo jeito que o Financeiro faz.
+ * "Entrou/Saiu no mês" = caixa pela data real; nunca competência.
+ */
+async function loadFinanceColumn(space: Space, profileId: string): Promise<FinancialMonthOverview | null> {
   const allowed = await hasModulePermission(space.id, "financeiro", "view");
   if (!allowed) return null;
 
+  await prepareFinancialSpace(space, profileId);
   const [charges, payments, accounts] = await Promise.all([
     listFinancialCharges(space.id),
     listFinancialPayments(space.id),
     listFinancialAccounts(space.id),
   ]);
-  const month = monthSummary(charges, currentMonthKeySaoPaulo());
-  const saldo = totalBalance(accounts, payments, new Map(charges.map((c) => [c.id, c.kind])));
-  return { saldo, receita: month.receita, despesa: month.despesa, lucro: month.lucro };
+  return financialMonthOverview(accounts, charges, payments);
 }
 
 /**
@@ -57,9 +64,9 @@ export default async function DashboardPage() {
   const [meetingsResult, workItemsResult, pessoalFinance, visionarioFinance, tiktokFinance] = await Promise.all([
     getTodayMeetingsForHoje(),
     getTodayWorkItemsForHoje(),
-    loadFinanceColumn(personalSpace),
-    visionarioSpace ? loadFinanceColumn(visionarioSpace) : Promise.resolve(null),
-    tiktokSpace ? loadFinanceColumn(tiktokSpace) : Promise.resolve(null),
+    loadFinanceColumn(personalSpace, profile.id),
+    visionarioSpace ? loadFinanceColumn(visionarioSpace, profile.id) : Promise.resolve(null),
+    tiktokSpace ? loadFinanceColumn(tiktokSpace, profile.id) : Promise.resolve(null),
   ]);
 
   const todayKey = todayKeySaoPaulo();
@@ -99,29 +106,39 @@ export default async function DashboardPage() {
     });
   });
 
-  for (const [space, href] of [
-    [personalSpace, "/financeiro"],
-    [visionarioSpace, "/visionario/financeiro"],
-    [tiktokSpace, "/tiktok/financeiro"],
-  ] as const) {
-    if (!space) continue;
-    const canView = await hasModulePermission(space.id, "financeiro", "view");
-    if (!canView) continue;
-    const [charges, payments] = await Promise.all([listFinancialCharges(space.id), listFinancialPayments(space.id)]);
-    listChargesForKind(charges, payments, "saida")
-      .filter((r) => r.bucket === "atrasadas")
-      .forEach((r) => {
-        attentionItems.push({
-          id: r.charge.id,
-          icon: Wallet,
-          label: "Conta atrasada",
-          title: `${r.charge.description} — ${formatCurrency(r.remaining)}`,
-          meta: "atrasada",
-          urgent: true,
-          href,
-        });
+  const financeBySpace = [
+    { name: "Pessoal", space: personalSpace, href: "/financeiro", data: pessoalFinance },
+    { name: "Visionário Dev", space: visionarioSpace, href: "/visionario/financeiro", data: visionarioFinance },
+    { name: "TikTok", space: tiktokSpace, href: "/tiktok/financeiro", data: tiktokFinance },
+  ];
+  for (const { name, space, href, data } of financeBySpace) {
+    if (!space || !data) continue;
+    if (data.aPagar.overdueCount > 0) {
+      const n = data.aPagar.overdueCount;
+      attentionItems.unshift({
+        id: `${space.id}-pagar`,
+        icon: Wallet,
+        label: `${name} · ${n === 1 ? "pagamento atrasado" : "pagamentos atrasados"}`,
+        title: `${n} ${n === 1 ? "pagamento atrasado" : "pagamentos atrasados"} — ${formatCurrency(data.aPagar.overdue)}`,
+        meta: "atrasado",
+        urgent: true,
+        href: `${href}?aba=a_pagar`,
       });
+    }
+    if (data.aReceber.overdueCount > 0) {
+      const n = data.aReceber.overdueCount;
+      attentionItems.unshift({
+        id: `${space.id}-receber`,
+        icon: HandCoins,
+        label: `${name} · ${n === 1 ? "cobrança atrasada" : "cobranças atrasadas"}`,
+        title: `${n} ${n === 1 ? "cobrança atrasada" : "cobranças atrasadas"} — ${formatCurrency(data.aReceber.overdue)}`,
+        meta: "atrasado",
+        urgent: true,
+        href: `${href}?aba=a_receber`,
+      });
+    }
   }
+  attentionItems.sort((a, b) => Number(b.urgent) - Number(a.urgent));
 
   return (
     <div className="flex flex-col gap-6">
@@ -195,7 +212,7 @@ function FinanceColumn({
 }: {
   title: string;
   icon: typeof Wallet;
-  data: { saldo: number; receita: number; despesa: number; lucro: number } | null;
+  data: FinancialMonthOverview | null;
   href: string;
 }) {
   return (
@@ -207,9 +224,29 @@ function FinanceColumn({
       {data ? (
         <div className="flex flex-col gap-1">
           <Row label="Saldo atual" value={data.saldo} />
-          <Row label="Receita (mês)" value={data.receita} tone="success" />
-          <Row label="Despesas (mês)" value={data.despesa} tone="destructive" />
-          <Row label="Lucro (mês)" value={data.lucro} tone={data.lucro >= 0 ? "success" : "destructive"} />
+          <div className="my-1 border-t border-border/60" />
+          <Row label="Entrou no mês" value={data.recebido} tone="success" />
+          <Row label="Saiu no mês" value={data.pago} tone="destructive" />
+          <div className="my-1 border-t border-border/60" />
+          <Row
+            label="A receber"
+            value={data.aReceber.total}
+            tone={data.aReceber.overdue > 0 ? "destructive" : "warning"}
+            hint={data.aReceber.overdue > 0 ? `${formatCurrency(data.aReceber.overdue)} atrasado` : undefined}
+          />
+          <Row
+            label="A pagar"
+            value={data.aPagar.total}
+            tone={data.aPagar.overdue > 0 ? "destructive" : "warning"}
+            hint={data.aPagar.overdue > 0 ? `${formatCurrency(data.aPagar.overdue)} atrasado` : undefined}
+          />
+          <div className="my-1 border-t border-border/60" />
+          <Row
+            label="Resultado do mês"
+            value={data.resultado}
+            tone={data.resultado > 0 ? "success" : data.resultado < 0 ? "destructive" : undefined}
+            strong
+          />
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">Sem permissão para ver o financeiro deste espaço.</p>
@@ -221,11 +258,27 @@ function FinanceColumn({
   );
 }
 
-function Row({ label, value, tone }: { label: string; value: number; tone?: "success" | "destructive" }) {
-  const toneClass = tone === "success" ? "text-success" : tone === "destructive" ? "text-destructive" : "text-foreground";
+function Row({
+  label,
+  value,
+  tone,
+  hint,
+  strong,
+}: {
+  label: string;
+  value: number;
+  tone?: "success" | "destructive" | "warning";
+  hint?: string;
+  strong?: boolean;
+}) {
+  const toneClass =
+    tone === "success" ? "text-success" : tone === "destructive" ? "text-destructive" : tone === "warning" ? "text-warning" : "text-foreground";
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-xs ${strong ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+        {label}
+        {hint && <span className="block text-[11px] text-destructive">{hint}</span>}
+      </span>
       <span className={`text-sm font-semibold tabular-nums whitespace-nowrap ${toneClass}`}>{formatCurrency(value)}</span>
     </div>
   );

@@ -16,10 +16,8 @@ import {
 } from "@/lib/supabase/repositories/financial.repository";
 import { prepareFinancialSpace } from "@/lib/supabase/financial-page-data";
 import {
-  totalBalance,
   calculateMRR,
-  monthCashSummary,
-  pendingInMonth,
+  financialMonthOverview,
   listChargesForKind,
   clientBillingSnapshot,
   recurringRevenueByService,
@@ -27,7 +25,7 @@ import {
 import { effectiveRenewalDate, groupChargesByOrigin, isPlannedRenewal, plannedRenewalsTotal } from "@/lib/domains";
 import { addDaysKey, daysBetweenKeys } from "@/lib/recurrence";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
-import { todayKeySaoPaulo, currentMonthKeySaoPaulo, dateKeyInSaoPaulo } from "@/lib/format";
+import { todayKeySaoPaulo, currentMonthKeySaoPaulo, dateKeyInSaoPaulo, formatCurrency } from "@/lib/format";
 import {
   VisionarioDashboard,
   type AttentionItem,
@@ -133,27 +131,23 @@ export default async function VisionarioOverviewPage() {
   // ---------------------------------------------------------------- Financeiro
   let finance: DashboardData["finance"] = null;
   let receivables: DashboardData["receivables"] = null;
+  let payables: DashboardData["payables"] = null;
   const attention: AttentionItem[] = [];
 
   if (canViewFinanceiro) {
-    const cash = monthCashSummary(charges, payments, monthKey);
-    const receivableMonth = pendingInMonth(charges, payments, "entrada", monthKey);
-    const payableMonth = pendingInMonth(charges, payments, "saida", monthKey);
+    // Mesma função da Home geral e das páginas de Financeiro.
+    const overview = financialMonthOverview(accounts, charges, payments, today);
     const incoming = listChargesForKind(charges, payments, "entrada", today);
     const outgoing = listChargesForKind(charges, payments, "saida", today);
 
     finance = {
       mrr: calculateMRR(origins, charges, contracts).mrr,
-      // "A receber/A pagar" do MÊS exibido — recorrências entram de novo automaticamente a cada mês.
-      aReceber: receivableMonth.month,
-      aPagar: payableMonth.month,
-      aReceberAtrasadoAnterior: receivableMonth.overdueBefore,
-      aPagarAtrasadoAnterior: payableMonth.overdueBefore,
-      recebido: cash.recebido,
-      pago: cash.pago,
-      resultado: cash.recebido - cash.pago,
-      saldo: totalBalance(accounts, payments, new Map(charges.map((c) => [c.id, c.kind]))),
-      overdueIn: incoming.filter((r) => r.bucket === "atrasadas").reduce((s, r) => s + r.remaining, 0),
+      saldo: overview.saldo,
+      recebido: overview.recebido,
+      pago: overview.pago,
+      resultado: overview.resultado,
+      aReceber: overview.aReceber,
+      aPagar: overview.aPagar,
     };
 
     const toRow = (r: (typeof incoming)[number]): ReceivableRow => {
@@ -178,23 +172,45 @@ export default async function VisionarioOverviewPage() {
       overdue: overdueIn.map(toRow),
       upcoming: upcomingIn.slice(0, 5).map(toRow),
       upcomingTotalCount: upcomingIn.length,
-      receivedThisMonth: { total: cash.recebido, count: paymentsThisMonth.length },
+      settledThisMonth: { total: overview.recebido, count: paymentsThisMonth.length },
     };
 
-    if (overdueIn.length > 0) {
+    // Contas a pagar: atrasadas (com "Marcar pago") x próximos vencimentos (futuros).
+    const toPayRow = (r: (typeof outgoing)[number]): ReceivableRow => ({
+      charge: r.charge,
+      remaining: r.remaining,
+      title: r.charge.description,
+      subtitle: r.charge.supplier_name ?? (r.charge.installment_number ? `Parcela ${r.charge.installment_number}/${r.charge.installment_total}` : null),
+      clientId: null,
+      days: daysBetweenKeys(today, r.charge.due_date),
+    });
+    const overdueOutRows = outgoing.filter((r) => r.bucket === "atrasadas");
+    const upcomingOut = outgoing.filter((r) => r.bucket === "vence_hoje" || r.bucket === "proximas");
+    payables = {
+      overdue: overdueOutRows.map(toPayRow),
+      upcoming: upcomingOut.slice(0, 5).map(toPayRow),
+      upcomingTotalCount: upcomingOut.length,
+      settledThisMonth: {
+        total: overview.pago,
+        count: payments.filter((p) => p.payment_date.startsWith(monthKey) && kindByCharge.get(p.charge_id) === "saida").length,
+      },
+    };
+
+    if (overview.aReceber.overdueCount > 0) {
+      const n = overview.aReceber.overdueCount;
       attention.push({
         id: "cobrancas-atrasadas",
         tone: "danger",
-        label: `${overdueIn.length} ${overdueIn.length === 1 ? "cobrança atrasada" : "cobranças atrasadas"}`,
+        label: `${n} ${n === 1 ? "cobrança atrasada" : "cobranças atrasadas"} — ${formatCurrency(overview.aReceber.overdue)}`,
         href: "/visionario/financeiro?aba=a_receber",
       });
     }
-    const overdueOut = outgoing.filter((r) => r.bucket === "atrasadas").length;
-    if (overdueOut > 0) {
+    if (overview.aPagar.overdueCount > 0) {
+      const n = overview.aPagar.overdueCount;
       attention.push({
         id: "pagar-atrasadas",
         tone: "danger",
-        label: `${overdueOut} ${overdueOut === 1 ? "conta a pagar atrasada" : "contas a pagar atrasadas"}`,
+        label: `${n} ${n === 1 ? "pagamento atrasado" : "pagamentos atrasados"} — ${formatCurrency(overview.aPagar.overdue)}`,
         href: "/visionario/financeiro?aba=a_pagar",
       });
     }
@@ -384,6 +400,7 @@ export default async function VisionarioOverviewPage() {
     attention,
     attentionScopeVisible: canViewFinanceiro || canViewTrabalhos || canViewReunioes || canViewSites,
     receivables,
+    payables,
     agenda,
     work,
     clients: clientsSummary,

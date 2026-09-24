@@ -7,7 +7,7 @@ import {
   listPersonalWorkTasks,
   listGoals,
 } from "@/lib/supabase/repositories/personal.repository";
-import { listFinancialCharges } from "@/lib/supabase/repositories/financial.repository";
+import { listFinancialCharges, listFinancialPayments } from "@/lib/supabase/repositories/financial.repository";
 import { listMeetings } from "@/lib/supabase/repositories/meetings.repository";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { toDateKey } from "@/lib/format";
@@ -25,10 +25,11 @@ export default async function HistoricoPage() {
   const from = new Date();
   from.setDate(from.getDate() - 42);
 
-  const [activities, completions, charges, tasks, workTasks, goals] = await Promise.all([
+  const [activities, completions, charges, payments, tasks, workTasks, goals] = await Promise.all([
     listActivities(space.id),
     listActivityCompletions(profile.id, toDateKey(from), toDateKey(new Date())),
     listFinancialCharges(space.id),
+    listFinancialPayments(space.id),
     listTasks(space.id),
     listPersonalWorkTasks(space.id),
     listGoals(space.id),
@@ -45,6 +46,7 @@ export default async function HistoricoPage() {
       activities={activities}
       completions={completions}
       charges={charges}
+      payments={payments}
       tasks={tasks.filter((t) => t.status === "concluida")}
       workTasks={workTasks.filter((t) => t.status === "concluida")}
       goals={goals.filter((g) => g.status === "concluida")}

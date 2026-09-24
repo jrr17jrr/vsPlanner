@@ -12,10 +12,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ChecklistItem } from "@/components/shared/checklist-item";
 import { toggleActivityCompletionAction } from "@/lib/supabase/personal-actions";
 import { getRealOccurrences } from "@/lib/routine-real";
-import { monthSummary } from "@/lib/financial-calc";
+import { monthCashSummary } from "@/lib/financial-calc";
 import { formatDateShort, formatMonthYear, formatCurrency, weekdayLabel, toDateKey, currentMonthKeySaoPaulo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Activity, ActivityCompletion, FinancialCharge, Goal, Meeting, PersonalWorkTask, Task } from "@/types/database.types";
+import type { Activity, ActivityCompletion, FinancialCharge, FinancialPayment, Goal, Meeting, PersonalWorkTask, Task } from "@/types/database.types";
 
 function useWeekRanges(count: number) {
   return useMemo(() => {
@@ -39,6 +39,7 @@ export function HistoricoPageClient({
   activities,
   completions: initialCompletions,
   charges,
+  payments,
   tasks,
   workTasks,
   goals,
@@ -47,6 +48,7 @@ export function HistoricoPageClient({
   activities: Activity[];
   completions: ActivityCompletion[];
   charges: FinancialCharge[];
+  payments: FinancialPayment[];
   tasks: Task[];
   workTasks: PersonalWorkTask[];
   goals: Goal[];
@@ -173,7 +175,9 @@ export function HistoricoPageClient({
         <TabsContent value="financeiro">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {months.map((m) => {
-              const summary = monthSummary(charges, m.key);
+              // Caixa pela data real — mesmo critério de "Entrou/Saiu no mês" da Home e do Financeiro.
+              const cash = monthCashSummary(charges, payments, m.key);
+              const summary = { receita: cash.recebido, despesa: cash.pago, lucro: cash.recebido - cash.pago };
               return (
                 <Card key={m.key} className="p-4">
                   <p className="text-sm font-medium text-foreground">
@@ -191,7 +195,7 @@ export function HistoricoPageClient({
                     </div>
                     <div className="flex justify-between border-t border-border pt-1">
                       <span className="text-muted-foreground">Resultado</span>
-                      <span className="font-semibold text-foreground">{formatCurrency(summary.lucro)}</span>
+                      <span className={`font-semibold ${summary.lucro > 0 ? "text-success" : summary.lucro < 0 ? "text-destructive" : "text-foreground"}`}>{formatCurrency(summary.lucro)}</span>
                     </div>
                   </div>
                 </Card>
