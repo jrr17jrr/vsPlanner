@@ -92,6 +92,16 @@ export function todayKeySaoPaulo(): string {
   }).format(new Date());
 }
 
+/** Data (yyyy-MM-dd) de um timestamp ISO no fuso de São Paulo. */
+export function dateKeyInSaoPaulo(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
 /** Mês atual (yyyy-MM) no fuso de São Paulo — mesma razão de `todayKeySaoPaulo`. */
 export function currentMonthKeySaoPaulo(): string {
   return todayKeySaoPaulo().slice(0, 7);

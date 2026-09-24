@@ -58,8 +58,9 @@ import type {
   Service,
 } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
+import type { FinanceTab } from "@/lib/finance-tabs";
 
-type Tab = "visao" | "movimentacoes" | "a_receber" | "a_pagar" | "config";
+type Tab = FinanceTab;
 
 function previousMonthKey(monthKey: string): string {
   const [y, m] = monthKey.split("-").map(Number);
@@ -101,7 +102,9 @@ export function FinanceiroPageClient({
   clientServices,
   services,
   permissions,
+  initialTab = "visao",
 }: {
+  initialTab?: Tab;
   scope: FinancialScope;
   charges: FinancialCharge[];
   payments: FinancialPayment[];
@@ -114,7 +117,7 @@ export function FinanceiroPageClient({
   services: Service[];
   permissions: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }) {
-  const [tab, setTab] = useState<Tab>("visao");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [period, setPeriod] = useState<PeriodPreset>("6m");
   const [dialog, setDialog] = useState<DialogPreset>(null);
 

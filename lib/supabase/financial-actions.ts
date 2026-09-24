@@ -450,6 +450,47 @@ export async function deletePaymentAction(scope: FinancialScope, paymentId: stri
   return { success: "Pagamento desfeito — a cobrança voltou a ficar em aberto." };
 }
 
+/**
+ * "Marcar novamente como pendente" (pagamento registrado por engano):
+ * remove TODOS os pagamentos da cobrança — ela volta para A receber/A
+ * pagar e o saldo da conta volta ao que era. Em cobranças de contrato
+ * (que nascem sem desconto/acréscimo), também desfaz o ajuste feito pelo
+ * "Quitar" com valor diferente, devolvendo o valor original.
+ */
+export async function undoChargePaymentsAction(scope: FinancialScope, chargeId: string): Promise<ActionState> {
+  const { profile, space } = await requireScopedModulePermission(scope, "financeiro", "edit");
+  const supabase = await createSupabaseServerClient();
+
+  const { data: charge, error: chargeError } = await supabase
+    .from("financial_charges")
+    .select("id, kind, client_service_id, discount_amount, addition_amount")
+    .eq("id", chargeId)
+    .eq("space_id", space.id)
+    .maybeSingle();
+  if (chargeError) return { error: chargeError.message };
+  if (!charge) return { error: "Cobrança não encontrada." };
+
+  const { data: removed, error } = await supabase
+    .from("financial_payments")
+    .delete()
+    .eq("charge_id", chargeId)
+    .eq("space_id", space.id)
+    .select("id");
+  if (error) return { error: error.message };
+  if (!removed || removed.length === 0) return { error: "Esta cobrança não tem pagamento registrado." };
+
+  if (charge.client_service_id && (Number(charge.discount_amount) !== 0 || Number(charge.addition_amount) !== 0)) {
+    await supabase
+      .from("financial_charges")
+      .update({ discount_amount: 0, addition_amount: 0, updated_by: profile.id })
+      .eq("id", chargeId)
+      .eq("space_id", space.id);
+  }
+
+  revalidateFinancialViews(scope);
+  return { success: charge.kind === "entrada" ? "Cobrança voltou para pendente." : "Despesa voltou para pendente." };
+}
+
 export async function cancelChargeAction(scope: FinancialScope, chargeId: string): Promise<ActionState> {
   const { space } = await requireScopedModulePermission(scope, "financeiro", "delete");
   const supabase = await createSupabaseServerClient();

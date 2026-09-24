@@ -77,6 +77,13 @@ export function nextOccurrence(
   return addMonthsKey(key, months, anchorDay);
 }
 
+/** Dias de `from` até `to` (negativo se `to` for antes). Chaves yyyy-MM-dd, sem fuso. */
+export function daysBetweenKeys(from: string, to: string): number {
+  const a = parseDateKey(from);
+  const b = parseDateKey(to);
+  return Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 86_400_000);
+}
+
 /** Fator para normalizar um valor recorrente em "por mês" (receita recorrente mensal). */
 export function monthlyFactor(frequency: FinancialRecurrenceFrequency | ClientServiceFrequency, interval: number | null = null): number {
   if (frequency === "semanal") return 52 / 12;

@@ -7,7 +7,7 @@ import type {
   FinancialPayment,
 } from "@/types/database.types";
 import { toDateKey, todayKeySaoPaulo } from "@/lib/format";
-import { monthlyFactor, nextOccurrence, parseDateKey } from "@/lib/recurrence";
+import { daysBetweenKeys, monthlyFactor, nextOccurrence, parseDateKey } from "@/lib/recurrence";
 
 /**
  * Único lugar onde o Financeiro é CALCULADO. Dashboard, gráficos, contas a
@@ -286,6 +286,92 @@ export function clientFinancialSummary(
     pendingCount: pending.length,
     payments: [...clientPayments].sort((a, b) => b.payment_date.localeCompare(a.payment_date)),
   };
+}
+
+export type ClientBillingStatus = "atrasado" | "pendente" | "pago" | "sem_cobranca";
+
+export type ClientBillingSnapshot = {
+  status: ClientBillingStatus;
+  /** Cobrança que define a situação (a atrasada mais antiga, a próxima a vencer ou a última paga). */
+  charge: FinancialCharge | null;
+  /** Em aberto da cobrança em foco (0 quando paga). */
+  remaining: number;
+  daysLate: number;
+  daysUntilDue: number;
+  overdueCount: number;
+  overdueTotal: number;
+};
+
+/** Janela em que uma cobrança em aberto já conta como "pendente" (vencendo em breve). */
+export const PENDING_WINDOW_DAYS = 10;
+
+/**
+ * Situação financeira de UM cliente, derivada só das cobranças de
+ * entrada reais dele (mesma fonte do Financeiro):
+ *  - atrasado: existe cobrança em aberto com vencimento passado;
+ *  - pendente: próxima cobrança em aberto vence em até 10 dias;
+ *  - pago: a última cobrança já vencida/recente foi quitada (em dia);
+ *  - sem_cobranca: nenhuma cobrança registrada.
+ */
+export function clientBillingSnapshot(
+  clientId: string,
+  charges: FinancialCharge[],
+  payments: FinancialPayment[],
+  today: string = todayKeySaoPaulo()
+): ClientBillingSnapshot {
+  const mine = charges.filter((c) => c.client_id === clientId && c.kind === "entrada" && c.status !== "cancelado");
+  const open = mine.filter((c) => chargeStatus(c, payments) !== "pago").sort((a, b) => a.due_date.localeCompare(b.due_date));
+  const overdue = open.filter((c) => c.due_date < today);
+  const base = {
+    overdueCount: overdue.length,
+    overdueTotal: roundCents(overdue.reduce((s, c) => s + remainingAmount(c, payments), 0)),
+  };
+
+  if (overdue.length > 0) {
+    const charge = overdue[0];
+    return {
+      ...base,
+      status: "atrasado",
+      charge,
+      remaining: remainingAmount(charge, payments),
+      daysLate: daysBetweenKeys(charge.due_date, today),
+      daysUntilDue: 0,
+    };
+  }
+
+  const upcoming = open[0] ?? null;
+  const pendingSnapshot = (charge: FinancialCharge): ClientBillingSnapshot => ({
+    ...base,
+    status: "pendente",
+    charge,
+    remaining: remainingAmount(charge, payments),
+    daysLate: 0,
+    daysUntilDue: daysBetweenKeys(today, charge.due_date),
+  });
+
+  if (upcoming && daysBetweenKeys(today, upcoming.due_date) <= PENDING_WINDOW_DAYS) return pendingSnapshot(upcoming);
+
+  const lastPaid = mine
+    .filter((c) => chargeStatus(c, payments) === "pago")
+    .sort((a, b) => b.due_date.localeCompare(a.due_date))[0];
+  if (lastPaid) return { ...base, status: "pago", charge: lastPaid, remaining: 0, daysLate: 0, daysUntilDue: 0 };
+  if (upcoming) return pendingSnapshot(upcoming);
+  return { ...base, status: "sem_cobranca", charge: null, remaining: 0, daysLate: 0, daysUntilDue: 0 };
+}
+
+/** Receita recorrente agrupada por serviço do catálogo (contratos recorrentes ativos). */
+export function recurringRevenueByService(contracts: ClientService[]) {
+  const byService = new Map<string, { serviceId: string; count: number; monthly: number }>();
+  for (const c of contracts) {
+    const monthly = contractMonthlyValue(c);
+    if (monthly <= 0) continue;
+    const row = byService.get(c.service_id) ?? { serviceId: c.service_id, count: 0, monthly: 0 };
+    row.count += 1;
+    row.monthly = roundCents(row.monthly + monthly);
+    byService.set(c.service_id, row);
+  }
+  const rows = [...byService.values()].sort((a, b) => b.monthly - a.monthly);
+  return { rows, total: roundCents(rows.reduce((s, r) => s + r.monthly, 0)) };
 }
 
 /**
