@@ -47,6 +47,21 @@ export function domainTotalSpent(
   return purchase + renewals;
 }
 
+/**
+ * O domínio gera uma renovação prevista (gasto futuro)? Só se estiver
+ * ATIVO e marcado para renovar. `will_renew` ausente (migration 010 ainda
+ * não aplicada) conta como true — mesmo default do banco.
+ */
+export function isPlannedRenewal(domain: Pick<Domain, "status" | "will_renew">): boolean {
+  return domain.status === "ativo" && domain.will_renew !== false;
+}
+
+/** Soma de `renewal_price` dos domínios com renovação prevista. */
+export function plannedRenewalsTotal(domains: Pick<Domain, "status" | "will_renew" | "renewal_price">[]): number {
+  const total = domains.filter(isPlannedRenewal).reduce((s, d) => s + Number(d.renewal_price ?? 0), 0);
+  return Math.round(total * 100) / 100;
+}
+
 export function groupChargesByOrigin(charges: FinancialCharge[]): Map<string, FinancialCharge[]> {
   const map = new Map<string, FinancialCharge[]>();
   for (const c of charges) {

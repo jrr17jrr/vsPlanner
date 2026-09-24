@@ -10,7 +10,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createMovementAction, type MovementFormInput } from "@/lib/supabase/financial-actions";
-import { parseMoneyInput, todayKeySaoPaulo } from "@/lib/format";
+import { formatCurrency, formatDate, parseMoneyInput, todayKeySaoPaulo } from "@/lib/format";
+import { firstDueOnOrAfter, nextOccurrence } from "@/lib/recurrence";
+import { Switch } from "@/components/ui/switch";
 import { FREQUENCY_LABEL, PAYMENT_METHOD_LABEL } from "@/lib/finance-labels";
 import type {
   Client,
@@ -21,7 +23,6 @@ import type {
   FinancialOriginType,
   FinancialPaymentMethod,
   FinancialReferenceType,
-  FinancialRecurrenceEndType,
   FinancialRecurrenceFrequency,
   Service,
 } from "@/types/database.types";
@@ -126,9 +127,9 @@ function MovementForm({
 
   const [frequency, setFrequency] = useState<FinancialRecurrenceFrequency>("mensal");
   const [interval, setInterval_] = useState("2");
-  const [endType, setEndType] = useState<FinancialRecurrenceEndType>("nunca");
+  const [dueDay, setDueDay] = useState(String(Number(todayKeySaoPaulo().slice(8, 10))));
+  const [hasEndDate, setHasEndDate] = useState(false);
   const [endDate, setEndDate] = useState("");
-  const [endOccurrences, setEndOccurrences] = useState("12");
 
   const [settled, setSettled] = useState(defaultSettled ?? true);
   const [paymentMethod, setPaymentMethod] = useState<FinancialPaymentMethod>("pix");
@@ -169,7 +170,11 @@ function MovementForm({
     if (!original || original <= 0) return toast.error("Informe o valor.");
     if (!dueDate) return toast.error("Escolha a data.");
     if (final <= 0) return toast.error("O valor final precisa ser maior que zero.");
-    const isSettled = tipo === "parcelado" ? false : settled;
+    // Recorrente: cada competência nasce pendente e é paga individualmente.
+    const isSettled = tipo === "unico" ? settled : false;
+    const usesDay = tipo === "recorrente" && frequency !== "semanal";
+    if (usesDay && !(Number(dueDay) >= 1 && Number(dueDay) <= 31)) return toast.error("Dia do vencimento precisa ser entre 1 e 31.");
+    if (tipo === "recorrente" && hasEndDate && !endDate) return toast.error("Informe a data de término ou desmarque a opção.");
     if (isSettled && !accountId) return toast.error("Escolha a conta que recebeu/pagou.");
 
     const input: MovementFormInput = {
@@ -184,14 +189,14 @@ function MovementForm({
       discountAmount: discount || undefined,
       additionAmount: addition || undefined,
       dueDate,
-      competencyDate: competencyDate || undefined,
+      competencyDate: tipo === "recorrente" ? undefined : competencyDate || undefined,
       tipo,
       installmentCount: tipo === "parcelado" ? parseInt(installmentCount, 10) : undefined,
       recurrenceFrequency: tipo === "recorrente" ? frequency : undefined,
       recurrenceInterval: tipo === "recorrente" ? parseInt(interval, 10) : undefined,
-      recurrenceEndType: tipo === "recorrente" ? endType : undefined,
-      recurrenceEndDate: tipo === "recorrente" && endType === "em_data" ? endDate : undefined,
-      recurrenceEndOccurrences: tipo === "recorrente" && endType === "apos_ocorrencias" ? parseInt(endOccurrences, 10) : undefined,
+      recurrenceEndType: tipo === "recorrente" ? (hasEndDate ? "em_data" : "nunca") : undefined,
+      recurrenceEndDate: tipo === "recorrente" && hasEndDate ? endDate : undefined,
+      recurrenceDay: usesDay ? Number(dueDay) : undefined,
       settled: isSettled,
       paymentMethod: isSettled ? paymentMethod : undefined,
       accountId: isSettled ? accountId : undefined,
@@ -213,6 +218,24 @@ function MovementForm({
   }
 
   const isEntrada = kind === "entrada";
+
+  const recurrencePreview = (() => {
+    if (tipo !== "recorrente" || !dueDate) return null;
+    const day = Number(dueDay);
+    if (frequency !== "semanal" && !(day >= 1 && day <= 31)) return null;
+    const first = frequency === "semanal" ? dueDate : firstDueOnOrAfter(dueDate, day);
+    const today = todayKeySaoPaulo();
+    let late = 0;
+    let cursor = first;
+    for (let guard = 0; guard < 240 && cursor < today; guard++) {
+      late += 1;
+      cursor = nextOccurrence(cursor, frequency, parseInt(interval, 10) || null, frequency === "semanal" ? undefined : day);
+    }
+    const every =
+      frequency === "semanal" ? "toda semana" : frequency === "mensal" ? `todo dia ${day}` : `dia ${day}, ${FREQUENCY_LABEL[frequency].toLowerCase()}`;
+    const lateNote = late > 0 ? ` · ${late} vencimento(s) já passaram e entrarão como atrasados` : "";
+    return `1º vencimento em ${formatDate(first)}, depois ${every}${final > 0 ? ` · ${formatCurrency(final)}` : ""}${lateNote}.`;
+  })();
 
   return (
     <DialogContent className="sm:max-w-xl">
@@ -333,48 +356,57 @@ function MovementForm({
 
         {tipo === "recorrente" && (
           <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <p className="text-sm font-medium text-foreground">Conta recorrente</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="flex flex-col gap-1.5">
-                <Label>Frequência</Label>
+                <Label>Repete</Label>
                 <Select value={frequency} onValueChange={(v) => setFrequency(v as FinancialRecurrenceFrequency)} disabled={pending}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger aria-label="Repete"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(Object.keys(FREQUENCY_LABEL) as FinancialRecurrenceFrequency[]).map((f) => (
-                      <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>
+                      <SelectItem key={f} value={f}>{f === "mensal" ? "Mensalmente" : FREQUENCY_LABEL[f]}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               {(frequency === "a_cada_x_meses" || frequency === "customizado") && (
                 <div className="flex flex-col gap-1.5">
-                  <Label>Intervalo (meses)</Label>
-                  <Input type="number" min={1} value={interval} onChange={(e) => setInterval_(e.target.value)} disabled={pending} />
+                  <Label htmlFor="mov-interval">A cada (meses)</Label>
+                  <Input id="mov-interval" type="number" min={1} value={interval} onChange={(e) => setInterval_(e.target.value)} disabled={pending} />
                 </div>
               )}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Término</Label>
-              <div className="flex gap-2">
-                {(["nunca", "em_data", "apos_ocorrencias"] as FinancialRecurrenceEndType[]).map((et) => (
-                  <Button key={et} type="button" size="sm" variant={endType === et ? "default" : "outline"} onClick={() => setEndType(et)} disabled={pending}>
-                    {et === "nunca" ? "Sem fim" : et === "em_data" ? "Em data" : "Após X ocorrências"}
-                  </Button>
-                ))}
+              {frequency !== "semanal" && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="mov-due-day">Vence todo dia</Label>
+                  <Input id="mov-due-day" type="number" min={1} max={31} value={dueDay} onChange={(e) => setDueDay(e.target.value)} disabled={pending} />
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="mov-start">Começa em</Label>
+                <Input id="mov-start" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />
               </div>
-              {endType === "em_data" && (
-                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={pending} className="mt-2" />
-              )}
-              {endType === "apos_ocorrencias" && (
-                <Input type="number" min={1} value={endOccurrences} onChange={(e) => setEndOccurrences(e.target.value)} disabled={pending} className="mt-2" />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <Switch checked={hasEndDate} onCheckedChange={setHasEndDate} disabled={pending} aria-label="Definir data de término" />
+                {hasEndDate ? "Termina em" : "Sem data de término"}
+              </label>
+              {hasEndDate && (
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={pending} aria-label="Data de término" className="sm:max-w-[12rem]" />
               )}
             </div>
+            {recurrencePreview && <p className="rounded-md bg-secondary px-3 py-2 text-xs text-secondary-foreground">{recurrencePreview}</p>}
+            <p className="text-xs text-muted-foreground">
+              Cada vencimento é uma competência separada: pagar um mês não quita o próximo. A recorrência continua até você cancelá-la.
+            </p>
           </div>
         )}
 
+        {tipo !== "recorrente" && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label>
-              {tipo === "recorrente" ? "1º vencimento" : tipo === "parcelado" ? "Vencimento da 1ª parcela" : settled ? "Data" : "Vencimento"} *
+              {tipo === "parcelado" ? "Vencimento da 1ª parcela" : settled ? "Data" : "Vencimento"} *
             </Label>
             <div className="flex gap-2">
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />
@@ -388,8 +420,9 @@ function MovementForm({
             <Input type="date" value={competencyDate} onChange={(e) => setCompetencyDate(e.target.value)} disabled={pending} placeholder="Opcional" />
           </div>
         </div>
+        )}
 
-        {tipo !== "parcelado" && (
+        {tipo === "unico" && (
           <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
             <Label>Status</Label>
             <div className="flex gap-2">

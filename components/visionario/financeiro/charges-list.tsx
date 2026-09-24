@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { AsyncConfirmDialog } from "@/components/shared/async-confirm-dialog";
 import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
 import { EditChargeDialog } from "@/components/visionario/financeiro/edit-charge-dialog";
+import { RecurrencesPanel } from "@/components/visionario/financeiro/recurrences-panel";
 import { listChargesForKind, type ReceivablePayable } from "@/lib/financial-calc";
 import { cancelChargeAction, stopRecurrenceAction } from "@/lib/supabase/financial-actions";
 import { FREQUENCY_LABEL, chargeBadgeStatus } from "@/lib/finance-labels";
@@ -32,7 +33,7 @@ import type {
 } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
 
-type Bucket = "em_aberto" | "atrasadas" | "vence_hoje" | "proximas" | "recebida_paga" | "todas";
+type Bucket = "em_aberto" | "este_mes" | "atrasadas" | "vence_hoje" | "proximas" | "recebida_paga" | "todas";
 
 type PendingConfirm = { type: "cancel"; row: ReceivablePayable } | { type: "stop"; origin: FinancialOrigin };
 
@@ -81,8 +82,9 @@ export function ChargesList({
   const filtered = useMemo(() => {
     if (bucket === "todas") return rows;
     if (bucket === "em_aberto") return rows.filter((r) => r.bucket !== "recebida_paga");
+    if (bucket === "este_mes") return rows.filter((r) => r.charge.due_date.startsWith(today.slice(0, 7)));
     return rows.filter((r) => r.bucket === bucket);
-  }, [rows, bucket]);
+  }, [rows, bucket, today]);
 
   const totals = useMemo(() => {
     const open = rows.filter((r) => r.bucket !== "recebida_paga");
@@ -95,6 +97,7 @@ export function ChargesList({
 
   const bucketLabels: Record<Bucket, string> = {
     em_aberto: "Em aberto",
+    este_mes: "Este mês",
     atrasadas: "Atrasadas",
     vence_hoje: "Vence hoje",
     proximas: "Próximas",
@@ -131,6 +134,17 @@ export function ChargesList({
           </Button>
         )}
       </div>
+
+      <RecurrencesPanel
+        scope={scope}
+        kind={kind}
+        origins={origins}
+        charges={charges}
+        payments={payments}
+        accounts={accounts}
+        categories={categories}
+        permissions={{ canEdit: permissions.canEdit }}
+      />
 
       <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
         <TabsList className="flex-wrap">

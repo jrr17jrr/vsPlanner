@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { AtSign, CheckCircle2, Globe, MoreVertical, Pencil, Plus, Receipt, Trash2, Wallet, CalendarClock } from "lucide-react";
+import { toast } from "sonner";
+import { AtSign, Ban, CheckCircle2, Globe, Loader2, MoreVertical, Pencil, Plus, Receipt, Repeat, Trash2, Wallet, CalendarClock } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
 import { MetricCard } from "@/components/shared/metric-card";
 import { MoneyCard } from "@/components/shared/money-card";
@@ -23,9 +26,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DomainFormDialog, DOMAIN_STATUS_LABEL } from "@/components/sites/domain-form-dialog";
 import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
-import { deleteDomainAction } from "@/lib/supabase/domains-actions";
+import { deleteDomainAction, setDomainWillRenewAction } from "@/lib/supabase/domains-actions";
 import { chargeStatus, remainingAmount } from "@/lib/financial-calc";
-import { domainTotalSpent, effectiveRenewalDate, groupChargesByOrigin, periodLabel } from "@/lib/domains";
+import {
+  domainTotalSpent,
+  effectiveRenewalDate,
+  groupChargesByOrigin,
+  isPlannedRenewal,
+  periodLabel,
+  plannedRenewalsTotal,
+} from "@/lib/domains";
 import { addDaysKey } from "@/lib/recurrence";
 import { formatCurrency, formatDate, todayKeySaoPaulo } from "@/lib/format";
 import type { Client, ClientSite, Domain, DomainStatus, FinancialAccount, FinancialCharge, FinancialPayment } from "@/types/database.types";
@@ -61,7 +71,13 @@ export function DomainsPageClient({
   const [deleting, setDeleting] = useState<Domain | null>(null);
   const [paying, setPaying] = useState<FinancialCharge | null>(null);
   const [statusFilter, setStatusFilter] = useState<"todos" | DomainStatus>("todos");
+  const [renewFilter, setRenewFilter] = useState<"todos" | "sim" | "nao">("todos");
   const [query, setQuery] = useState("");
+  // Atualização otimista do "Renovar": o card e os totais mudam na hora; se
+  // o Supabase recusar, volta ao valor anterior. Depois do sucesso a Server
+  // Action revalida a rota e os dados do servidor passam a bater com isto.
+  const [renewOverride, setRenewOverride] = useState<Record<string, boolean>>({});
+  const [savingRenew, setSavingRenew] = useState<Record<string, boolean>>({});
 
   const today = todayKeySaoPaulo();
   const in30 = addDaysKey(today, 30);
@@ -69,9 +85,35 @@ export function DomainsPageClient({
   const siteById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
   const chargesByOrigin = useMemo(() => groupChargesByOrigin(charges), [charges]);
 
+  const effectiveDomains = useMemo(
+    () => domains.map((d) => (d.id in renewOverride ? { ...d, will_renew: renewOverride[d.id] } : d)),
+    [domains, renewOverride]
+  );
+
+  async function toggleRenew(domain: Domain, next: boolean) {
+    const previous = domain.will_renew !== false;
+    setRenewOverride((o) => ({ ...o, [domain.id]: next }));
+    setSavingRenew((s) => ({ ...s, [domain.id]: true }));
+    try {
+      const result = await setDomainWillRenewAction(domain.id, next);
+      if (result.error) {
+        setRenewOverride((o) => ({ ...o, [domain.id]: previous }));
+        toast.error(result.error);
+        return;
+      }
+      toast.success(result.success ?? "Salvo.");
+      if (result.warning) toast.warning(result.warning);
+    } catch {
+      setRenewOverride((o) => ({ ...o, [domain.id]: previous }));
+      toast.error("Não foi possível salvar. Verifique a conexão e tente de novo.");
+    } finally {
+      setSavingRenew((s) => ({ ...s, [domain.id]: false }));
+    }
+  }
+
   const rows = useMemo(
     () =>
-      domains.map((d) => {
+      effectiveDomains.map((d) => {
         const originCharges = d.financial_origin_id ? chargesByOrigin.get(d.financial_origin_id) ?? [] : [];
         const openCharge = originCharges
           .filter((c) => c.status !== "cancelado" && chargeStatus(c, payments) !== "pago")
@@ -83,20 +125,26 @@ export function DomainsPageClient({
           openCharge,
         };
       }),
-    [domains, chargesByOrigin, payments]
+    [effectiveDomains, chargesByOrigin, payments]
   );
 
+  const byRenewal = (a: { renewal: string | null }, b: { renewal: string | null }) =>
+    (a.renewal ?? "").localeCompare(b.renewal ?? "");
   const activeRows = rows.filter((r) => r.domain.status === "ativo");
+  // Renovação prevista = ativo + "vou renovar" (nunca pelo status sozinho).
+  const plannedRows = rows.filter((r) => isPlannedRenewal(r.domain));
+  const notRenewingRows = activeRows.filter((r) => r.domain.will_renew === false);
+  const plannedTotal = plannedRenewalsTotal(effectiveDomains);
+  const plannedWithoutPrice = plannedRows.filter((r) => r.domain.renewal_price === null).length;
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
-  const expiring = activeRows
-    .filter((r) => r.renewal && r.renewal <= in30)
-    .sort((a, b) => (a.renewal ?? "").localeCompare(b.renewal ?? ""));
-  const nextRenewal = activeRows
-    .filter((r) => r.renewal && r.renewal >= today)
-    .sort((a, b) => (a.renewal ?? "").localeCompare(b.renewal ?? ""))[0];
+  const expiring = plannedRows.filter((r) => r.renewal && r.renewal <= in30).sort(byRenewal);
+  const nextRenewal =
+    plannedRows.filter((r) => r.renewal && r.renewal >= today).sort(byRenewal)[0] ??
+    activeRows.filter((r) => r.renewal && r.renewal >= today).sort(byRenewal)[0];
 
   const filtered = rows
     .filter((r) => statusFilter === "todos" || r.domain.status === statusFilter)
+    .filter((r) => renewFilter === "todos" || (renewFilter === "sim") === (r.domain.will_renew !== false))
     .filter((r) => !query.trim() || r.domain.domain.includes(query.trim().toLowerCase()))
     .sort((a, b) => (a.renewal ?? "9999").localeCompare(b.renewal ?? "9999"));
 
@@ -114,19 +162,40 @@ export function DomainsPageClient({
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <MetricCard label="Domínios" value={domains.length} icon={Globe} />
         <MoneyCard
-          label="Total gasto em domínios"
-          amount={totalSpent}
-          icon={Wallet}
-          hint={permissions.canViewFinance ? "Compras + renovações pagas" : "Valores de compra cadastrados"}
+          label="Renovações previstas"
+          amount={plannedTotal}
+          icon={Repeat}
+          className="border-primary/40"
+          hint={
+            plannedWithoutPrice > 0
+              ? `Só os que vou renovar · ${plannedWithoutPrice} sem valor cadastrado`
+              : "Somente domínios que pretendo renovar"
+          }
         />
+        <Card className="p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Não renovar</p>
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10">
+              <Ban className="h-3.5 w-3.5 text-primary" aria-hidden />
+            </div>
+          </div>
+          <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">{notRenewingRows.length}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Serão abandonados no vencimento</p>
+        </Card>
         <MetricCard label="Vencendo em 30 dias" value={expiring.length} icon={CalendarClock} tone={expiring.length > 0 ? "warning" : "default"} />
         <MetricCard
           label="Próximo vencimento"
           value={nextRenewal ? `${formatDate(nextRenewal.renewal!)}` : "—"}
           icon={AtSign}
+        />
+        <MoneyCard
+          label="Total gasto"
+          amount={totalSpent}
+          icon={Wallet}
+          hint={permissions.canViewFinance ? "Compras + renovações pagas" : "Valores de compra cadastrados"}
         />
       </div>
 
@@ -173,6 +242,14 @@ export function DomainsPageClient({
             ))}
           </SelectContent>
         </Select>
+        <Select value={renewFilter} onValueChange={(v) => setRenewFilter(v as typeof renewFilter)}>
+          <SelectTrigger className="w-full sm:w-48" aria-label="Renovação"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos (renovação)</SelectItem>
+            <SelectItem value="sim">Vou renovar</SelectItem>
+            <SelectItem value="nao">Não vou renovar</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {filtered.length === 0 ? (
@@ -195,8 +272,13 @@ export function DomainsPageClient({
             const site = domain.site_id ? siteById.get(domain.site_id) : undefined;
             const overdue = domain.status === "ativo" && !!renewal && renewal < today;
             const hasMenu = permissions.canEdit || permissions.canDelete;
+            const willRenew = domain.will_renew !== false;
+            const saving = !!savingRenew[domain.id];
             return (
-              <Card key={domain.id} className="flex flex-col gap-3 p-4">
+              <Card
+                key={domain.id}
+                className={cn("flex flex-col gap-3 p-4 transition-opacity", !willRenew && "border-dashed opacity-75")}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <a
@@ -254,15 +336,38 @@ export function DomainsPageClient({
                     {domain.purchase_price !== null && ` · ${formatCurrency(Number(domain.purchase_price))}`}
                   </dd>
                   <dt className="text-muted-foreground">Valor da renovação</dt>
-                  <dd className="text-right text-foreground">
+                  <dd className={cn("text-right", willRenew ? "text-foreground" : "text-muted-foreground line-through")}>
                     {domain.renewal_price !== null ? formatCurrency(Number(domain.renewal_price)) : "—"}
                   </dd>
+                  <dt className="self-center text-muted-foreground">Renovar</dt>
+                  <dd className="flex items-center justify-end gap-2">
+                    {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-label="Salvando" />}
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
+                        willRenew ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"
+                      )}
+                    >
+                      {willRenew ? "Sim" : "Não"}
+                    </span>
+                    {permissions.canEdit && (
+                      <Switch
+                        checked={willRenew}
+                        disabled={saving}
+                        onCheckedChange={(checked) => toggleRenew(domain, checked)}
+                        aria-label={`Renovar ${domain.domain} no próximo vencimento`}
+                      />
+                    )}
+                  </dd>
+                  {!willRenew && (
+                    <dd className="col-span-2 text-right text-destructive/90">Não renovar no vencimento</dd>
+                  )}
                   <dt className="text-muted-foreground">Total gasto</dt>
                   <dd className="text-right font-medium text-foreground">{formatCurrency(spent)}</dd>
                 </dl>
 
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {domain.financial_origin_id && (
+                  {domain.financial_origin_id && willRenew && (
                     <Badge variant="default" className="gap-1">
                       <Receipt className="h-3 w-3" /> Renovação em A pagar
                     </Badge>

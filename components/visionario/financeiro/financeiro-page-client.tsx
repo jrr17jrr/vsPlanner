@@ -37,7 +37,7 @@ import {
   historicalSeries,
   listChargesForKind,
   monthCashSummary,
-  pendingTotal,
+  pendingInMonth,
   upcomingOpenCharges,
   type ReceivablePayable,
 } from "@/lib/financial-calc";
@@ -141,8 +141,9 @@ export function FinanceiroPageClient({
   const series = useMemo(() => historicalSeries(charges, monthKeys), [charges, monthKeys]);
   const chartData = series.map((s) => ({ month: monthKeyLabel(s.month), Receita: s.receita, Despesas: s.despesa, Lucro: s.lucro }));
 
-  const aReceber = useMemo(() => pendingTotal(charges, payments, "entrada"), [charges, payments]);
-  const aPagar = useMemo(() => pendingTotal(charges, payments, "saida"), [charges, payments]);
+  // Só vencimentos do mês atual (nunca soma competências futuras); atrasado anterior à parte.
+  const receberMes = useMemo(() => pendingInMonth(charges, payments, "entrada", curMonth), [charges, payments, curMonth]);
+  const pagarMes = useMemo(() => pendingInMonth(charges, payments, "saida", curMonth), [charges, payments, curMonth]);
   const atrasadoReceber = useMemo(
     () => listChargesForKind(charges, payments, "entrada", today).filter((r) => r.bucket === "atrasadas").reduce((s, r) => s + r.remaining, 0),
     [charges, payments, today]
@@ -198,8 +199,8 @@ export function FinanceiroPageClient({
             <MoneyCard label="Recebido no mês" amount={cash.recebido} icon={TrendingUp} tone="success" hint="Pela data real do recebimento" />
             <MoneyCard label="Pago no mês" amount={cash.pago} icon={TrendingDown} tone="destructive" hint="Pela data real do pagamento" />
             <MoneyCard label="Resultado do mês" amount={resultado} icon={DollarSign} tone={resultado >= 0 ? "success" : "destructive"} hint="Recebido − pago" />
-            <MoneyCard label="A receber" amount={aReceber} icon={HandCoins} tone="warning" hint={atrasadoReceber > 0 ? `${formatCurrency(atrasadoReceber)} atrasado` : "Cobranças pendentes"} />
-            <MoneyCard label="A pagar" amount={aPagar} icon={Receipt} tone="warning" hint={atrasadoPagar > 0 ? `${formatCurrency(atrasadoPagar)} atrasado` : "Despesas pendentes"} />
+            <MoneyCard label="A receber no mês" amount={receberMes.month} icon={HandCoins} tone="warning" hint={receberMes.overdueBefore > 0 ? `+ ${formatCurrency(receberMes.overdueBefore)} atrasado de meses anteriores` : "Vencimentos deste mês"} />
+            <MoneyCard label="A pagar no mês" amount={pagarMes.month} icon={Receipt} tone="warning" hint={pagarMes.overdueBefore > 0 ? `+ ${formatCurrency(pagarMes.overdueBefore)} atrasado de meses anteriores` : atrasadoPagar > 0 ? `${formatCurrency(atrasadoPagar)} atrasado` : "Vencimentos deste mês"} />
             <MoneyCard label="Receita recorrente mensal" amount={mrr} icon={Repeat} hint={`${recurringCount} recorrência(s) ativa(s)`} />
             <MoneyCard
               label="Atrasado a receber"

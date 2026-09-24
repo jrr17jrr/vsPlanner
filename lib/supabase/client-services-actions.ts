@@ -222,6 +222,7 @@ async function createContractOrigin(
       tipo: "recorrente",
       firstDueDate: firstDueOnOrAfter(from, contract.due_day ?? 1),
       recurrenceFrequency: contract.frequency ?? "mensal",
+      recurrenceDay: contract.frequency === "semanal" ? null : contract.due_day,
       recurrenceEndType: "nunca",
     });
     return created.error ?? null;
@@ -433,6 +434,8 @@ async function syncContractFinance(
       return err ? `Cobranças não geradas: ${err}` : undefined;
     }
     if (Number(before.price) !== Number(after.price)) {
+      // Valor atual da recorrência (migration 011) — próximas competências nascem com ele.
+      await setRecurrenceAmount(supabase, spaceId, activeOrigin.id, Number(after.price));
       const { charges, paidIds } = await originChargesWithPayments(supabase, activeOrigin.id, spaceId);
       const ids = charges.filter((c) => c.status === "ativo" && c.due_date >= today && !paidIds.has(c.id)).map((c) => c.id);
       if (ids.length > 0) {
@@ -470,6 +473,11 @@ async function syncContractFinance(
 
   if (before.service_id !== after.service_id) await renameOrigin(supabase, spaceId, activeOrigin.id, after);
   return undefined;
+}
+
+/** Atualiza o valor atual da recorrência; sem a migration 011 a coluna não existe e isto é ignorado. */
+async function setRecurrenceAmount(supabase: Supa, spaceId: string, originId: string, amount: number) {
+  await supabase.from("financial_origins").update({ recurrence_amount: amount }).eq("id", originId).eq("space_id", spaceId);
 }
 
 async function reactivateOrigin(supabase: Supa, spaceId: string, origin: FinancialOrigin, today: string) {

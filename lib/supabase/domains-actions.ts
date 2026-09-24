@@ -7,11 +7,12 @@ import { hasModulePermission } from "@/lib/supabase/repositories/permissions.rep
 import {
   createOriginWithCharges,
   friendlyDbError,
+  resumeRecurringOrigin,
   revalidateFinancialViews,
   type Supa,
 } from "@/lib/supabase/finance-core";
 import { renewalRecurrence } from "@/lib/domains";
-import { competencyOf } from "@/lib/recurrence";
+import { competencyOf, parseDateKey } from "@/lib/recurrence";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
 import type { Domain, DomainStatus } from "@/types/database.types";
@@ -190,6 +191,16 @@ async function rescheduleRenewalOrigin(supabase: Supa, spaceId: string, profileI
     })
     .eq("id", originId)
     .eq("space_id", spaceId);
+  // Valor atual da renovação (migration 011) — separado para não falhar o
+  // update acima se a coluna ainda não existir.
+  await supabase
+    .from("financial_origins")
+    .update({
+      recurrence_amount: amount,
+      ...(after.renewal_date && { recurrence_day: parseDateKey(after.renewal_date).d }),
+    })
+    .eq("id", originId)
+    .eq("space_id", spaceId);
 
   const { data: charges } = await supabase
     .from("financial_charges")
@@ -239,6 +250,50 @@ async function rescheduleRenewalOrigin(supabase: Supa, spaceId: string, profileI
     competency_date: competencyOf(after.renewal_date),
     created_by: profileId,
   });
+}
+
+/**
+ * Controle rápido "Renovar: Sim/Não" do card. Muda SÓ a decisão
+ * (`will_renew`), nunca o status — o domínio continua ativo até expirar.
+ * Se a renovação está no Financeiro: "Não" para de gerar e cancela as
+ * competências futuras não pagas (deixa de ser gasto previsto em A pagar);
+ * "Sim" retoma a série.
+ */
+export async function setDomainWillRenewAction(domainId: string, willRenew: boolean): Promise<ActionState> {
+  const { profile, space } = await requireModulePermission(VISIONARIO_DEV_SLUG, "sites", "edit");
+  if (typeof willRenew !== "boolean") return { error: "Valor inválido." };
+  const supabase = await createSupabaseServerClient();
+
+  const { data: domain, error } = await supabase
+    .from("domains")
+    .update({ will_renew: willRenew })
+    .eq("id", domainId)
+    .eq("space_id", space.id)
+    .select("*")
+    .maybeSingle();
+  if (error) {
+    const hint = /will_renew/i.test(error.message) ? " — execute a migration 010_domains_will_renew.sql no Supabase." : "";
+    return { error: `${error.message}${hint}` };
+  }
+  if (!domain) return { error: "Domínio não encontrado." };
+
+  let warning: string | undefined;
+  if (domain.financial_origin_id) {
+    const canEditFinance = await hasModulePermission(space.id, "financeiro", "edit");
+    if (!canEditFinance) {
+      warning = "Decisão salva, mas sem permissão no Financeiro a renovação em A pagar não foi ajustada.";
+    } else {
+      if (!willRenew) await stopRenewalOrigin(supabase, space.id, domain.financial_origin_id);
+      else if (domain.status === "ativo") await resumeRecurringOrigin(supabase, space.id, profile.id, domain.financial_origin_id);
+      revalidateFinancialViews("visionario");
+    }
+  }
+
+  revalidateDomainViews();
+  return {
+    success: willRenew ? `${domain.domain}: será renovado.` : `${domain.domain}: não será renovado no vencimento.`,
+    warning,
+  };
 }
 
 export async function createDomainAction(input: DomainFormInput): Promise<ActionState> {
@@ -294,7 +349,8 @@ export async function updateDomainAction(domainId: string, input: DomainFormInpu
   if (beforeError) return { error: beforeError.message };
   if (!before) return { error: "Domínio não encontrado." };
 
-  const wantsFinance = input.trackRenewalInFinance && input.status === "ativo";
+  // "Não renovar" (will_renew = false) nunca reativa a renovação no Financeiro.
+  const wantsFinance = input.trackRenewalInFinance && input.status === "ativo" && before.will_renew !== false;
   const touchesFinance = wantsFinance || !!before.financial_origin_id;
   const [canCreateFinance, canEditFinance] = touchesFinance
     ? await Promise.all([

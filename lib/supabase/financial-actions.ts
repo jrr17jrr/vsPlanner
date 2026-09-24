@@ -6,11 +6,15 @@ import { listFinancialChargesByOrigin } from "@/lib/supabase/repositories/financ
 import {
   assertUsableAccount,
   createOriginWithCharges,
+  occurrenceCompetency,
+  recurrenceAnchorDay,
+  resumeRecurringOrigin,
   revalidateFinancialViews,
   type Supa,
 } from "@/lib/supabase/finance-core";
 import type { FinancialScope } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
+import { addMonthsKey, firstDueOnOrAfter, makeDateKey, nextOccurrence, parseDateKey } from "@/lib/recurrence";
 import type {
   FinancialChargeStatus,
   FinancialKind,
@@ -233,6 +237,12 @@ export type MovementFormInput = {
   recurrenceEndType?: FinancialRecurrenceEndType;
   recurrenceEndDate?: string;
   recurrenceEndOccurrences?: number;
+  /**
+   * Recorrente: dia fixo de vencimento (1..31). Com ele, `dueDate` é a DATA
+   * DE INÍCIO e o 1º vencimento é o primeiro "dia N" a partir dela (mês
+   * curto → último dia do mês).
+   */
+  recurrenceDay?: number;
 
   /** true = já recebido/pago (cria o pagamento junto); false = pendente (A receber / A pagar). */
   settled: boolean;
@@ -272,6 +282,15 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
     return { error: "Parcelamento precisa ter de 2 a 120 parcelas." };
   }
   if (input.tipo === "recorrente" && !input.recurrenceFrequency) return { error: "Escolha a frequência da recorrência." };
+  const usesDay = input.tipo === "recorrente" && input.recurrenceFrequency !== "semanal" && input.recurrenceDay !== undefined;
+  if (usesDay && !(Number.isInteger(input.recurrenceDay) && input.recurrenceDay! >= 1 && input.recurrenceDay! <= 31)) {
+    return { error: "Dia do vencimento precisa ser entre 1 e 31." };
+  }
+  if (input.tipo === "recorrente" && input.recurrenceEndType === "em_data") {
+    if (!input.recurrenceEndDate || !DATE_RE.test(input.recurrenceEndDate)) return { error: "Informe a data de término." };
+    if (input.recurrenceEndDate < input.dueDate) return { error: "A data de término precisa ser depois do início." };
+  }
+  const firstDueDate = usesDay ? firstDueOnOrAfter(input.dueDate, input.recurrenceDay!) : input.dueDate;
   const settled = input.tipo === "parcelado" ? false : input.settled;
   if (settled && (!input.paymentMethod || !PAYMENT_METHODS.includes(input.paymentMethod))) {
     return { error: "Informe a forma de pagamento." };
@@ -306,7 +325,7 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
     amount: input.originalAmount,
     discountAmount: input.discountAmount,
     additionAmount: input.additionAmount,
-    firstDueDate: input.dueDate,
+    firstDueDate,
     competencyDate: input.competencyDate || null,
     installmentCount: input.installmentCount,
     recurrenceFrequency: input.recurrenceFrequency,
@@ -314,6 +333,7 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
     recurrenceEndType: input.recurrenceEndType,
     recurrenceEndDate: input.recurrenceEndDate,
     recurrenceEndOccurrences: input.recurrenceEndOccurrences,
+    recurrenceDay: usesDay ? input.recurrenceDay : null,
     notes: input.notes,
   });
   if (created.error || !created.charges) return { error: created.error ?? "Não foi possível criar a movimentação." };
@@ -511,6 +531,18 @@ export async function cancelChargeAction(scope: FinancialScope, chargeId: string
  * novas competências e cancela as futuras ainda não pagas. Competências já
  * pagas/atrasadas continuam como estão (histórico e dívidas reais).
  */
+/**
+ * Recorrências controladas por outro módulo (contrato de cliente,
+ * renovação de domínio) só podem ser editadas/canceladas por lá — senão
+ * contrato/domínio e Financeiro deixariam de bater.
+ */
+async function managedElsewhereError(supabase: Supa, originId: string, clientServiceId: string | null): Promise<string | null> {
+  if (clientServiceId) return "Esta recorrência vem de um serviço contratado — edite, pause ou encerre o serviço na ficha do cliente.";
+  const { data } = await supabase.from("domains").select("domain").eq("financial_origin_id", originId).limit(1);
+  if (data && data.length > 0) return `Esta recorrência é a renovação do domínio ${data[0].domain} — altere na página Domínios.`;
+  return null;
+}
+
 export async function stopRecurrenceAction(scope: FinancialScope, originId: string): Promise<ActionState> {
   const { space } = await requireScopedModulePermission(scope, "financeiro", "edit");
   const supabase = await createSupabaseServerClient();
@@ -523,10 +555,8 @@ export async function stopRecurrenceAction(scope: FinancialScope, originId: stri
     .maybeSingle();
   if (error) return { error: error.message };
   if (!origin || origin.origin_type !== "recorrente") return { error: "Recorrência não encontrada." };
-  if (origin.client_service_id) {
-    // Contrato e financeiro precisam continuar coerentes: o controle é pelo serviço do cliente.
-    return { error: "Esta recorrência vem de um serviço contratado — pause ou encerre o serviço na ficha do cliente." };
-  }
+  const managed = await managedElsewhereError(supabase, originId, origin.client_service_id);
+  if (managed) return { error: managed };
 
   const { error: stopError } = await supabase
     .from("financial_origins")
@@ -548,7 +578,187 @@ export async function stopRecurrenceAction(scope: FinancialScope, originId: stri
   }
 
   revalidateFinancialViews(scope);
-  return { success: "Recorrência encerrada. Nenhuma nova competência será gerada." };
+  return { success: "Recorrência cancelada. Nenhum novo vencimento será gerado; o histórico foi mantido." };
+}
+
+/** Reativa uma recorrência cancelada: volta a gerar a partir da próxima competência (sem cobrar os meses parados). */
+export async function resumeRecurrenceAction(scope: FinancialScope, originId: string): Promise<ActionState> {
+  const { profile, space } = await requireScopedModulePermission(scope, "financeiro", "edit");
+  const supabase = await createSupabaseServerClient();
+
+  const { data: origin, error } = await supabase
+    .from("financial_origins")
+    .select("id, client_service_id, origin_type, recurrence_end_type, recurrence_end_date")
+    .eq("id", originId)
+    .eq("space_id", space.id)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!origin || origin.origin_type !== "recorrente") return { error: "Recorrência não encontrada." };
+  const managed = await managedElsewhereError(supabase, originId, origin.client_service_id);
+  if (managed) return { error: managed };
+  if (origin.recurrence_end_type === "em_data" && origin.recurrence_end_date && origin.recurrence_end_date < todayKeySaoPaulo()) {
+    return { error: "A data de término desta recorrência já passou — edite o término antes de reativar." };
+  }
+
+  const resumeError = await resumeRecurringOrigin(supabase, space.id, profile.id, originId);
+  if (resumeError) return { error: resumeError };
+
+  revalidateFinancialViews(scope);
+  return { success: "Recorrência reativada a partir do próximo vencimento." };
+}
+
+export type RecurrenceUpdateInput = {
+  description: string;
+  amount: number;
+  frequency: FinancialRecurrenceFrequency;
+  interval?: number | null;
+  /** Dia fixo de vencimento (1..31); ignorado em semanal. */
+  dueDay?: number | null;
+  categoryId?: string | null;
+  notes?: string | null;
+  /** null = sem data de término. */
+  endDate?: string | null;
+};
+
+/**
+ * Edita a RECORRÊNCIA (não uma ocorrência): descrição, valor, dia,
+ * frequência, categoria, observações e término. Vale só daqui pra frente:
+ *  - competências já pagas (ou com pagamento parcial) nunca mudam;
+ *  - competências vencidas e não pagas continuam como estão (dívida real);
+ *  - competências futuras em aberto recebem o novo valor/dia;
+ *  - mudar a frequência substitui as futuras em aberto pela nova série.
+ */
+export async function updateRecurrenceAction(scope: FinancialScope, originId: string, input: RecurrenceUpdateInput): Promise<ActionState> {
+  const { profile, space } = await requireScopedModulePermission(scope, "financeiro", "edit");
+  if (!input.description?.trim()) return { error: "Informe a descrição." };
+  if (!Number.isFinite(input.amount) || input.amount <= 0) return { error: "Informe um valor válido." };
+  const weekly = input.frequency === "semanal";
+  if (!weekly && !(Number.isInteger(input.dueDay) && input.dueDay! >= 1 && input.dueDay! <= 31)) {
+    return { error: "Dia do vencimento precisa ser entre 1 e 31." };
+  }
+  if (input.endDate && !DATE_RE.test(input.endDate)) return { error: "Data de término inválida." };
+
+  const supabase = await createSupabaseServerClient();
+  const { data: origin, error } = await supabase
+    .from("financial_origins")
+    .select("*")
+    .eq("id", originId)
+    .eq("space_id", space.id)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!origin || origin.origin_type !== "recorrente") return { error: "Recorrência não encontrada." };
+  const managed = await managedElsewhereError(supabase, originId, origin.client_service_id);
+  if (managed) return { error: managed };
+  if (input.categoryId) {
+    const err = await assertBelongsToSpace(supabase, "financial_categories", input.categoryId, space.id, "Categoria");
+    if (err) return { error: err };
+  }
+
+  const amount = Math.round(input.amount * 100) / 100;
+  const dueDay = weekly ? null : input.dueDay!;
+  const frequencyChanged =
+    origin.recurrence_frequency !== input.frequency || (origin.recurrence_interval ?? null) !== (input.interval ?? null);
+
+  const { error: updateError } = await supabase
+    .from("financial_origins")
+    .update({
+      description: input.description.trim(),
+      category_id: input.categoryId || null,
+      recurrence_frequency: input.frequency,
+      recurrence_interval: input.interval ?? null,
+      recurrence_day: dueDay,
+      recurrence_amount: amount,
+      notes: input.notes?.trim() || null,
+      recurrence_end_type: input.endDate ? "em_data" : "nunca",
+      recurrence_end_date: input.endDate || null,
+    })
+    .eq("id", originId)
+    .eq("space_id", space.id);
+  if (updateError) {
+    const hint = /recurrence_day|recurrence_amount|notes/.test(updateError.message)
+      ? " — execute a migration 011_recurring_payables.sql no Supabase."
+      : "";
+    return { error: `${updateError.message}${hint}` };
+  }
+
+  const today = todayKeySaoPaulo();
+  const { data: charges } = await supabase
+    .from("financial_charges")
+    .select("*")
+    .eq("origin_id", originId)
+    .eq("space_id", space.id)
+    .order("due_date", { ascending: true });
+  const all = charges ?? [];
+  const ids = all.map((c) => c.id);
+  const { data: paid } = ids.length > 0 ? await supabase.from("financial_payments").select("charge_id").in("charge_id", ids) : { data: [] };
+  const paidIds = new Set((paid ?? []).map((p) => p.charge_id));
+  const openFuture = all.filter((c) => c.status === "ativo" && c.due_date >= today && !paidIds.has(c.id));
+
+  if (!frequencyChanged) {
+    for (const c of openFuture) {
+      const { y, m } = parseDateKey(c.due_date);
+      // Mesmo mês/competência, novo dia (mês curto → último dia válido).
+      const newDue = weekly ? c.due_date : addMonthsKey(makeDateKey(y, m, 1), 0, dueDay!);
+      await supabase
+        .from("financial_charges")
+        .update({
+          description: input.description.trim(),
+          category_id: input.categoryId || null,
+          original_amount: amount,
+          due_date: newDue >= today ? newDue : c.due_date,
+          updated_by: profile.id,
+        })
+        .eq("id", c.id)
+        .eq("space_id", space.id);
+    }
+  } else {
+    if (openFuture.length > 0) {
+      await supabase
+        .from("financial_charges")
+        .update({ status: "cancelado", updated_by: profile.id })
+        .in("id", openFuture.map((c) => c.id))
+        .eq("space_id", space.id);
+    }
+    // Próxima ocorrência da NOVA série, a partir de hoje.
+    const past = all.filter((c) => c.due_date < today);
+    const anchorDay = dueDay ?? recurrenceAnchorDay(origin, all[0]?.due_date);
+    let next = past.length > 0 ? past[past.length - 1].due_date : weekly ? today : firstDueOnOrAfter(today, dueDay!);
+    for (let guard = 0; guard < 2000 && next < today; guard++) {
+      next = nextOccurrence(next, input.frequency, input.interval ?? null, anchorDay);
+    }
+    if (past.length > 0 && next === past[past.length - 1].due_date) {
+      next = nextOccurrence(next, input.frequency, input.interval ?? null, anchorDay);
+    }
+    if (origin.is_active && !(input.endDate && next > input.endDate)) {
+      const existing = all.find((c) => c.due_date === next);
+      if (existing && !paidIds.has(existing.id)) {
+        await supabase
+          .from("financial_charges")
+          .update({ status: "ativo", original_amount: amount, description: input.description.trim(), category_id: input.categoryId || null })
+          .eq("id", existing.id)
+          .eq("space_id", space.id);
+      } else if (!existing) {
+        const template = all[all.length - 1];
+        await supabase.from("financial_charges").insert({
+          space_id: space.id,
+          origin_id: originId,
+          kind: origin.kind,
+          description: input.description.trim(),
+          client_id: origin.client_id,
+          category_id: input.categoryId || null,
+          reference_type_id: origin.reference_type_id ?? template?.reference_type_id ?? null,
+          supplier_name: origin.supplier_name,
+          original_amount: amount,
+          due_date: next,
+          competency_date: occurrenceCompetency(input.frequency, next),
+          created_by: profile.id,
+        });
+      }
+    }
+  }
+
+  revalidateFinancialViews(scope);
+  return { success: "Recorrência atualizada. O novo valor vale para as próximas competências." };
 }
 
 // -----------------------------------------------------------------------------

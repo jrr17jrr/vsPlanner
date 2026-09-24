@@ -253,6 +253,22 @@ export function pendingTotal(charges: FinancialCharge[], payments: FinancialPaym
     .reduce((sum, c) => sum + remainingAmount(c, payments), 0);
 }
 
+/**
+ * Em aberto do MÊS (yyyy-MM): só vencimentos daquele mês — nunca soma
+ * competências futuras (recorrências já geradas para o mês seguinte não
+ * entram). O atrasado de meses anteriores vem separado em `overdueBefore`.
+ */
+export function pendingInMonth(charges: FinancialCharge[], payments: FinancialPayment[], kind: FinancialKind, monthKey: string) {
+  const open = charges.filter((c) => c.kind === kind && c.status !== "cancelado");
+  const monthStart = `${monthKey}-01`;
+  const inMonth = open.filter((c) => c.due_date.startsWith(monthKey));
+  const before = open.filter((c) => c.due_date < monthStart);
+  return {
+    month: roundCents(inMonth.reduce((s, c) => s + remainingAmount(c, payments), 0)),
+    overdueBefore: roundCents(before.reduce((s, c) => s + remainingAmount(c, payments), 0)),
+  };
+}
+
 /** Próximas cobranças em aberto (inclui atrasadas no topo), já com restante calculado. */
 export function upcomingOpenCharges(
   charges: FinancialCharge[],

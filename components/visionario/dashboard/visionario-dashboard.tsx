@@ -76,8 +76,12 @@ export type DashboardData = {
   today: string;
   finance: {
     mrr: number;
+    /** Em aberto com vencimento no mês atual. */
     aReceber: number;
     aPagar: number;
+    /** Em aberto de meses anteriores (atrasado), mostrado à parte. */
+    aReceberAtrasadoAnterior: number;
+    aPagarAtrasadoAnterior: number;
     recebido: number;
     pago: number;
     resultado: number;
@@ -118,6 +122,9 @@ export type DashboardData = {
   sites: {
     activeSites: number;
     domains: number;
+    /** Soma de renewal_price dos domínios ativos marcados para renovar. */
+    plannedRenewals: number;
+    notRenewing: number;
     expiring30: number;
     hostings: number;
     nextDomain: { name: string; date: string } | null;
@@ -215,14 +222,28 @@ export function VisionarioDashboard({
               <>
                 <MoneyCard label="Receita recorrente mensal" amount={finance.mrr} icon={Repeat} hint="Serviços recorrentes ativos" />
                 <MoneyCard
-                  label="A receber"
+                  label="A receber no mês"
                   amount={finance.aReceber}
                   icon={HandCoins}
                   tone="warning"
-                  hint={finance.overdueIn > 0 ? `${formatCurrency(finance.overdueIn)} atrasado` : "Cobranças pendentes"}
+                  hint={
+                    finance.aReceberAtrasadoAnterior > 0
+                      ? `+ ${formatCurrency(finance.aReceberAtrasadoAnterior)} atrasado de meses anteriores`
+                      : "Vencimentos deste mês"
+                  }
                 />
                 <MoneyCard label="Recebido no mês" amount={finance.recebido} icon={TrendingUp} tone="success" hint="Dinheiro que de fato entrou" />
-                <MoneyCard label="A pagar" amount={finance.aPagar} icon={Receipt} tone="warning" hint="Despesas pendentes" />
+                <MoneyCard
+                  label="A pagar no mês"
+                  amount={finance.aPagar}
+                  icon={Receipt}
+                  tone="warning"
+                  hint={
+                    finance.aPagarAtrasadoAnterior > 0
+                      ? `+ ${formatCurrency(finance.aPagarAtrasadoAnterior)} atrasado de meses anteriores`
+                      : "Vencimentos deste mês"
+                  }
+                />
                 <MoneyCard label="Pago no mês" amount={finance.pago} icon={TrendingDown} tone="destructive" hint="Dinheiro que de fato saiu" />
                 <MoneyCard
                   label="Resultado do mês"
@@ -699,7 +720,9 @@ function SitesPanel({ sites }: { sites: NonNullable<DashboardData["sites"]> }) {
       <div className="flex flex-col gap-1.5">
         <Stat label="Sites ativos" value={sites.activeSites} />
         <Stat label="Domínios" value={sites.domains} />
+        <Stat label="Renovações previstas" value={formatCurrency(sites.plannedRenewals)} />
         <Stat label="Vencendo em 30 dias" value={sites.expiring30} tone={sites.expiring30 > 0 ? "alert" : undefined} />
+        {sites.notRenewing > 0 && <Stat label="Não renovar" value={sites.notRenewing} tone="neutral" />}
         <Stat label="Hospedagens" value={sites.hostings} />
       </div>
       <div className="border-t border-border pt-3 text-sm">

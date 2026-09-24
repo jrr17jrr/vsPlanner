@@ -19,12 +19,12 @@ import {
   totalBalance,
   calculateMRR,
   monthCashSummary,
-  pendingTotal,
+  pendingInMonth,
   listChargesForKind,
   clientBillingSnapshot,
   recurringRevenueByService,
 } from "@/lib/financial-calc";
-import { effectiveRenewalDate, groupChargesByOrigin } from "@/lib/domains";
+import { effectiveRenewalDate, groupChargesByOrigin, isPlannedRenewal, plannedRenewalsTotal } from "@/lib/domains";
 import { addDaysKey, daysBetweenKeys } from "@/lib/recurrence";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { todayKeySaoPaulo, currentMonthKeySaoPaulo, dateKeyInSaoPaulo } from "@/lib/format";
@@ -137,13 +137,18 @@ export default async function VisionarioOverviewPage() {
 
   if (canViewFinanceiro) {
     const cash = monthCashSummary(charges, payments, monthKey);
+    const receivableMonth = pendingInMonth(charges, payments, "entrada", monthKey);
+    const payableMonth = pendingInMonth(charges, payments, "saida", monthKey);
     const incoming = listChargesForKind(charges, payments, "entrada", today);
     const outgoing = listChargesForKind(charges, payments, "saida", today);
 
     finance = {
       mrr: calculateMRR(origins, charges, contracts).mrr,
-      aReceber: pendingTotal(charges, payments, "entrada"),
-      aPagar: pendingTotal(charges, payments, "saida"),
+      // "A receber/A pagar" do MÊS exibido — recorrências entram de novo automaticamente a cada mês.
+      aReceber: receivableMonth.month,
+      aPagar: payableMonth.month,
+      aReceberAtrasadoAnterior: receivableMonth.overdueBefore,
+      aPagarAtrasadoAnterior: payableMonth.overdueBefore,
       recebido: cash.recebido,
       pago: cash.pago,
       resultado: cash.recebido - cash.pago,
@@ -322,17 +327,21 @@ export default async function VisionarioOverviewPage() {
   let sitesSummary: DashboardData["sites"] = null;
   if (canViewSites) {
     const chargesByOrigin = groupChargesByOrigin(charges);
-    const activeDomains = domains
-      .filter((d) => d.status === "ativo")
+    // Gasto futuro com domínio = só os ATIVOS marcados para renovar
+    // (will_renew, migration 010). "Não renovar" nunca entra.
+    const plannedDomains = domains
+      .filter(isPlannedRenewal)
       .map((d) => ({ domain: d, renewal: effectiveRenewalDate(d, chargesByOrigin, payments) }))
       .filter((x): x is { domain: Domain; renewal: string } => !!x.renewal)
       .sort((a, b) => a.renewal.localeCompare(b.renewal));
-    const expiring = activeDomains.filter((x) => x.renewal <= in30);
+    const expiring = plannedDomains.filter((x) => x.renewal <= in30);
     const activeSites = sites.filter((s) => s.status === "ativo");
-    const next = activeDomains.find((x) => x.renewal >= today) ?? activeDomains[0] ?? null;
+    const next = plannedDomains.find((x) => x.renewal >= today) ?? plannedDomains[0] ?? null;
     sitesSummary = {
       activeSites: activeSites.length,
       domains: domains.length,
+      plannedRenewals: plannedRenewalsTotal(domains),
+      notRenewing: domains.filter((d) => d.status === "ativo" && d.will_renew === false).length,
       expiring30: expiring.length,
       hostings: activeSites.filter((s) => !!s.hosting_provider?.trim()).length,
       nextDomain: next ? { name: next.domain.domain, date: next.renewal } : null,

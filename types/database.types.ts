@@ -304,6 +304,12 @@ export type FinancialOrigin = {
   recurrence_end_type: FinancialRecurrenceEndType | null;
   recurrence_end_date: string | null;
   recurrence_end_occurrences: number | null;
+  /** Migration 011 — dia fixo de vencimento (1..31); mês curto usa o último dia. */
+  recurrence_day?: number | null;
+  /** Migration 011 — valor ATUAL de cada nova competência. */
+  recurrence_amount?: number | null;
+  /** Migration 011 — observações da recorrência. */
+  notes?: string | null;
   is_active: boolean;
   created_by: string;
   created_at: string;
@@ -540,6 +546,8 @@ export type Domain = {
   renewal_date: string | null;
   renewal_price: number | null;
   status: DomainStatus;
+  /** Migration 010 — decisão de renovar no próximo vencimento (independente do status). */
+  will_renew: boolean;
   notes: string | null;
   client_id: string | null;
   site_id: string | null;

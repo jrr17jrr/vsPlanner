@@ -73,8 +73,28 @@ export type OriginSpec = {
   recurrenceEndType?: FinancialRecurrenceEndType | null;
   recurrenceEndDate?: string | null;
   recurrenceEndOccurrences?: number | null;
+  /** Dia fixo de vencimento da recorrência (migration 011). */
+  recurrenceDay?: number | null;
   notes?: string | null;
 };
+
+/** Colunas da migration 011 ausentes (migration ainda não aplicada)? */
+function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
+  return !!error && (error.code === "PGRST204" || error.code === "42703") && /recurrence_day|recurrence_amount|notes/.test(error.message ?? "");
+}
+
+/**
+ * Competência de uma ocorrência: o mês do vencimento (uma por mês), exceto
+ * recorrência semanal, em que a própria data é a competência.
+ */
+export function occurrenceCompetency(frequency: FinancialRecurrenceFrequency | null | undefined, dueDate: string): string {
+  return frequency === "semanal" ? dueDate : competencyOf(dueDate);
+}
+
+/** Dia-âncora da série: o dia fixo salvo; em dados antigos, o dia da 1ª ocorrência. */
+export function recurrenceAnchorDay(origin: Pick<FinancialOrigin, "recurrence_day">, firstDueDate: string | undefined): number | undefined {
+  return origin.recurrence_day ?? (firstDueDate ? parseDateKey(firstDueDate).d : undefined);
+}
 
 type ChargeInsert = {
   space_id: string;
@@ -112,30 +132,45 @@ export async function createOriginWithCharges(
   spec: OriginSpec
 ): Promise<{ originId?: string; charges?: Pick<FinancialCharge, "id" | "amount" | "due_date">[]; error?: string }> {
   const isRecurring = spec.tipo === "recorrente";
-  const { data: origin, error: originError } = await supabase
+  const frequency = isRecurring ? spec.recurrenceFrequency ?? "mensal" : null;
+  const basePayload = {
+    space_id: spaceId,
+    kind: spec.kind,
+    origin_type: spec.tipo,
+    description: spec.description.trim(),
+    client_id: spec.clientId || null,
+    client_service_id: spec.clientServiceId || null,
+    reference_type_id: spec.referenceTypeId || null,
+    category_id: spec.categoryId || null,
+    supplier_name: spec.kind === "saida" ? spec.supplierName?.trim() || null : null,
+    installment_count: spec.tipo === "parcelado" ? spec.installmentCount ?? null : null,
+    recurrence_frequency: frequency,
+    recurrence_interval: isRecurring ? spec.recurrenceInterval ?? null : null,
+    recurrence_end_type: isRecurring ? spec.recurrenceEndType ?? "nunca" : null,
+    recurrence_end_date: isRecurring ? spec.recurrenceEndDate || null : null,
+    recurrence_end_occurrences: isRecurring ? spec.recurrenceEndOccurrences ?? null : null,
+    created_by: profileId,
+  };
+  // Recorrência guarda dia fixo + valor atual (migration 011).
+  const recurrencePayload = isRecurring
+    ? {
+        recurrence_day: frequency === "semanal" ? null : spec.recurrenceDay ?? parseDateKey(spec.firstDueDate).d,
+        recurrence_amount: spec.amount,
+        notes: spec.notes?.trim() || null,
+      }
+    : {};
+
+  let { data: origin, error: originError } = await supabase
     .from("financial_origins")
-    .insert({
-      space_id: spaceId,
-      kind: spec.kind,
-      origin_type: spec.tipo,
-      description: spec.description.trim(),
-      client_id: spec.clientId || null,
-      client_service_id: spec.clientServiceId || null,
-      reference_type_id: spec.referenceTypeId || null,
-      category_id: spec.categoryId || null,
-      supplier_name: spec.kind === "saida" ? spec.supplierName?.trim() || null : null,
-      installment_count: spec.tipo === "parcelado" ? spec.installmentCount ?? null : null,
-      recurrence_frequency: isRecurring ? spec.recurrenceFrequency ?? "mensal" : null,
-      recurrence_interval: isRecurring ? spec.recurrenceInterval ?? null : null,
-      recurrence_end_type: isRecurring ? spec.recurrenceEndType ?? "nunca" : null,
-      recurrence_end_date: isRecurring ? spec.recurrenceEndDate || null : null,
-      recurrence_end_occurrences: isRecurring ? spec.recurrenceEndOccurrences ?? null : null,
-      created_by: profileId,
-    })
+    .insert({ ...basePayload, ...recurrencePayload })
     .select("id")
     .single();
+  if (isMissingColumnError(originError)) {
+    // Migration 011 ainda não aplicada: grava sem as colunas novas (comportamento anterior).
+    ({ data: origin, error: originError } = await supabase.from("financial_origins").insert(basePayload).select("id").single());
+  }
 
-  if (originError) return { error: originError.message };
+  if (originError || !origin) return { error: originError?.message ?? "Falha ao criar a origem financeira." };
 
   const base = {
     space_id: spaceId,
@@ -181,7 +216,10 @@ export async function createOriginWithCharges(
       discount_amount: spec.discountAmount ?? 0,
       addition_amount: spec.additionAmount ?? 0,
       due_date: spec.firstDueDate,
-      competency_date: spec.competencyDate || competencyOf(spec.firstDueDate),
+      // Recorrência: competência sempre derivada do vencimento (uma por competência).
+      competency_date: isRecurring
+        ? occurrenceCompetency(frequency, spec.firstDueDate)
+        : spec.competencyDate || competencyOf(spec.firstDueDate),
     });
   }
 
@@ -198,14 +236,107 @@ export async function createOriginWithCharges(
   return { originId: origin.id, charges: charges ?? [] };
 }
 
-/** Próxima data da série respeitando o dia-âncora da 1ª cobrança. */
-function nextDueFor(origin: FinancialOrigin, anchor: FinancialCharge, last: FinancialCharge): string {
+/** Próxima data da série a partir de `fromDue`, respeitando o dia fixo (mês curto → último dia). */
+function nextDueFor(origin: FinancialOrigin, firstDue: string, fromDue: string): string {
   return nextOccurrence(
-    last.due_date,
+    fromDue,
     origin.recurrence_frequency ?? "mensal",
     origin.recurrence_interval,
-    parseDateKey(anchor.due_date).d
+    recurrenceAnchorDay(origin, firstDue)
   );
+}
+
+function recurringChargeRow(origin: FinancialOrigin, template: FinancialCharge | null, spaceId: string, profileId: string, dueDate: string, amount: number): ChargeInsert {
+  return {
+    space_id: spaceId,
+    origin_id: origin.id,
+    kind: origin.kind,
+    description: origin.description,
+    client_id: origin.client_id ?? template?.client_id ?? null,
+    client_service_id: origin.client_service_id ?? template?.client_service_id ?? null,
+    reference_type_id: origin.reference_type_id ?? template?.reference_type_id ?? null,
+    category_id: origin.category_id ?? template?.category_id ?? null,
+    supplier_name: origin.supplier_name ?? template?.supplier_name ?? null,
+    installment_number: null,
+    installment_total: null,
+    original_amount: amount,
+    discount_amount: 0,
+    addition_amount: 0,
+    due_date: dueDate,
+    competency_date: occurrenceCompetency(origin.recurrence_frequency, dueDate),
+    notes: null,
+    created_by: profileId,
+  };
+}
+
+/** Insere ocorrências uma a uma, ignorando conflito de unicidade (competência/vencimento já existe). */
+async function insertOccurrences(supabase: Supa, rows: ChargeInsert[]): Promise<void> {
+  for (const row of rows) {
+    const { error } = await supabase.from("financial_charges").insert(row);
+    if (error && error.code !== "23505") break;
+  }
+}
+
+/**
+ * Retoma uma recorrência (reativar assinatura/contrato/domínio): reativa a
+ * série, devolve as competências futuras canceladas ainda sem pagamento e,
+ * se não houver nenhuma em aberto a partir de hoje, cria a próxima
+ * ocorrência da série. Nunca cobra retroativamente os meses parados e
+ * nunca duplica competência.
+ */
+export async function resumeRecurringOrigin(supabase: Supa, spaceId: string, profileId: string, originId: string): Promise<string | null> {
+  const { data: origin, error } = await supabase
+    .from("financial_origins")
+    .update({ is_active: true })
+    .eq("id", originId)
+    .eq("space_id", spaceId)
+    .select("*")
+    .maybeSingle();
+  if (error) return error.message;
+  if (!origin) return "Recorrência não encontrada.";
+  if (origin.origin_type !== "recorrente") return null;
+
+  const today = todayKeySaoPaulo();
+  const { data: charges } = await supabase
+    .from("financial_charges")
+    .select("*")
+    .eq("origin_id", originId)
+    .eq("space_id", spaceId)
+    .order("due_date", { ascending: true });
+  const all = charges ?? [];
+  const ids = all.map((c) => c.id);
+  const { data: paid } = ids.length > 0 ? await supabase.from("financial_payments").select("charge_id").in("charge_id", ids) : { data: [] };
+  const paidIds = new Set((paid ?? []).map((p) => p.charge_id));
+
+  const toRestore = all.filter((c) => c.status === "cancelado" && c.due_date >= today && !paidIds.has(c.id));
+  for (const c of toRestore) {
+    // Uma a uma: se já existir outra ativa na mesma competência, o índice recusa e esta fica cancelada.
+    await supabase.from("financial_charges").update({ status: "ativo" }).eq("id", c.id).eq("space_id", spaceId);
+  }
+  const { data: openFuture } = await supabase
+    .from("financial_charges")
+    .select("id")
+    .eq("origin_id", originId)
+    .eq("space_id", spaceId)
+    .eq("status", "ativo")
+    .gte("due_date", today)
+    .limit(1);
+  if ((openFuture?.length ?? 0) > 0 || all.length === 0) return null;
+
+  let next = all[all.length - 1].due_date;
+  for (let guard = 0; guard < 2000 && next < today; guard++) {
+    next = nextDueFor(origin, all[0].due_date, next);
+  }
+  const amount = Number(origin.recurrence_amount ?? all[all.length - 1].original_amount);
+  const existing = all.find((c) => c.due_date === next);
+  if (existing) {
+    if (!paidIds.has(existing.id)) {
+      await supabase.from("financial_charges").update({ status: "ativo", original_amount: amount }).eq("id", existing.id).eq("space_id", spaceId);
+    }
+    return null;
+  }
+  await insertOccurrences(supabase, [recurringChargeRow(origin, all[all.length - 1], spaceId, profileId, next, amount)]);
+  return null;
 }
 
 /**
@@ -256,12 +387,19 @@ export async function ensureRecurringChargesForSpace(
   for (const origin of origins) {
     const existing = byOrigin.get(origin.id) ?? [];
     if (existing.length === 0) continue;
-    const anchor = existing[0];
-    let last = existing[existing.length - 1];
+    const firstDue = existing[0].due_date;
+    const template = existing[existing.length - 1];
+    // Competências que já têm ocorrência ativa — nunca criar outra no mesmo mês.
+    const activeCompetencies = new Set(
+      existing.filter((c) => c.status === "ativo").map((c) => c.competency_date ?? occurrenceCompetency(origin.recurrence_frequency, c.due_date))
+    );
+    // Valor ATUAL da recorrência (migration 011); dados antigos: última cobrança.
+    const amount = Number(origin.recurrence_amount ?? template.original_amount);
+    let cursor = template.due_date;
     let occurrenceCount = existing.length;
 
     for (let guard = 0; guard < 120; guard++) {
-      const nextDue = nextDueFor(origin, anchor, last);
+      const nextDue = nextDueFor(origin, firstDue, cursor);
       if (nextDue > horizonKey) break;
       if (origin.recurrence_end_type === "em_data" && origin.recurrence_end_date && nextDue > origin.recurrence_end_date) break;
       if (
@@ -271,42 +409,18 @@ export async function ensureRecurringChargesForSpace(
       )
         break;
 
-      const row: ChargeInsert = {
-        space_id: spaceId,
-        origin_id: origin.id,
-        kind: origin.kind,
-        description: origin.description,
-        client_id: last.client_id,
-        client_service_id: last.client_service_id,
-        reference_type_id: last.reference_type_id,
-        category_id: last.category_id,
-        supplier_name: last.supplier_name,
-        installment_number: null,
-        installment_total: null,
-        original_amount: Number(last.original_amount),
-        discount_amount: 0,
-        addition_amount: 0,
-        due_date: nextDue,
-        competency_date: competencyOf(nextDue),
-        notes: null,
-        created_by: profileId,
-      };
-      rows.push(row);
-      last = { ...last, due_date: nextDue };
+      cursor = nextDue;
+      const competency = occurrenceCompetency(origin.recurrence_frequency, nextDue);
+      if (activeCompetencies.has(competency)) continue;
+      activeCompetencies.add(competency);
+      rows.push(recurringChargeRow(origin, template, spaceId, profileId, nextDue, amount));
       occurrenceCount += 1;
     }
   }
 
-  if (rows.length === 0) return;
-  // ignoreDuplicates + índice único = geração concorrente nunca duplica.
-  const { error: upsertError } = await supabase
-    .from("financial_charges")
-    .upsert(rows, { onConflict: "origin_id,due_date", ignoreDuplicates: true });
-  // 42P10 = índice único ainda não existe (migration 009 pendente): cai no
-  // insert simples, que continua idempotente por partir da última cobrança.
-  if (upsertError?.code === "42P10") {
-    await supabase.from("financial_charges").insert(rows);
-  }
+  // Uma a uma, ignorando conflito: os índices únicos (origem+vencimento,
+  // origem+competência) garantem que duas abas abertas nunca dupliquem.
+  await insertOccurrences(supabase, rows);
 }
 
 /**
