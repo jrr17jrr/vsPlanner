@@ -193,7 +193,7 @@ function MovementForm({
       tipo,
       installmentCount: tipo === "parcelado" ? parseInt(installmentCount, 10) : undefined,
       recurrenceFrequency: tipo === "recorrente" ? frequency : undefined,
-      recurrenceInterval: tipo === "recorrente" ? parseInt(interval, 10) : undefined,
+      recurrenceInterval: tipo === "recorrente" && (frequency === "a_cada_x_meses" || frequency === "customizado") ? parseInt(interval, 10) : undefined,
       recurrenceEndType: tipo === "recorrente" ? (hasEndDate ? "em_data" : "nunca") : undefined,
       recurrenceEndDate: tipo === "recorrente" && hasEndDate ? endDate : undefined,
       recurrenceDay: usesDay ? Number(dueDay) : undefined,

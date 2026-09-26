@@ -8,13 +8,22 @@ import {
   createOriginWithCharges,
   occurrenceCompetency,
   recurrenceAnchorDay,
+  recurrenceStartDate,
   resumeRecurringOrigin,
   revalidateFinancialViews,
   type Supa,
 } from "@/lib/supabase/finance-core";
 import type { FinancialScope } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
-import { addMonthsKey, firstDueOnOrAfter, makeDateKey, nextOccurrence, parseDateKey } from "@/lib/recurrence";
+import {
+  addMonthsKey,
+  firstDueOnOrAfter,
+  isOnOrAfterRecurrenceStart,
+  makeDateKey,
+  nextOccurrence,
+  normalizedInterval,
+  parseDateKey,
+} from "@/lib/recurrence";
 import type {
   FinancialChargeStatus,
   FinancialKind,
@@ -656,8 +665,14 @@ export async function updateRecurrenceAction(scope: FinancialScope, originId: st
 
   const amount = Math.round(input.amount * 100) / 100;
   const dueDay = weekly ? null : input.dueDay!;
+  // Intervalo só conta em "a cada N meses": recorrências mensais antigas foram gravadas com
+  // recurrence_interval = 2 (padrão do formulário) e a edição manda null — comparar cru fazia
+  // QUALQUER edição parecer troca de frequência (cancelava a 1ª competência e recriava a série
+  // a partir de hoje, antes do início).
+  const interval = normalizedInterval(input.frequency, input.interval);
   const frequencyChanged =
-    origin.recurrence_frequency !== input.frequency || (origin.recurrence_interval ?? null) !== (input.interval ?? null);
+    origin.recurrence_frequency !== input.frequency ||
+    normalizedInterval(origin.recurrence_frequency, origin.recurrence_interval) !== interval;
 
   const { error: updateError } = await supabase
     .from("financial_origins")
@@ -665,7 +680,7 @@ export async function updateRecurrenceAction(scope: FinancialScope, originId: st
       description: input.description.trim(),
       category_id: input.categoryId || null,
       recurrence_frequency: input.frequency,
-      recurrence_interval: input.interval ?? null,
+      recurrence_interval: interval,
       recurrence_day: dueDay,
       recurrence_amount: amount,
       notes: input.notes?.trim() || null,
@@ -693,6 +708,8 @@ export async function updateRecurrenceAction(scope: FinancialScope, originId: st
   const { data: paid } = ids.length > 0 ? await supabase.from("financial_payments").select("charge_id").in("charge_id", ids) : { data: [] };
   const paidIds = new Set((paid ?? []).map((p) => p.charge_id));
   const openFuture = all.filter((c) => c.status === "ativo" && c.due_date >= today && !paidIds.has(c.id));
+  // Barreira mínima: nenhuma ocorrência pode vencer antes do início da recorrência.
+  const start = recurrenceStartDate(origin, all);
 
   if (!frequencyChanged) {
     for (const c of openFuture) {
@@ -705,7 +722,7 @@ export async function updateRecurrenceAction(scope: FinancialScope, originId: st
           description: input.description.trim(),
           category_id: input.categoryId || null,
           original_amount: amount,
-          due_date: newDue >= today ? newDue : c.due_date,
+          due_date: newDue >= today && isOnOrAfterRecurrenceStart(newDue, start) ? newDue : c.due_date,
           updated_by: profile.id,
         })
         .eq("id", c.id)
@@ -720,18 +737,16 @@ export async function updateRecurrenceAction(scope: FinancialScope, originId: st
         .eq("space_id", space.id);
     }
     // Próxima ocorrência da NOVA série, a partir de hoje — mas nunca antes do
-    // início da recorrência (1ª competência): se ela só começa no mês que
-    // vem, a nova série também só começa lá.
-    const past = all.filter((c) => c.due_date < today);
+    // início: se a recorrência só começa no mês que vem, a nova série também.
+    const past = all.filter((c) => c.due_date < today && isOnOrAfterRecurrenceStart(c.due_date, start));
     const anchorDay = dueDay ?? recurrenceAnchorDay(origin, all[0]?.due_date);
-    const seriesStart = all[0]?.due_date;
-    const from = seriesStart && seriesStart > today ? seriesStart : today;
+    const from = start && start > today ? start : today;
     let next = past.length > 0 ? past[past.length - 1].due_date : weekly ? from : firstDueOnOrAfter(from, dueDay!);
-    for (let guard = 0; guard < 2000 && next < today; guard++) {
-      next = nextOccurrence(next, input.frequency, input.interval ?? null, anchorDay);
+    for (let guard = 0; guard < 2000 && (next < today || !isOnOrAfterRecurrenceStart(next, start)); guard++) {
+      next = nextOccurrence(next, input.frequency, interval, anchorDay);
     }
     if (past.length > 0 && next === past[past.length - 1].due_date) {
-      next = nextOccurrence(next, input.frequency, input.interval ?? null, anchorDay);
+      next = nextOccurrence(next, input.frequency, interval, anchorDay);
     }
     if (origin.is_active && !(input.endDate && next > input.endDate)) {
       const existing = all.find((c) => c.due_date === next);

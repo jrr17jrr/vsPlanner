@@ -65,6 +65,29 @@ export function frequencyMonths(frequency: FinancialRecurrenceFrequency, interva
   }
 }
 
+/** Frequência que usa "a cada N meses" — nas demais o intervalo não existe (null). */
+export function usesInterval(frequency: FinancialRecurrenceFrequency | null | undefined): boolean {
+  return frequency === "a_cada_x_meses" || frequency === "customizado";
+}
+
+/** Intervalo normalizado: só existe para "a cada N meses"; nas outras frequências é sempre null. */
+export function normalizedInterval(frequency: FinancialRecurrenceFrequency | null | undefined, interval: number | null | undefined): number | null {
+  return usesInterval(frequency) ? Math.max(1, interval ?? 1) : null;
+}
+
+/**
+ * REGRA CENTRAL da data de início: uma ocorrência só existe se vence no
+ * 1º vencimento da recorrência ou depois (o que também garante que a
+ * competência nunca é anterior ao mês inicial). Recorrência que começa em
+ * 25/10 não tem 25/09 — nem como pendente, nem como atrasada.
+ * Toda geração de ocorrência (criação, geração lazy, edição, reativação)
+ * passa por aqui.
+ */
+export function isOnOrAfterRecurrenceStart(dueKey: string, startKey: string | null | undefined): boolean {
+  if (!startKey) return true;
+  return dueKey >= startKey && competencyOf(dueKey) >= competencyOf(startKey);
+}
+
 /** Próxima ocorrência depois de `key`. `anchorDay` = dia do 1º vencimento da série. */
 export function nextOccurrence(
   key: string,

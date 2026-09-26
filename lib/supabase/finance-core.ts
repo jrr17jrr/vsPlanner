@@ -6,7 +6,9 @@ import { todayKeySaoPaulo } from "@/lib/format";
 import {
   addDaysKey,
   competencyOf,
+  isOnOrAfterRecurrenceStart,
   nextOccurrence,
+  normalizedInterval,
   parseDateKey,
   splitInstallments,
 } from "@/lib/recurrence";
@@ -78,9 +80,9 @@ export type OriginSpec = {
   notes?: string | null;
 };
 
-/** Colunas da migration 011 ausentes (migration ainda não aplicada)? */
-function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
-  return !!error && (error.code === "PGRST204" || error.code === "42703") && /recurrence_day|recurrence_amount|notes/.test(error.message ?? "");
+/** Colunas da migration 011/012 ausentes (migration ainda não aplicada)? */
+function isMissingColumnError(error: { code?: string; message?: string } | null, pattern = /recurrence_day|recurrence_amount|notes|recurrence_start_date/): boolean {
+  return !!error && (error.code === "PGRST204" || error.code === "42703") && pattern.test(error.message ?? "");
 }
 
 /**
@@ -89,6 +91,22 @@ function isMissingColumnError(error: { code?: string; message?: string } | null)
  */
 export function occurrenceCompetency(frequency: FinancialRecurrenceFrequency | null | undefined, dueDate: string): string {
   return frequency === "semanal" ? dueDate : competencyOf(dueDate);
+}
+
+/**
+ * Início da recorrência (1º vencimento válido) — a barreira mínima de
+ * qualquer ocorrência. Salvo em `recurrence_start_date` (migration 012);
+ * sem a coluna, vale o vencimento da 1ª cobrança CRIADA da série (a da
+ * criação), nunca a de menor data — uma ocorrência gerada por engano antes
+ * do início não pode virar o novo início.
+ */
+export function recurrenceStartDate(
+  origin: Pick<FinancialOrigin, "recurrence_start_date">,
+  charges: Pick<FinancialCharge, "due_date" | "created_at">[]
+): string | null {
+  if (origin.recurrence_start_date) return origin.recurrence_start_date;
+  if (charges.length === 0) return null;
+  return [...charges].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.due_date.localeCompare(b.due_date))[0].due_date;
 }
 
 /** Dia-âncora da série: o dia fixo salvo; em dados antigos, o dia da 1ª ocorrência. */
@@ -145,7 +163,8 @@ export async function createOriginWithCharges(
     supplier_name: spec.kind === "saida" ? spec.supplierName?.trim() || null : null,
     installment_count: spec.tipo === "parcelado" ? spec.installmentCount ?? null : null,
     recurrence_frequency: frequency,
-    recurrence_interval: isRecurring ? spec.recurrenceInterval ?? null : null,
+    // Mensal/anual/... não têm intervalo: gravar null evita que editar a recorrência pareça "troca de frequência".
+    recurrence_interval: isRecurring ? normalizedInterval(frequency, spec.recurrenceInterval) : null,
     recurrence_end_type: isRecurring ? spec.recurrenceEndType ?? "nunca" : null,
     recurrence_end_date: isRecurring ? spec.recurrenceEndDate || null : null,
     recurrence_end_occurrences: isRecurring ? spec.recurrenceEndOccurrences ?? null : null,
@@ -160,11 +179,22 @@ export async function createOriginWithCharges(
       }
     : {};
 
+  // 1º vencimento = início da recorrência (migration 012).
+  const startPayload = isRecurring ? { recurrence_start_date: spec.firstDueDate } : {};
+
   let { data: origin, error: originError } = await supabase
     .from("financial_origins")
-    .insert({ ...basePayload, ...recurrencePayload })
+    .insert({ ...basePayload, ...recurrencePayload, ...startPayload })
     .select("id")
     .single();
+  if (isRecurring && isMissingColumnError(originError, /recurrence_start_date/)) {
+    // Migration 012 ainda não aplicada: o início continua sendo a 1ª cobrança criada.
+    ({ data: origin, error: originError } = await supabase
+      .from("financial_origins")
+      .insert({ ...basePayload, ...recurrencePayload })
+      .select("id")
+      .single());
+  }
   if (isMissingColumnError(originError)) {
     // Migration 011 ainda não aplicada: grava sem as colunas novas (comportamento anterior).
     ({ data: origin, error: originError } = await supabase.from("financial_origins").insert(basePayload).select("id").single());
@@ -308,7 +338,9 @@ export async function resumeRecurringOrigin(supabase: Supa, spaceId: string, pro
   const { data: paid } = ids.length > 0 ? await supabase.from("financial_payments").select("charge_id").in("charge_id", ids) : { data: [] };
   const paidIds = new Set((paid ?? []).map((p) => p.charge_id));
 
-  const toRestore = all.filter((c) => c.status === "cancelado" && c.due_date >= today && !paidIds.has(c.id));
+  const toRestore = all.filter(
+    (c) => c.status === "cancelado" && c.due_date >= today && !paidIds.has(c.id) && isOnOrAfterRecurrenceStart(c.due_date, recurrenceStartDate(origin, all))
+  );
   for (const c of toRestore) {
     // Uma a uma: se já existir outra ativa na mesma competência, o índice recusa e esta fica cancelada.
     await supabase.from("financial_charges").update({ status: "ativo" }).eq("id", c.id).eq("space_id", spaceId);
@@ -323,8 +355,9 @@ export async function resumeRecurringOrigin(supabase: Supa, spaceId: string, pro
     .limit(1);
   if ((openFuture?.length ?? 0) > 0 || all.length === 0) return null;
 
+  const start = recurrenceStartDate(origin, all);
   let next = all[all.length - 1].due_date;
-  for (let guard = 0; guard < 2000 && next < today; guard++) {
+  for (let guard = 0; guard < 2000 && (next < today || !isOnOrAfterRecurrenceStart(next, start)); guard++) {
     next = nextDueFor(origin, all[0].due_date, next);
   }
   const amount = Number(origin.recurrence_amount ?? all[all.length - 1].original_amount);
@@ -388,6 +421,7 @@ export async function ensureRecurringChargesForSpace(
     const existing = byOrigin.get(origin.id) ?? [];
     if (existing.length === 0) continue;
     const firstDue = existing[0].due_date;
+    const start = recurrenceStartDate(origin, existing);
     const template = existing[existing.length - 1];
     // Competências que já têm ocorrência ativa — nunca criar outra no mesmo mês.
     const activeCompetencies = new Set(
@@ -410,6 +444,7 @@ export async function ensureRecurringChargesForSpace(
         break;
 
       cursor = nextDue;
+      if (!isOnOrAfterRecurrenceStart(nextDue, start)) continue;
       const competency = occurrenceCompetency(origin.recurrence_frequency, nextDue);
       if (activeCompetencies.has(competency)) continue;
       activeCompetencies.add(competency);

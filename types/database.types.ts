@@ -310,6 +310,8 @@ export type FinancialOrigin = {
   recurrence_amount?: number | null;
   /** Migration 011 — observações da recorrência. */
   notes?: string | null;
+  /** Migration 012 — 1º vencimento da recorrência: nenhuma ocorrência pode vencer antes. */
+  recurrence_start_date?: string | null;
   is_active: boolean;
   created_by: string;
   created_at: string;
