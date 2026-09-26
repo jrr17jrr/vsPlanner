@@ -719,10 +719,14 @@ export async function updateRecurrenceAction(scope: FinancialScope, originId: st
         .in("id", openFuture.map((c) => c.id))
         .eq("space_id", space.id);
     }
-    // Próxima ocorrência da NOVA série, a partir de hoje.
+    // Próxima ocorrência da NOVA série, a partir de hoje — mas nunca antes do
+    // início da recorrência (1ª competência): se ela só começa no mês que
+    // vem, a nova série também só começa lá.
     const past = all.filter((c) => c.due_date < today);
     const anchorDay = dueDay ?? recurrenceAnchorDay(origin, all[0]?.due_date);
-    let next = past.length > 0 ? past[past.length - 1].due_date : weekly ? today : firstDueOnOrAfter(today, dueDay!);
+    const seriesStart = all[0]?.due_date;
+    const from = seriesStart && seriesStart > today ? seriesStart : today;
+    let next = past.length > 0 ? past[past.length - 1].due_date : weekly ? from : firstDueOnOrAfter(from, dueDay!);
     for (let guard = 0; guard < 2000 && next < today; guard++) {
       next = nextOccurrence(next, input.frequency, input.interval ?? null, anchorDay);
     }

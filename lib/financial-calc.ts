@@ -266,6 +266,16 @@ export type PendingSummary = {
 };
 
 /**
+ * A cobrança pertence ao "A receber / A pagar" do mês `monthKey` (yyyy-MM)?
+ * Só se já venceu ou vence até o fim desse mês. Uma recorrência que começa
+ * no mês que vem tem a 1ª competência no mês que vem — ela é "próximo
+ * pagamento", nunca dívida do mês atual (nem atrasada).
+ */
+export function isDueUpToMonth(charge: Pick<FinancialCharge, "due_date">, monthKey: string): boolean {
+  return charge.due_date.slice(0, 7) <= monthKey;
+}
+
+/**
  * "A receber" / "A pagar" — REGRA ÚNICA do sistema:
  *   cobranças em aberto com vencimento no mês atual
  *   + vencidas de meses anteriores ainda não pagas.
@@ -280,7 +290,7 @@ export function pendingUpToMonth(
   today: string = todayKeySaoPaulo()
 ): PendingSummary {
   const open = charges
-    .filter((c) => c.kind === kind && c.status !== "cancelado" && c.due_date.slice(0, 7) <= monthKey)
+    .filter((c) => c.kind === kind && c.status !== "cancelado" && isDueUpToMonth(c, monthKey))
     .map((c) => ({ charge: c, remaining: remainingAmount(c, payments) }))
     .filter((x) => x.remaining > 0);
   const sum = (xs: typeof open) => roundCents(xs.reduce((s, x) => s + x.remaining, 0));

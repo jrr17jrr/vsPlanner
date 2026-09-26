@@ -17,7 +17,7 @@ import { AsyncConfirmDialog } from "@/components/shared/async-confirm-dialog";
 import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
 import { EditChargeDialog } from "@/components/visionario/financeiro/edit-charge-dialog";
 import { RecurrencesPanel } from "@/components/visionario/financeiro/recurrences-panel";
-import { listChargesForKind, type ReceivablePayable } from "@/lib/financial-calc";
+import { isDueUpToMonth, listChargesForKind, pendingUpToMonth, type ReceivablePayable } from "@/lib/financial-calc";
 import { cancelChargeAction, stopRecurrenceAction } from "@/lib/supabase/financial-actions";
 import { FREQUENCY_LABEL, chargeBadgeStatus } from "@/lib/finance-labels";
 import { formatCurrency, formatDate, todayKeySaoPaulo } from "@/lib/format";
@@ -78,22 +78,25 @@ export function ChargesList({
   const originById = useMemo(() => new Map(origins.map((o) => [o.id, o])), [origins]);
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
+  const monthKey = today.slice(0, 7);
   const rows = useMemo(() => listChargesForKind(charges, payments, kind, today), [charges, payments, kind, today]);
   const filtered = useMemo(() => {
     if (bucket === "todas") return rows;
-    if (bucket === "em_aberto") return rows.filter((r) => r.bucket !== "recebida_paga");
-    if (bucket === "este_mes") return rows.filter((r) => r.charge.due_date.startsWith(today.slice(0, 7)));
+    // "Em aberto" = A pagar/A receber do mês (mesma regra do resumo); competências futuras ficam em "Próximas".
+    if (bucket === "em_aberto") return rows.filter((r) => r.bucket !== "recebida_paga" && isDueUpToMonth(r.charge, monthKey));
+    if (bucket === "este_mes") return rows.filter((r) => r.charge.due_date.startsWith(monthKey));
     return rows.filter((r) => r.bucket === bucket);
-  }, [rows, bucket, today]);
+  }, [rows, bucket, monthKey]);
 
+  // Mesmo cálculo da Home/dashboards (`pendingUpToMonth`): nunca soma competências de meses futuros.
   const totals = useMemo(() => {
-    const open = rows.filter((r) => r.bucket !== "recebida_paga");
+    const summary = pendingUpToMonth(charges, payments, kind, monthKey, today);
     return {
-      open: open.reduce((s, r) => s + r.remaining, 0),
-      overdue: open.filter((r) => r.bucket === "atrasadas").reduce((s, r) => s + r.remaining, 0),
-      count: open.length,
+      open: summary.total,
+      overdue: summary.overdue,
+      count: rows.filter((r) => r.bucket !== "recebida_paga" && isDueUpToMonth(r.charge, monthKey)).length,
     };
-  }, [rows]);
+  }, [charges, payments, kind, monthKey, today, rows]);
 
   const bucketLabels: Record<Bucket, string> = {
     em_aberto: "Em aberto",
@@ -121,7 +124,7 @@ export function ChargesList({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm">
           <p className="text-muted-foreground">
-            Em aberto: <span className="font-semibold text-foreground">{formatCurrency(totals.open)}</span>
+            {isEntrada ? "A receber" : "A pagar"} até o fim do mês: <span className="font-semibold text-foreground">{formatCurrency(totals.open)}</span>
             <span className="text-xs"> · {totals.count} cobrança(s)</span>
           </p>
           {totals.overdue > 0 && (
