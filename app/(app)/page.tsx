@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet, HandCoins } from "lucide-react";
+import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet, HandCoins, ListChecks } from "lucide-react";
 import { requireActiveProfile, findOrBootstrapSpace, requirePersonalSpace } from "@/lib/supabase/dal";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
 import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
 import { getTodayWorkItemsForHoje } from "@/lib/supabase/work-items-actions";
+import { loadMyDayTasks } from "@/lib/supabase/my-day";
+import { getImportantAttentionTasks } from "@/lib/tasks";
 import { listWorkItems } from "@/lib/supabase/repositories/work-items.repository";
 import {
   listFinancialCharges,
@@ -48,9 +50,9 @@ async function loadFinanceColumn(space: Space, profileId: string): Promise<Finan
 /**
  * Dashboard raiz — 100% real, montado só com os espaços aos quais o
  * usuário tem acesso e só com os dados cujo módulo ele tem permissão de
- * ver. Rotina/Tarefas pessoais ainda não têm backend real (migration
- * 008 pendente) — por isso "Meu dia" mostra só Reuniões/Trabalhos reais
- * por enquanto, nunca um percentual calculado a partir de mock.
+ * ver. Tarefas pessoais vêm de `loadMyDayTasks` — a MESMA fonte do Meu
+ * Dia (/hoje); "Precisa da sua atenção" mostra só as IMPORTANTES
+ * relevantes hoje (regra em `getImportantAttentionTasks`).
  */
 export default async function DashboardPage() {
   const { profile } = await requireActiveProfile();
@@ -61,7 +63,8 @@ export default async function DashboardPage() {
     findOrBootstrapSpace(TIKTOK_SLUG, profile),
   ]);
 
-  const [meetingsResult, workItemsResult, pessoalFinance, visionarioFinance, tiktokFinance] = await Promise.all([
+  const [myDay, meetingsResult, workItemsResult, pessoalFinance, visionarioFinance, tiktokFinance] = await Promise.all([
+    loadMyDayTasks(),
     getTodayMeetingsForHoje(),
     getTodayWorkItemsForHoje(),
     loadFinanceColumn(personalSpace, profile.id),
@@ -71,8 +74,21 @@ export default async function DashboardPage() {
 
   const todayKey = todayKeySaoPaulo();
 
-  type AttentionItem = { id: string; icon: typeof Briefcase; label: string; title: string; meta: string; urgent: boolean; href: string };
+  type AttentionItem = {
+    id: string;
+    icon: typeof Briefcase;
+    label: string;
+    title: string;
+    meta: string;
+    detail?: string | null;
+    urgent: boolean;
+    href: string;
+  };
   const attentionItems: AttentionItem[] = [];
+
+  getImportantAttentionTasks(myDay).forEach((t) => {
+    attentionItems.push({ ...t, icon: ListChecks, href: "/hoje" });
+  });
 
   if (visionarioSpace) {
     const canViewTrabalhos = await hasModulePermission(visionarioSpace.id, "trabalhos", "view");
@@ -148,7 +164,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-foreground">Meu dia</p>
           <span className="text-xs text-muted-foreground">
-            {meetingsResult.meetings.length} reunião(ões) · {workItemsResult.workItems.length} trabalho(s)
+            {myDay.today.length} tarefa(s) · {meetingsResult.meetings.length} reunião(ões) · {workItemsResult.workItems.length} trabalho(s)
           </span>
         </div>
         <Link href="/hoje" className="mt-3 flex items-center gap-1 text-sm text-primary hover:underline">
@@ -190,6 +206,7 @@ export default async function DashboardPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-muted-foreground">{item.label}</p>
                     <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
+                    {item.detail && <p className="truncate text-[11px] text-muted-foreground">{item.detail}</p>}
                   </div>
                   <span className={`shrink-0 text-xs font-medium ${item.urgent ? "text-destructive" : "text-muted-foreground"}`}>
                     {item.meta}

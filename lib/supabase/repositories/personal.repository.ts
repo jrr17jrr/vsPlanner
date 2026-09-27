@@ -1,5 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Activity, ActivityCompletion, Goal, PersonalWorkTask, Task } from "@/types/database.types";
+import type { Activity, ActivityCompletion, Goal, PersonalWorkTask, Task, TaskOccurrence } from "@/types/database.types";
 
 /**
  * Leitura dos módulos pessoais reais (migration 008). RLS é `user_id =
@@ -8,14 +8,30 @@ import type { Activity, ActivityCompletion, Goal, PersonalWorkTask, Task } from 
  * sempre do space Pessoal certo).
  */
 
-export async function listTasks(spaceId: string): Promise<Task[]> {
+/**
+ * `includeArchived` traz também recorrentes excluídas que tinham histórico
+ * (`archived_at`) — só quem monta histórico/ocorrências passadas precisa.
+ */
+export async function listTasks(spaceId: string, options: { includeArchived?: boolean } = {}): Promise<Task[]> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("tasks")
-    .select("*")
-    .eq("space_id", spaceId)
+  let query = supabase.from("tasks").select("*").eq("space_id", spaceId);
+  if (!options.includeArchived) query = query.is("archived_at", null);
+  const { data, error } = await query
     .order("due_date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Ocorrências (conclusões/pendências gravadas) de tarefas recorrentes num intervalo, inclusive. */
+export async function listTaskOccurrences(userId: string, fromDate: string, toDate: string): Promise<TaskOccurrence[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("task_occurrences")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("occurrence_date", fromDate)
+    .lte("occurrence_date", toDate);
   if (error) throw error;
   return data ?? [];
 }

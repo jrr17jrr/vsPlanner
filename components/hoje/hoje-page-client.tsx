@@ -3,52 +3,58 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowRight, Sun, ListChecks, Repeat, Briefcase, CalendarClock } from "lucide-react";
+import { ArrowRight, Sun, ListChecks, Repeat, Briefcase, CalendarClock, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ChecklistItem, PriorityBadge } from "@/components/shared/checklist-item";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { TodayMeetingItem } from "@/components/visionario/reunioes/today-meeting-item";
+import { DayTaskItem } from "@/components/tarefas/day-task-item";
+import { useTaskToggle } from "@/components/tarefas/use-task-toggle";
+import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
 import { updateWorkItemStatusAction } from "@/lib/supabase/work-items-actions";
-import {
-  toggleActivityCompletionAction,
-  toggleTaskStatusAction,
-  togglePersonalWorkTaskStatusAction,
-} from "@/lib/supabase/personal-actions";
+import { toggleActivityCompletionAction, togglePersonalWorkTaskStatusAction } from "@/lib/supabase/personal-actions";
 import { getRealOccurrencesForDay } from "@/lib/routine-real";
-import { formatDateLong, parseLocalDate } from "@/lib/format";
+import { isRecurrenceEnded, type MyDayTasks } from "@/lib/tasks";
+import { formatDate, formatDateLong, parseLocalDate, weekdayLabel } from "@/lib/format";
 import type { Activity, ActivityCompletion, Meeting, PersonalWorkTask, Task, WorkItem } from "@/types/database.types";
 
 export function HojePageClient({
   todayKey,
+  myDay,
   meetings,
   meetingParticipantNames,
   workItems,
   workItemAssigneeNames,
   activities,
   completions: initialCompletions,
-  tasks: initialTasks,
   workTasks: initialWorkTasks,
 }: {
   /** "Hoje" calculado no servidor (America/Sao_Paulo) — nunca recalculado no navegador, pra nunca divergir do que foi buscado. */
   todayKey: string;
+  /** Tarefas do dia/pendentes/prazos — mesma fonte (`loadMyDayTasks`) do Dashboard. */
+  myDay: MyDayTasks;
   meetings: Meeting[];
   meetingParticipantNames: Record<string, string[]>;
   workItems: WorkItem[];
   workItemAssigneeNames: Record<string, string[]>;
   activities: Activity[];
   completions: ActivityCompletion[];
-  tasks: Task[];
   workTasks: PersonalWorkTask[];
 }) {
   const [items, setItems] = useState(workItems);
   const [completions, setCompletions] = useState(initialCompletions);
-  const [tasks, setTasks] = useState(initialTasks);
   const [workTasks, setWorkTasks] = useState(initialWorkTasks);
+  const taskToggle = useTaskToggle();
+  const taskDialogs = useTaskDialogs(todayKey);
 
   const today = parseLocalDate(todayKey);
   const sortedMeetings = [...meetings].sort((a, b) => a.start_time.localeCompare(b.start_time));
   const doneCount = items.filter((w) => w.status === "concluido").length;
   const todayOcc = getRealOccurrencesForDay(activities, completions, today);
+  const deadlineTasks = [...myDay.deadlines.overdue, ...myDay.deadlines.dueToday];
+  const tasksDone = myDay.today.filter((e) => taskToggle.isEntryDone(e)).length;
 
   async function toggleWorkItemDone(workItem: WorkItem) {
     const nextStatus = workItem.status === "concluido" ? "pendente" : "concluido";
@@ -71,16 +77,6 @@ export function HojePageClient({
     if (result.error) toast.error(result.error);
   }
 
-  async function toggleTask(task: Task) {
-    const next = task.status === "concluida" ? "pendente" : "concluida";
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: next } : t)));
-    const result = await toggleTaskStatusAction(task.id, next);
-    if (result.error) {
-      toast.error(result.error);
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)));
-    }
-  }
-
   async function toggleWorkTask(task: PersonalWorkTask) {
     const next = task.status === "concluida" ? "pendente" : "concluida";
     setWorkTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: next } : t)));
@@ -91,147 +87,214 @@ export function HojePageClient({
     }
   }
 
+  function taskMenu(task: Task) {
+    if (task.archived_at) return {};
+    return {
+      onEdit: () => taskDialogs.openEdit(task),
+      onEndRecurrence: task.recurrence === "weekly" && !isRecurrenceEnded(task, todayKey) ? () => taskDialogs.askEnd(task) : undefined,
+      onDelete: () => taskDialogs.askDelete(task),
+    };
+  }
+
   const nothingPlanned =
-    sortedMeetings.length === 0 && items.length === 0 && todayOcc.length === 0 && tasks.length === 0 && workTasks.length === 0;
+    sortedMeetings.length === 0 &&
+    items.length === 0 &&
+    todayOcc.length === 0 &&
+    myDay.today.length === 0 &&
+    myDay.missed.length === 0 &&
+    deadlineTasks.length === 0 &&
+    workTasks.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Hoje" description={formatDateLong(today)} />
+      <PageHeader
+        title={`Meu Dia — ${weekdayLabel(today.getDay())}`}
+        description={formatDateLong(today)}
+        actions={
+          <Button size="sm" onClick={() => taskDialogs.openCreate("dia")}>
+            <Plus className="h-4 w-4" /> Tarefa
+          </Button>
+        }
+      />
 
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Reuniões</h2>
-          <Link href="/visionario/reunioes" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Ver todas <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-        {sortedMeetings.length === 0 ? (
-          <EmptyState icon={CalendarClock} title="Nenhuma reunião hoje" />
-        ) : (
-          <div className="flex flex-col gap-2">
-            {sortedMeetings.map((m) => (
-              <TodayMeetingItem key={m.id} meeting={m} participantNames={meetingParticipantNames[m.id] ?? []} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-muted-foreground">Trabalhos (Visionário Dev)</h2>
-            {items.length > 0 && <span className="text-xs text-muted-foreground">{doneCount} de {items.length} concluídos</span>}
-          </div>
-          <Link href="/visionario/trabalhos" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Ver tudo <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-        {items.length === 0 ? (
-          <EmptyState icon={Briefcase} title="Nenhum trabalho pendente para hoje" />
-        ) : (
-          <div className="flex flex-col gap-2">
-            {items.map((w) => (
-              <ChecklistItem
-                key={w.id}
-                title={w.title}
-                done={w.status === "concluido"}
-                onToggle={() => toggleWorkItemDone(w)}
-                badges={
-                  <>
-                    <PriorityBadge priority={w.priority} />
-                    {(workItemAssigneeNames[w.id]?.length ?? 0) > 1 && (
-                      <span className="text-[11px] text-muted-foreground">{workItemAssigneeNames[w.id].join(", ")}</span>
-                    )}
-                  </>
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Rotina</h2>
-          <Link href="/rotina" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Ver tudo <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
+      <Section title="Rotina" href="/rotina" linkLabel="Ver tudo">
         {todayOcc.length === 0 ? (
           <EmptyState icon={Repeat} title="Nenhuma atividade de rotina programada para hoje" />
         ) : (
-          <div className="flex flex-col gap-2">
-            {todayOcc.map((occ) => (
-              <ChecklistItem
-                key={occ.activity.id}
-                title={occ.activity.title}
-                done={occ.completed}
-                time={occ.activity.start_time.slice(0, 5)}
-                onToggle={() => toggleActivity(occ.activity.id)}
-                badges={occ.activity.category ? <span className="text-[11px] text-muted-foreground">{occ.activity.category}</span> : undefined}
-              />
-            ))}
-          </div>
+          todayOcc.map((occ) => (
+            <ChecklistItem
+              key={occ.activity.id}
+              title={occ.activity.title}
+              done={occ.completed}
+              time={occ.activity.start_time.slice(0, 5)}
+              onToggle={() => toggleActivity(occ.activity.id)}
+              badges={occ.activity.category ? <span className="text-[11px] text-muted-foreground">{occ.activity.category}</span> : undefined}
+            />
+          ))
         )}
-      </section>
+      </Section>
 
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Tarefas</h2>
-          <Link href="/tarefas" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Ver todas <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-        {tasks.length === 0 ? (
-          <EmptyState icon={ListChecks} title="Nenhuma tarefa para hoje" />
+      <Section
+        title="Tarefas de hoje"
+        hint={myDay.today.length > 0 ? `${tasksDone} de ${myDay.today.length} feitas` : undefined}
+        href="/tarefas"
+        linkLabel="Ver todas"
+      >
+        {myDay.today.length === 0 ? (
+          <EmptyState
+            icon={ListChecks}
+            title="Nenhuma tarefa para hoje"
+            action={
+              <Button size="sm" variant="outline" onClick={() => taskDialogs.openCreate("dia")}>
+                <Plus className="h-4 w-4" /> Nova tarefa do dia
+              </Button>
+            }
+          />
         ) : (
-          <div className="flex flex-col gap-2">
-            {tasks.map((t) => (
-              <ChecklistItem
-                key={t.id}
-                title={t.title}
-                done={t.status === "concluida"}
-                time={t.scheduled_time?.slice(0, 5)}
-                onToggle={() => toggleTask(t)}
-                badges={<PriorityBadge priority={t.priority} />}
-              />
-            ))}
-          </div>
+          myDay.today.map((entry) => (
+            <DayTaskItem
+              key={entry.key}
+              entry={entry}
+              done={taskToggle.isEntryDone(entry)}
+              onToggle={() => taskToggle.toggleEntry(entry)}
+              {...taskMenu(entry.task)}
+            />
+          ))
         )}
-      </section>
+      </Section>
 
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Trabalho / CLT</h2>
-          <Link href="/trabalho" className="flex items-center gap-1 text-xs text-primary hover:underline">
-            Ver tudo <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
+      {myDay.missed.length > 0 && (
+        <Section title="Ficou pendente" hint="últimos 7 dias">
+          {myDay.missed.map((entry) => (
+            <DayTaskItem
+              key={entry.key}
+              entry={entry}
+              done={taskToggle.isEntryDone(entry)}
+              onToggle={() => taskToggle.toggleEntry(entry)}
+            />
+          ))}
+        </Section>
+      )}
+
+      {deadlineTasks.length > 0 && (
+        <Section title="Prazos" href="/tarefas" linkLabel="Ver todos">
+          {deadlineTasks.map((task) => {
+            const overdue = !!task.due_date && task.due_date < todayKey;
+            return (
+              <ChecklistItem
+                key={task.id}
+                title={task.title}
+                done={taskToggle.isTaskDone(task)}
+                onToggle={() => taskToggle.toggleTask(task)}
+                onEdit={() => taskDialogs.openEdit(task)}
+                className={overdue ? "border-destructive/40" : undefined}
+                badges={
+                  <>
+                    <Badge variant={overdue ? "destructive" : "warning"} className="border-0">
+                      {overdue ? `Atrasada · prazo ${formatDate(task.due_date!)}` : "Prazo hoje"}
+                    </Badge>
+                    {task.priority === "importante" && <Badge variant="destructive" className="border-0">Importante</Badge>}
+                  </>
+                }
+              />
+            );
+          })}
+        </Section>
+      )}
+
+      <Section title="Compromissos" href="/visionario/reunioes" linkLabel="Ver todos">
+        {sortedMeetings.length === 0 ? (
+          <EmptyState icon={CalendarClock} title="Nenhum compromisso hoje" />
+        ) : (
+          sortedMeetings.map((m) => <TodayMeetingItem key={m.id} meeting={m} participantNames={meetingParticipantNames[m.id] ?? []} />)
+        )}
+      </Section>
+
+      <Section
+        title="Trabalhos (Visionário Dev)"
+        hint={items.length > 0 ? `${doneCount} de ${items.length} concluídos` : undefined}
+        href="/visionario/trabalhos"
+        linkLabel="Ver tudo"
+      >
+        {items.length === 0 ? (
+          <EmptyState icon={Briefcase} title="Nenhum trabalho pendente para hoje" />
+        ) : (
+          items.map((w) => (
+            <ChecklistItem
+              key={w.id}
+              title={w.title}
+              done={w.status === "concluido"}
+              onToggle={() => toggleWorkItemDone(w)}
+              badges={
+                <>
+                  <PriorityBadge priority={w.priority} />
+                  {(workItemAssigneeNames[w.id]?.length ?? 0) > 1 && (
+                    <span className="text-[11px] text-muted-foreground">{workItemAssigneeNames[w.id].join(", ")}</span>
+                  )}
+                </>
+              }
+            />
+          ))
+        )}
+      </Section>
+
+      <Section title="Trabalho / CLT" href="/trabalho" linkLabel="Ver tudo">
         {workTasks.length === 0 ? (
           <EmptyState icon={Briefcase} title="Nenhuma tarefa de trabalho para hoje" />
         ) : (
-          <div className="flex flex-col gap-2">
-            {workTasks.map((t) => (
-              <ChecklistItem
-                key={t.id}
-                title={t.title}
-                done={t.status === "concluida"}
-                time={t.scheduled_time?.slice(0, 5)}
-                onToggle={() => toggleWorkTask(t)}
-                badges={<PriorityBadge priority={t.priority} />}
-              />
-            ))}
-          </div>
+          workTasks.map((t) => (
+            <ChecklistItem
+              key={t.id}
+              title={t.title}
+              done={t.status === "concluida"}
+              time={t.scheduled_time?.slice(0, 5)}
+              onToggle={() => toggleWorkTask(t)}
+              badges={<PriorityBadge priority={t.priority} />}
+            />
+          ))
         )}
-      </section>
+      </Section>
 
       {nothingPlanned && (
         <EmptyState
           icon={Sun}
           title="Nada planejado para hoje"
-          description="Reuniões, trabalhos, rotina e tarefas aparecem aqui automaticamente."
+          description="Rotina, tarefas, compromissos e trabalhos aparecem aqui automaticamente."
         />
       )}
+
+      {taskDialogs.dialogs}
     </div>
+  );
+}
+
+function Section({
+  title,
+  hint,
+  href,
+  linkLabel,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  href?: string;
+  linkLabel?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+          {hint && <span className="truncate text-xs text-muted-foreground">{hint}</span>}
+        </div>
+        {href && (
+          <Link href={href} className="flex shrink-0 items-center gap-1 text-xs text-primary hover:underline">
+            {linkLabel} <ArrowRight className="h-3 w-3" />
+          </Link>
+        )}
+      </div>
+      <div className="flex flex-col gap-2">{children}</div>
+    </section>
   );
 }

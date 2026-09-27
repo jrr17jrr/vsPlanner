@@ -87,7 +87,7 @@ export function ChecklistItem({
 
 export function PriorityBadge({ priority }: { priority: string }) {
   const variant =
-    priority === "urgente" || priority === "alta"
+    priority === "urgente" || priority === "alta" || priority === "importante"
       ? "destructive"
       : priority === "media" || priority === "normal"
         ? "warning"
@@ -98,6 +98,7 @@ export function PriorityBadge({ priority }: { priority: string }) {
     normal: "Normal",
     alta: "Alta",
     urgente: "Urgente",
+    importante: "Importante",
   };
   return <Badge variant={variant} className="border-0">{label[priority] ?? priority}</Badge>;
 }

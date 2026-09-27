@@ -4,6 +4,7 @@ import {
   listActivities,
   listActivityCompletions,
   listTasks,
+  listTaskOccurrences,
   listPersonalWorkTasks,
   listGoals,
 } from "@/lib/supabase/repositories/personal.repository";
@@ -25,12 +26,13 @@ export default async function HistoricoPage() {
   const from = new Date();
   from.setDate(from.getDate() - 42);
 
-  const [activities, completions, charges, payments, tasks, workTasks, goals] = await Promise.all([
+  const [activities, completions, charges, payments, tasks, taskOccurrences, workTasks, goals] = await Promise.all([
     listActivities(space.id),
     listActivityCompletions(profile.id, toDateKey(from), toDateKey(new Date())),
     listFinancialCharges(space.id),
     listFinancialPayments(space.id),
     listTasks(space.id),
+    listTaskOccurrences(profile.id, toDateKey(from), toDateKey(new Date())),
     listPersonalWorkTasks(space.id),
     listGoals(space.id),
   ]);
@@ -47,7 +49,8 @@ export default async function HistoricoPage() {
       completions={completions}
       charges={charges}
       payments={payments}
-      tasks={tasks.filter((t) => t.status === "concluida")}
+      tasks={tasks.filter((t) => t.recurrence === "none" && t.status === "concluida")}
+      taskOccurrences={taskOccurrences.filter((o) => o.status === "concluida")}
       workTasks={workTasks.filter((t) => t.status === "concluida")}
       goals={goals.filter((g) => g.status === "concluida")}
       meetings={meetings}

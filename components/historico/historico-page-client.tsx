@@ -15,7 +15,7 @@ import { getRealOccurrences } from "@/lib/routine-real";
 import { monthCashSummary } from "@/lib/financial-calc";
 import { formatDateShort, formatMonthYear, formatCurrency, weekdayLabel, toDateKey, currentMonthKeySaoPaulo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Activity, ActivityCompletion, FinancialCharge, FinancialPayment, Goal, Meeting, PersonalWorkTask, Task } from "@/types/database.types";
+import type { Activity, ActivityCompletion, FinancialCharge, FinancialPayment, Goal, Meeting, PersonalWorkTask, Task, TaskOccurrence } from "@/types/database.types";
 
 function useWeekRanges(count: number) {
   return useMemo(() => {
@@ -41,6 +41,7 @@ export function HistoricoPageClient({
   charges,
   payments,
   tasks,
+  taskOccurrences,
   workTasks,
   goals,
   meetings,
@@ -50,6 +51,8 @@ export function HistoricoPageClient({
   charges: FinancialCharge[];
   payments: FinancialPayment[];
   tasks: Task[];
+  /** Dias concluídos de tarefas recorrentes (snapshot do título daquele dia). */
+  taskOccurrences: TaskOccurrence[];
   workTasks: PersonalWorkTask[];
   goals: Goal[];
   meetings: Meeting[];
@@ -81,12 +84,13 @@ export function HistoricoPageClient({
   const feed = useMemo<FeedItem[]>(() => {
     const items: FeedItem[] = [
       ...tasks.map((t) => ({ id: `task-${t.id}`, icon: ListChecks, label: "Tarefa concluída", title: t.title, date: t.completed_at ?? t.updated_at, href: "/tarefas" })),
+      ...taskOccurrences.map((o) => ({ id: `task-occ-${o.id}`, icon: ListChecks, label: "Tarefa concluída", title: o.title, date: o.completed_at ?? o.updated_at, href: "/tarefas" })),
       ...workTasks.map((t) => ({ id: `wt-${t.id}`, icon: Briefcase, label: "Trabalho/CLT concluído", title: t.title, date: t.completed_at ?? t.updated_at, href: "/trabalho" })),
       ...goals.map((g) => ({ id: `goal-${g.id}`, icon: Target, label: "Meta concluída", title: g.title, date: g.updated_at, href: "/metas" })),
       ...meetings.map((m) => ({ id: `meeting-${m.id}`, icon: CalendarClock, label: "Reunião realizada", title: m.title, date: `${m.meeting_date}T${m.start_time}`, href: `/visionario/reunioes/${m.id}` })),
     ];
     return items.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30);
-  }, [tasks, workTasks, goals, meetings]);
+  }, [tasks, taskOccurrences, workTasks, goals, meetings]);
 
   return (
     <div className="flex flex-col gap-4">

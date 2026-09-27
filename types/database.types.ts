@@ -364,8 +364,11 @@ export type FinancialPayment = {
  * Metas. RLS é `user_id = auth.uid()` direto (space Pessoal é sempre de
  * um usuário só, sem papéis/permissão por módulo).
  */
-export type TaskPriority = "baixa" | "media" | "alta";
+export type TaskPriority = "normal" | "importante";
 export type TaskStatus = "pendente" | "concluida";
+/** 'prazo' = concluir ATÉ `due_date`; 'dia' = fazer NAQUELE dia (migration 013). */
+export type TaskKind = "prazo" | "dia";
+export type TaskRecurrence = "none" | "weekly";
 
 export type Task = {
   id: string;
@@ -373,13 +376,44 @@ export type Task = {
   user_id: string;
   title: string;
   description: string | null;
+  kind: TaskKind;
+  /** Prazo (kind 'prazo') ou o dia da tarefa (kind 'dia' sem repetição). */
   due_date: string | null;
   scheduled_time: string | null;
+  location: string | null;
   priority: TaskPriority;
+  /** Só vale para tarefas NÃO recorrentes — recorrentes usam `TaskOccurrence` por dia. */
   status: TaskStatus;
   category: string | null;
   notes: string | null;
+  recurrence: TaskRecurrence;
+  /** 0=domingo .. 6=sábado (Date.getDay()), igual à Rotina. */
+  weekdays: number[];
+  recurrence_start: string | null;
+  recurrence_until: string | null;
+  archived_at: string | null;
   completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Espelha `public.task_occurrences` — estado de UM dia de uma tarefa
+ * recorrente, com snapshot (título/horário/local/prioridade) daquele dia.
+ * Nunca existe linha para dia futuro.
+ */
+export type TaskOccurrence = {
+  id: string;
+  task_id: string;
+  space_id: string;
+  user_id: string;
+  occurrence_date: string;
+  status: TaskStatus;
+  completed_at: string | null;
+  title: string;
+  scheduled_time: string | null;
+  location: string | null;
+  priority: TaskPriority;
   created_at: string;
   updated_at: string;
 };
@@ -734,6 +768,12 @@ export type Database = {
         Row: Task;
         Insert: Partial<Task> & { space_id: string; user_id: string; title: string };
         Update: Partial<Omit<Task, "id">>;
+        Relationships: [];
+      };
+      task_occurrences: {
+        Row: TaskOccurrence;
+        Insert: Partial<TaskOccurrence> & { task_id: string; space_id: string; user_id: string; occurrence_date: string; title: string };
+        Update: Partial<Omit<TaskOccurrence, "id">>;
         Relationships: [];
       };
       activities: {
