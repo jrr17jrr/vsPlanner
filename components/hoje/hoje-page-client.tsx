@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ArrowRight, Sun, ListChecks, Repeat, Briefcase, CalendarClock, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
+import { SectionError } from "@/components/shared/section-error";
 import { ChecklistItem, PriorityBadge } from "@/components/shared/checklist-item";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,12 +18,13 @@ import { updateWorkItemStatusAction } from "@/lib/supabase/work-items-actions";
 import { toggleActivityCompletionAction, togglePersonalWorkTaskStatusAction } from "@/lib/supabase/personal-actions";
 import { getRealOccurrencesForDay } from "@/lib/routine-real";
 import { isRecurrenceEnded, type MyDayTasks } from "@/lib/tasks";
+import type { SectionError as SectionErrorData } from "@/lib/supabase/section-result";
 import { formatDate, formatDateLong, parseLocalDate, weekdayLabel } from "@/lib/format";
 import type { Activity, ActivityCompletion, Meeting, PersonalWorkTask, Task, WorkItem } from "@/types/database.types";
 
 export function HojePageClient({
   todayKey,
-  myDay,
+  myDay: loadedMyDay,
   meetings,
   meetingParticipantNames,
   workItems,
@@ -30,11 +32,12 @@ export function HojePageClient({
   activities,
   completions: initialCompletions,
   workTasks: initialWorkTasks,
+  errors,
 }: {
   /** "Hoje" calculado no servidor (America/Sao_Paulo) — nunca recalculado no navegador, pra nunca divergir do que foi buscado. */
   todayKey: string;
-  /** Tarefas do dia/pendentes/prazos — mesma fonte (`loadMyDayTasks`) do Dashboard. */
-  myDay: MyDayTasks;
+  /** Tarefas do dia/pendentes/prazos — mesma fonte (`loadMyDayTasks`) do Dashboard. `null` = falhou (ver `errors.tarefas`). */
+  myDay: MyDayTasks | null;
   meetings: Meeting[];
   meetingParticipantNames: Record<string, string[]>;
   workItems: WorkItem[];
@@ -42,12 +45,15 @@ export function HojePageClient({
   activities: Activity[];
   completions: ActivityCompletion[];
   workTasks: PersonalWorkTask[];
+  /** Seções que falharam ao carregar — o erro real é exibido no lugar do conteúdo. */
+  errors: Partial<Record<"tarefas" | "compromissos" | "trabalhos" | "rotina" | "clt", SectionErrorData>>;
 }) {
   const [items, setItems] = useState(workItems);
   const [completions, setCompletions] = useState(initialCompletions);
   const [workTasks, setWorkTasks] = useState(initialWorkTasks);
   const taskToggle = useTaskToggle();
   const taskDialogs = useTaskDialogs(todayKey);
+  const myDay: MyDayTasks = loadedMyDay ?? { todayKey, today: [], missed: [], deadlines: { overdue: [], dueToday: [] } };
 
   const today = parseLocalDate(todayKey);
   const sortedMeetings = [...meetings].sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -97,6 +103,7 @@ export function HojePageClient({
   }
 
   const nothingPlanned =
+    Object.values(errors).every((e) => !e) &&
     sortedMeetings.length === 0 &&
     items.length === 0 &&
     todayOcc.length === 0 &&
@@ -118,7 +125,9 @@ export function HojePageClient({
       />
 
       <Section title="Rotina" href="/rotina" linkLabel="Ver tudo">
-        {todayOcc.length === 0 ? (
+        {errors.rotina ? (
+          <SectionError title="Não foi possível carregar a Rotina" error={errors.rotina} />
+        ) : todayOcc.length === 0 ? (
           <EmptyState icon={Repeat} title="Nenhuma atividade de rotina programada para hoje" />
         ) : (
           todayOcc.map((occ) => (
@@ -140,7 +149,9 @@ export function HojePageClient({
         href="/tarefas"
         linkLabel="Ver todas"
       >
-        {myDay.today.length === 0 ? (
+        {errors.tarefas ? (
+          <SectionError title="Não foi possível carregar as tarefas" error={errors.tarefas} />
+        ) : myDay.today.length === 0 ? (
           <EmptyState
             icon={ListChecks}
             title="Nenhuma tarefa para hoje"
@@ -203,7 +214,9 @@ export function HojePageClient({
       )}
 
       <Section title="Compromissos" href="/visionario/reunioes" linkLabel="Ver todos">
-        {sortedMeetings.length === 0 ? (
+        {errors.compromissos ? (
+          <SectionError title="Não foi possível carregar os compromissos" error={errors.compromissos} />
+        ) : sortedMeetings.length === 0 ? (
           <EmptyState icon={CalendarClock} title="Nenhum compromisso hoje" />
         ) : (
           sortedMeetings.map((m) => <TodayMeetingItem key={m.id} meeting={m} participantNames={meetingParticipantNames[m.id] ?? []} />)
@@ -216,7 +229,9 @@ export function HojePageClient({
         href="/visionario/trabalhos"
         linkLabel="Ver tudo"
       >
-        {items.length === 0 ? (
+        {errors.trabalhos ? (
+          <SectionError title="Não foi possível carregar os trabalhos" error={errors.trabalhos} />
+        ) : items.length === 0 ? (
           <EmptyState icon={Briefcase} title="Nenhum trabalho pendente para hoje" />
         ) : (
           items.map((w) => (
@@ -239,7 +254,9 @@ export function HojePageClient({
       </Section>
 
       <Section title="Trabalho / CLT" href="/trabalho" linkLabel="Ver tudo">
-        {workTasks.length === 0 ? (
+        {errors.clt ? (
+          <SectionError title="Não foi possível carregar as tarefas de trabalho" error={errors.clt} />
+        ) : workTasks.length === 0 ? (
           <EmptyState icon={Briefcase} title="Nenhuma tarefa de trabalho para hoje" />
         ) : (
           workTasks.map((t) => (

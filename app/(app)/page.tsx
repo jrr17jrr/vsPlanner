@@ -6,6 +6,8 @@ import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
 import { getTodayWorkItemsForHoje } from "@/lib/supabase/work-items-actions";
 import { loadMyDayTasks } from "@/lib/supabase/my-day";
 import { getImportantAttentionTasks } from "@/lib/tasks";
+import { loadSection, type SectionError as SectionErrorData, type SectionResult } from "@/lib/supabase/section-result";
+import { SectionError } from "@/components/shared/section-error";
 import { listWorkItems } from "@/lib/supabase/repositories/work-items.repository";
 import {
   listFinancialCharges,
@@ -18,7 +20,7 @@ import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG } from "@/lib/space-slugs";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { formatCurrency, formatDateLong, todayKeySaoPaulo } from "@/lib/format";
-import type { Space } from "@/types/database.types";
+import type { Space, WorkItem } from "@/types/database.types";
 
 function greeting(): string {
   // Hora de São Paulo (o servidor pode estar em UTC).
@@ -47,12 +49,28 @@ async function loadFinanceColumn(space: Space, profileId: string): Promise<Finan
   return financialMonthOverview(accounts, charges, payments);
 }
 
+/** Trabalhos (Visionário Dev) atrasados — só se o usuário puder ver o módulo. */
+async function loadOverdueWorkItems(visionarioSpace: Space | null | undefined): Promise<WorkItem[]> {
+  if (!visionarioSpace) return [];
+  const canViewTrabalhos = await hasModulePermission(visionarioSpace.id, "trabalhos", "view");
+  if (!canViewTrabalhos) return [];
+  const todayKey = todayKeySaoPaulo();
+  const workItems = await listWorkItems(visionarioSpace.id);
+  return workItems.filter((w) => w.status !== "concluido" && w.due_date && w.due_date < todayKey);
+}
+
 /**
  * Dashboard raiz — 100% real, montado só com os espaços aos quais o
  * usuário tem acesso e só com os dados cujo módulo ele tem permissão de
  * ver. Tarefas pessoais vêm de `loadMyDayTasks` — a MESMA fonte do Meu
  * Dia (/hoje); "Precisa da sua atenção" mostra só as IMPORTANTES
  * relevantes hoje (regra em `getImportantAttentionTasks`).
+ *
+ * Cada seção (tarefas, reuniões, trabalhos, financeiro de cada espaço)
+ * carrega de forma independente via `loadSection`: se uma query falhar, o
+ * erro REAL (code/message/details/hint) é logado no terminal e mostrado na
+ * própria seção, e o resto do Dashboard continua funcionando. Falha de
+ * sessão/space ainda vai pro `error.tsx`.
  */
 export default async function DashboardPage() {
   const { profile } = await requireActiveProfile();
@@ -63,16 +81,28 @@ export default async function DashboardPage() {
     findOrBootstrapSpace(TIKTOK_SLUG, profile),
   ]);
 
-  const [myDay, meetingsResult, workItemsResult, pessoalFinance, visionarioFinance, tiktokFinance] = await Promise.all([
-    loadMyDayTasks(),
-    getTodayMeetingsForHoje(),
-    getTodayWorkItemsForHoje(),
-    loadFinanceColumn(personalSpace, profile.id),
-    visionarioSpace ? loadFinanceColumn(visionarioSpace, profile.id) : Promise.resolve(null),
-    tiktokSpace ? loadFinanceColumn(tiktokSpace, profile.id) : Promise.resolve(null),
-  ]);
+  const noFinance: SectionResult<FinancialMonthOverview | null> = { ok: true, data: null };
+  const [myDayResult, meetingsSection, workItemsSection, pessoalFinance, visionarioFinance, tiktokFinance, overdueWorkSection] =
+    await Promise.all([
+      loadSection("inicio:tarefas", () => loadMyDayTasks()),
+      loadSection("inicio:reunioes", () => getTodayMeetingsForHoje()),
+      loadSection("inicio:trabalhos", () => getTodayWorkItemsForHoje()),
+      loadSection("inicio:financeiro-pessoal", () => loadFinanceColumn(personalSpace, profile.id)),
+      visionarioSpace
+        ? loadSection("inicio:financeiro-visionario", () => loadFinanceColumn(visionarioSpace, profile.id))
+        : Promise.resolve(noFinance),
+      tiktokSpace ? loadSection("inicio:financeiro-tiktok", () => loadFinanceColumn(tiktokSpace, profile.id)) : Promise.resolve(noFinance),
+      loadSection("inicio:trabalhos-atrasados", () => loadOverdueWorkItems(visionarioSpace)),
+    ]);
 
-  const todayKey = todayKeySaoPaulo();
+  const myDay = myDayResult.ok ? myDayResult.data : null;
+  const meetingsResult = meetingsSection.ok ? meetingsSection.data : { meetings: [] };
+  const workItemsResult = workItemsSection.ok ? workItemsSection.data : { workItems: [] };
+  const sectionErrors: { title: string; error: SectionErrorData }[] = [];
+  if (!myDayResult.ok) sectionErrors.push({ title: "Não foi possível carregar as tarefas", error: myDayResult.error });
+  if (!meetingsSection.ok) sectionErrors.push({ title: "Não foi possível carregar as reuniões de hoje", error: meetingsSection.error });
+  if (!workItemsSection.ok) sectionErrors.push({ title: "Não foi possível carregar os trabalhos de hoje", error: workItemsSection.error });
+  if (!overdueWorkSection.ok) sectionErrors.push({ title: "Não foi possível carregar os trabalhos atrasados", error: overdueWorkSection.error });
 
   type AttentionItem = {
     id: string;
@@ -86,28 +116,24 @@ export default async function DashboardPage() {
   };
   const attentionItems: AttentionItem[] = [];
 
-  getImportantAttentionTasks(myDay).forEach((t) => {
-    attentionItems.push({ ...t, icon: ListChecks, href: "/hoje" });
-  });
+  if (myDay) {
+    getImportantAttentionTasks(myDay).forEach((t) => {
+      attentionItems.push({ ...t, icon: ListChecks, href: "/hoje" });
+    });
+  }
 
-  if (visionarioSpace) {
-    const canViewTrabalhos = await hasModulePermission(visionarioSpace.id, "trabalhos", "view");
-    if (canViewTrabalhos) {
-      const workItems = await listWorkItems(visionarioSpace.id);
-      workItems
-        .filter((w) => w.status !== "concluido" && w.due_date && w.due_date < todayKey)
-        .forEach((w) => {
-          attentionItems.push({
-            id: w.id,
-            icon: Briefcase,
-            label: "Trabalho atrasado",
-            title: w.title,
-            meta: "atrasado",
-            urgent: true,
-            href: "/visionario/trabalhos",
-          });
-        });
-    }
+  if (overdueWorkSection.ok) {
+    overdueWorkSection.data.forEach((w) => {
+      attentionItems.push({
+        id: w.id,
+        icon: Briefcase,
+        label: "Trabalho atrasado",
+        title: w.title,
+        meta: "atrasado",
+        urgent: true,
+        href: "/visionario/trabalhos",
+      });
+    });
   }
 
   meetingsResult.meetings.forEach((m) => {
@@ -127,7 +153,8 @@ export default async function DashboardPage() {
     { name: "Visionário Dev", space: visionarioSpace, href: "/visionario/financeiro", data: visionarioFinance },
     { name: "TikTok", space: tiktokSpace, href: "/tiktok/financeiro", data: tiktokFinance },
   ];
-  for (const { name, space, href, data } of financeBySpace) {
+  for (const { name, space, href, data: result } of financeBySpace) {
+    const data = result.ok ? result.data : null;
     if (!space || !data) continue;
     if (data.aPagar.overdueCount > 0) {
       const n = data.aPagar.overdueCount;
@@ -164,9 +191,17 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-foreground">Meu dia</p>
           <span className="text-xs text-muted-foreground">
-            {myDay.today.length} tarefa(s) · {meetingsResult.meetings.length} reunião(ões) · {workItemsResult.workItems.length} trabalho(s)
+            {myDay ? `${myDay.today.length} tarefa(s) · ` : ""}
+            {meetingsResult.meetings.length} reunião(ões) · {workItemsResult.workItems.length} trabalho(s)
           </span>
         </div>
+        {sectionErrors.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            {sectionErrors.map((s) => (
+              <SectionError key={s.error.section} title={s.title} error={s.error} />
+            ))}
+          </div>
+        )}
         <Link href="/hoje" className="mt-3 flex items-center gap-1 text-sm text-primary hover:underline">
           Ver meu dia <ArrowRight className="h-3.5 w-3.5" />
         </Link>
@@ -176,9 +211,9 @@ export default async function DashboardPage() {
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Resumo financeiro</h2>
         <Card className="p-4">
           <div className="grid grid-cols-1 gap-4 divide-y divide-border sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
-            <FinanceColumn title="Pessoal" icon={Wallet} data={pessoalFinance} href="/financeiro" />
-            {visionarioSpace && <FinanceColumn title="Visionário Dev" icon={Rocket} data={visionarioFinance} href="/visionario/financeiro" />}
-            {tiktokSpace && <FinanceColumn title="TikTok" icon={Video} data={tiktokFinance} href="/tiktok/financeiro" />}
+            <FinanceColumn title="Pessoal" icon={Wallet} result={pessoalFinance} href="/financeiro" />
+            {visionarioSpace && <FinanceColumn title="Visionário Dev" icon={Rocket} result={visionarioFinance} href="/visionario/financeiro" />}
+            {tiktokSpace && <FinanceColumn title="TikTok" icon={Video} result={tiktokFinance} href="/tiktok/financeiro" />}
           </div>
         </Card>
       </section>
@@ -187,7 +222,9 @@ export default async function DashboardPage() {
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Precisa da sua atenção</h2>
         <Card className="p-2">
           {attentionItems.length === 0 ? (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">Tudo em dia por aqui.</p>
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+              {sectionErrors.length > 0 ? "Algumas seções não carregaram — veja o erro em “Meu dia”." : "Tudo em dia por aqui."}
+            </p>
           ) : (
             <div className="flex flex-col">
               {attentionItems.slice(0, 8).map((item) => (
@@ -224,21 +261,25 @@ export default async function DashboardPage() {
 function FinanceColumn({
   title,
   icon: Icon,
-  data,
+  result,
   href,
 }: {
   title: string;
   icon: typeof Wallet;
-  data: FinancialMonthOverview | null;
+  /** `data: null` = sem permissão para ver o financeiro do espaço. */
+  result: SectionResult<FinancialMonthOverview | null>;
   href: string;
 }) {
+  const data = result.ok ? result.data : null;
   return (
     <div className="flex flex-col gap-2 pt-4 first:pt-0 sm:pt-0 sm:px-4 sm:first:pl-0 sm:last:pr-0">
       <div className="flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
       </div>
-      {data ? (
+      {!result.ok ? (
+        <SectionError title="Não foi possível carregar o financeiro" error={result.error} />
+      ) : data ? (
         <div className="flex flex-col gap-1">
           <Row label="Saldo atual" value={data.saldo} />
           <div className="my-1 border-t border-border/60" />
