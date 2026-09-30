@@ -294,7 +294,10 @@ export function pendingUpToMonth(
     .map((c) => ({ charge: c, remaining: remainingAmount(c, payments) }))
     .filter((x) => x.remaining > 0);
   const sum = (xs: typeof open) => roundCents(xs.reduce((s, x) => s + x.remaining, 0));
-  const overdue = open.filter((x) => x.charge.due_date < today);
+  // Em competências históricas/futuras, atraso é relativo ao fim/período selecionado,
+  // não ao dia de hoje; isso evita marcar como "atrasado" algo que ainda não tinha vencido naquele mês.
+  const overdueCutoff = today.slice(0, 7) === monthKey ? today : `${monthKey}-31`;
+  const overdue = open.filter((x) => x.charge.due_date < overdueCutoff);
   return {
     total: sum(open),
     thisMonth: sum(open.filter((x) => x.charge.due_date.startsWith(monthKey))),
