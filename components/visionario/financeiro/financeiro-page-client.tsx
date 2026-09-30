@@ -13,6 +13,8 @@ import {
   DollarSign,
   Receipt,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LineChart, Line,
@@ -59,11 +61,25 @@ import type { FinanceTab } from "@/lib/finance-tabs";
 
 type Tab = FinanceTab;
 
-function previousMonthKey(monthKey: string): string {
+function shiftMonthKey(monthKey: string, delta: number): string {
   const [y, m] = monthKey.split("-").map(Number);
-  const d = new Date(y, m - 1, 1);
-  d.setMonth(d.getMonth() - 1);
+  const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function previousMonthKey(monthKey: string): string { return shiftMonthKey(monthKey, -1); }
+
+function monthLabel(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const value = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function referenceDateForMonth(monthKey: string, currentMonth: string, today: string): string {
+  if (monthKey === currentMonth) return today;
+  const [y, m] = monthKey.split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return `${monthKey}-${String(last).padStart(2, "0")}`;
 }
 
 const SCOPE_TITLE: Record<FinancialScope, string> = {
@@ -117,6 +133,8 @@ export function FinanceiroPageClient({
   const [tab, setTab] = useState<Tab>(initialTab);
   const [period, setPeriod] = useState<PeriodPreset>("6m");
   const [dialog, setDialog] = useState<DialogPreset>(null);
+  const curMonth = currentMonthKeySaoPaulo();
+  const [selectedMonth, setSelectedMonth] = useState(curMonth);
 
   const today = todayKeySaoPaulo();
   const chargeKindById = useMemo(() => new Map(charges.map((c) => [c.id, c.kind])), [charges]);
@@ -127,12 +145,12 @@ export function FinanceiroPageClient({
   }, [accounts, payments, chargeKindById]);
 
   // Mesmo cálculo da Home geral e do dashboard (lib/financial-calc.ts).
-  const overview = useMemo(() => financialMonthOverview(accounts, charges, payments, today), [accounts, charges, payments, today]);
+  const referenceDate = referenceDateForMonth(selectedMonth, curMonth, today);
+  const overview = useMemo(() => financialMonthOverview(accounts, charges, payments, referenceDate), [accounts, charges, payments, referenceDate]);
   const { mrr, recurringCount } = useMemo(() => calculateMRR(origins, charges, clientServices), [origins, charges, clientServices]);
 
-  const curMonth = currentMonthKeySaoPaulo();
-  const prevMonth = previousMonthKey(curMonth);
-  const comparison = useMemo(() => monthlyComparison(charges, curMonth, prevMonth), [charges, curMonth, prevMonth]);
+  const prevMonth = previousMonthKey(selectedMonth);
+  const comparison = useMemo(() => monthlyComparison(charges, selectedMonth, prevMonth), [charges, selectedMonth, prevMonth]);
 
   const monthKeys = useMemo(() => monthKeysForPeriod(period), [period]);
   const series = useMemo(() => historicalSeries(charges, monthKeys), [charges, monthKeys]);
@@ -168,6 +186,19 @@ export function FinanceiroPageClient({
         }
       />
 
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
+        <div className="flex items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" aria-label="Mês anterior" onClick={() => setSelectedMonth((m) => shiftMonthKey(m, -1))}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-36 text-center text-sm font-semibold">{monthLabel(selectedMonth)}</span>
+          <Button type="button" variant="ghost" size="icon" aria-label="Próximo mês" onClick={() => setSelectedMonth((m) => shiftMonthKey(m, 1))}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        {selectedMonth !== curMonth && <Button type="button" variant="outline" size="sm" onClick={() => setSelectedMonth(curMonth)}>Mês atual</Button>}
+      </div>
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="visao">Visão geral</TabsTrigger>
@@ -182,10 +213,10 @@ export function FinanceiroPageClient({
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <MoneyCard label="Saldo atual" amount={overview.saldo} icon={Wallet} hint={`${accounts.filter((a) => a.is_active).length} conta(s) ativa(s)`} />
-            <MoneyCard label="Recebido no mês" amount={overview.recebido} icon={TrendingUp} tone="success" hint="Pela data real do recebimento" />
-            <MoneyCard label="Pago no mês" amount={overview.pago} icon={TrendingDown} tone="destructive" hint="Pela data real do pagamento" />
+            <MoneyCard label={`Recebido em ${monthLabel(selectedMonth)}`} amount={overview.recebido} icon={TrendingUp} tone="success" hint="Pela data real do recebimento" />
+            <MoneyCard label={`Pago em ${monthLabel(selectedMonth)}`} amount={overview.pago} icon={TrendingDown} tone="destructive" hint="Pela data real do pagamento" />
             <MoneyCard
-              label="Resultado do mês"
+              label={`Resultado de ${monthLabel(selectedMonth)}`}
               amount={resultado}
               icon={DollarSign}
               tone={resultado > 0 ? "success" : resultado < 0 ? "destructive" : "default"}
@@ -221,9 +252,9 @@ export function FinanceiroPageClient({
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <ComparisonTile label="Receita (competência)" value={comparison.current.receita} pct={comparison.pctReceita} goodWhenUp />
-            <ComparisonTile label="Despesas (competência)" value={comparison.current.despesa} pct={comparison.pctDespesa} goodWhenUp={false} />
-            <ComparisonTile label="Lucro (competência)" value={comparison.current.lucro} pct={comparison.pctLucro} goodWhenUp />
+            <ComparisonTile label={`Receita (${monthLabel(selectedMonth)})`} value={comparison.current.receita} pct={comparison.pctReceita} goodWhenUp />
+            <ComparisonTile label={`Despesas (${monthLabel(selectedMonth)})`} value={comparison.current.despesa} pct={comparison.pctDespesa} goodWhenUp={false} />
+            <ComparisonTile label={`Lucro (${monthLabel(selectedMonth)})`} value={comparison.current.lucro} pct={comparison.pctLucro} goodWhenUp />
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
