@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet, HandCoins, ListChecks } from "lucide-react";
+import { Rocket, Video, ArrowRight, Briefcase, CalendarClock, Wallet, HandCoins, ListChecks, ChevronLeft, ChevronRight } from "lucide-react";
 import { requireActiveProfile, findOrBootstrapSpace, requirePersonalSpace } from "@/lib/supabase/dal";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
 import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
@@ -19,7 +19,7 @@ import { prepareFinancialSpace } from "@/lib/supabase/financial-page-data";
 import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG } from "@/lib/space-slugs";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
-import { formatCurrency, formatDateLong, todayKeySaoPaulo } from "@/lib/format";
+import { formatCurrency, formatDateLong, todayKeySaoPaulo, currentMonthKeySaoPaulo } from "@/lib/format";
 import type { Space, WorkItem } from "@/types/database.types";
 
 function greeting(): string {
@@ -36,7 +36,7 @@ function greeting(): string {
  * materializar as recorrências do mesmo jeito que o Financeiro faz.
  * "Entrou/Saiu no mês" = caixa pela data real; nunca competência.
  */
-async function loadFinanceColumn(space: Space, profileId: string): Promise<FinancialMonthOverview | null> {
+async function loadFinanceColumn(space: Space, profileId: string, referenceDate?: string): Promise<FinancialMonthOverview | null> {
   const allowed = await hasModulePermission(space.id, "financeiro", "view");
   if (!allowed) return null;
 
@@ -46,7 +46,7 @@ async function loadFinanceColumn(space: Space, profileId: string): Promise<Finan
     listFinancialPayments(space.id),
     listFinancialAccounts(space.id),
   ]);
-  return financialMonthOverview(accounts, charges, payments);
+  return financialMonthOverview(accounts, charges, payments, referenceDate);
 }
 
 /** Trabalhos (Visionário Dev) atrasados — só se o usuário puder ver o módulo. */
@@ -72,8 +72,34 @@ async function loadOverdueWorkItems(visionarioSpace: Space | null | undefined): 
  * própria seção, e o resto do Dashboard continua funcionando. Falha de
  * sessão/space ainda vai pro `error.tsx`.
  */
-export default async function DashboardPage() {
+function validMonthKey(value?: string): string {
+  return value && /^\\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : currentMonthKeySaoPaulo();
+}
+
+function shiftMonthKey(monthKey: string, delta: number): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const value = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function referenceDateForMonth(monthKey: string): string {
+  const current = currentMonthKeySaoPaulo();
+  if (monthKey === current) return todayKeySaoPaulo();
+  const [y, m] = monthKey.split("-").map(Number);
+  return `${monthKey}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+}
+
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ mes?: string }> }) {
   const { profile } = await requireActiveProfile();
+  const { mes } = await searchParams;
+  const selectedMonth = validMonthKey(mes);
+  const financeReferenceDate = referenceDateForMonth(selectedMonth);
   const { space: personalSpace } = await requirePersonalSpace();
 
   const [visionarioSpace, tiktokSpace] = await Promise.all([
@@ -87,11 +113,11 @@ export default async function DashboardPage() {
       loadSection("inicio:tarefas", () => loadMyDayTasks()),
       loadSection("inicio:reunioes", () => getTodayMeetingsForHoje()),
       loadSection("inicio:trabalhos", () => getTodayWorkItemsForHoje()),
-      loadSection("inicio:financeiro-pessoal", () => loadFinanceColumn(personalSpace, profile.id)),
+      loadSection("inicio:financeiro-pessoal", () => loadFinanceColumn(personalSpace, profile.id, financeReferenceDate)),
       visionarioSpace
-        ? loadSection("inicio:financeiro-visionario", () => loadFinanceColumn(visionarioSpace, profile.id))
+        ? loadSection("inicio:financeiro-visionario", () => loadFinanceColumn(visionarioSpace, profile.id, financeReferenceDate))
         : Promise.resolve(noFinance),
-      tiktokSpace ? loadSection("inicio:financeiro-tiktok", () => loadFinanceColumn(tiktokSpace, profile.id)) : Promise.resolve(noFinance),
+      tiktokSpace ? loadSection("inicio:financeiro-tiktok", () => loadFinanceColumn(tiktokSpace, profile.id, financeReferenceDate)) : Promise.resolve(noFinance),
       loadSection("inicio:trabalhos-atrasados", () => loadOverdueWorkItems(visionarioSpace)),
     ]);
 
@@ -208,7 +234,15 @@ export default async function DashboardPage() {
       </Card>
 
       <section>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">Resumo financeiro</h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">Resumo financeiro</h2>
+          <div className="flex items-center gap-1">
+            <Link href={`/?mes=${shiftMonthKey(selectedMonth, -1)}`} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="Mês anterior"><ChevronLeft className="h-4 w-4" /></Link>
+            <span className="min-w-32 text-center text-xs font-semibold text-foreground">{monthLabel(selectedMonth)}</span>
+            <Link href={`/?mes=${shiftMonthKey(selectedMonth, 1)}`} className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary" aria-label="Próximo mês"><ChevronRight className="h-4 w-4" /></Link>
+            {selectedMonth !== currentMonthKeySaoPaulo() && <Link href="/" className="ml-1 text-xs text-primary hover:underline">Mês atual</Link>}
+          </div>
+        </div>
         <Card className="p-4">
           <div className="grid grid-cols-1 gap-4 divide-y divide-border sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
             <FinanceColumn title="Pessoal" icon={Wallet} result={pessoalFinance} href="/financeiro" />
