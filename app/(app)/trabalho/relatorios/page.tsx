@@ -1,0 +1,2 @@
+import { PageHeader } from "@/components/shared/page-header"; import { Card, CardContent } from "@/components/ui/card";
+export default function Page(){return <div className="space-y-4"><PageHeader title="Relatórios" description="Relatórios mensais individuais das empresas."/><Card><CardContent className="p-6 text-sm text-muted-foreground">Aqui ficará a geração do PDF mensal por empresa e, depois, o relatório consolidado por responsável.</CardContent></Card></div>}
