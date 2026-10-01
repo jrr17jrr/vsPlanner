@@ -28,17 +28,7 @@ create table if not exists public.clt_companies (
   unique(user_id, name)
 );
 
-create table if not exists public.clt_traffic_entries (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  company_id uuid not null references public.clt_companies(id) on delete cascade,
-  amount numeric(12,2) not null check (amount >= 0),
-  entry_date date not null,
-  status text not null default 'pendente' check (status in ('pendente','pago')),
-  notes text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+alter table public.clt_companies add column if not exists current_ad_balance numeric(12,2) not null default 0 check (current_ad_balance >= 0);
 
 create table if not exists public.clt_campaigns (
   id uuid primary key default gen_random_uuid(),
@@ -88,12 +78,11 @@ create table if not exists public.clt_company_notes (
 create index if not exists idx_clt_companies_user on public.clt_companies(user_id);
 create index if not exists idx_clt_campaigns_company_dates on public.clt_campaigns(company_id, starts_on, ends_on);
 create index if not exists idx_clt_tasks_user_due on public.clt_tasks(user_id, due_date);
-create index if not exists idx_clt_entries_company_date on public.clt_traffic_entries(company_id, entry_date);
 
 do $$
 declare t text;
 begin
-  foreach t in array array['clt_responsibles','clt_companies','clt_traffic_entries','clt_campaigns','clt_tasks','clt_company_notes']
+  foreach t in array array['clt_responsibles','clt_companies','clt_campaigns','clt_tasks','clt_company_notes']
   loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists %I on public.%I', t || '_all', t);
@@ -104,8 +93,6 @@ end $$;
 
 drop trigger if exists set_updated_at on public.clt_companies;
 create trigger set_updated_at before update on public.clt_companies for each row execute function public.set_updated_at();
-drop trigger if exists set_updated_at on public.clt_traffic_entries;
-create trigger set_updated_at before update on public.clt_traffic_entries for each row execute function public.set_updated_at();
 drop trigger if exists set_updated_at on public.clt_campaigns;
 create trigger set_updated_at before update on public.clt_campaigns for each row execute function public.set_updated_at();
 drop trigger if exists set_updated_at on public.clt_tasks;
