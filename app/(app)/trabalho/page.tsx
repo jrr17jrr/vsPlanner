@@ -1,9 +1,7 @@
-import { requirePersonalSpace } from "@/lib/supabase/dal";
-import { listPersonalWorkTasks } from "@/lib/supabase/repositories/personal.repository";
-import { TrabalhoPageClient } from "@/components/trabalho/trabalho-page-client";
+import { CltDashboard } from "@/components/trabalho/clt-dashboard";
+import { getCltDashboardData } from "@/lib/supabase/repositories/clt.repository";
 
 export default async function TrabalhoPage() {
-  const { space } = await requirePersonalSpace();
-  const tasks = await listPersonalWorkTasks(space.id);
-  return <TrabalhoPageClient tasks={tasks} />;
+  const data = await getCltDashboardData();
+  return <CltDashboard data={data} />;
 }
