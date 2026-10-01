@@ -468,6 +468,14 @@ export type PersonalWorkTask = {
   updated_at: string;
 };
 
+
+export type CltResponsible = { id: string; user_id: string; name: string; created_at: string };
+export type CltCompany = { id: string; user_id: string; responsible_id: string | null; name: string; email: string | null; instagram: string | null; responsible_phone: string | null; company_phone: string | null; website: string | null; notes: string | null; is_active: boolean; created_at: string; updated_at: string };
+export type CltTrafficEntry = { id: string; user_id: string; company_id: string; amount: number; entry_date: string; status: "pendente" | "pago"; notes: string | null; created_at: string; updated_at: string };
+export type CltCampaign = { id: string; user_id: string; company_id: string; name: string; objective: string | null; description: string | null; starts_on: string; ends_on: string; spent_amount: number; messages: number; sales: number; views: number; generated_revenue: number | null; notes: string | null; created_at: string; updated_at: string };
+export type CltTask = { id: string; user_id: string; company_id: string | null; title: string; description: string | null; due_date: string | null; scheduled_time: string | null; priority: "normal" | "importante"; status: "pendente" | "concluida"; notes: string | null; completed_at: string | null; created_at: string; updated_at: string };
+export type CltCompanyNote = { id: string; user_id: string; company_id: string; note_date: string; content: string; created_at: string };
+
 export type GoalStatus = "em_andamento" | "concluida" | "cancelada";
 
 export type Goal = {
@@ -794,6 +802,12 @@ export type Database = {
         Update: Partial<Omit<PersonalWorkTask, "id">>;
         Relationships: [];
       };
+      clt_responsibles: { Row: CltResponsible; Insert: Partial<CltResponsible> & { user_id: string; name: string }; Update: Partial<Omit<CltResponsible, "id">>; Relationships: [] };
+      clt_companies: { Row: CltCompany; Insert: Partial<CltCompany> & { user_id: string; name: string }; Update: Partial<Omit<CltCompany, "id">>; Relationships: [] };
+      clt_traffic_entries: { Row: CltTrafficEntry; Insert: Partial<CltTrafficEntry> & { user_id: string; company_id: string; amount: number; entry_date: string }; Update: Partial<Omit<CltTrafficEntry, "id">>; Relationships: [] };
+      clt_campaigns: { Row: CltCampaign; Insert: Partial<CltCampaign> & { user_id: string; company_id: string; name: string; starts_on: string; ends_on: string }; Update: Partial<Omit<CltCampaign, "id">>; Relationships: [] };
+      clt_tasks: { Row: CltTask; Insert: Partial<CltTask> & { user_id: string; title: string }; Update: Partial<Omit<CltTask, "id">>; Relationships: [] };
+      clt_company_notes: { Row: CltCompanyNote; Insert: Partial<CltCompanyNote> & { user_id: string; company_id: string; content: string }; Update: Partial<Omit<CltCompanyNote, "id">>; Relationships: [] };
       goals: {
         Row: Goal;
         Insert: Partial<Goal> & { space_id: string; user_id: string; title: string };
