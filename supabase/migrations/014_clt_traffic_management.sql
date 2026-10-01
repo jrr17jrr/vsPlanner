@@ -98,19 +98,24 @@ create trigger set_updated_at before update on public.clt_campaigns for each row
 drop trigger if exists set_updated_at on public.clt_tasks;
 create trigger set_updated_at before update on public.clt_tasks for each row execute function public.set_updated_at();
 
--- Dados iniciais informados pelo usuário. Inserções idempotentes e somente
--- para o usuário autenticado quando a migration for executada no SQL Editor.
-do $$
-declare uid uuid := auth.uid(); lenon uuid; ruben uuid; carol uuid;
+-- Dados iniciais do CLT para o usuário atual do VSPlanner.
+-- Usa o profile conhecido porque auth.uid() no SQL Editor pode ser null.
+do $
+declare
+  uid uuid := 'f672e7b6-7a05-41be-8e7a-36a5f1a21acc';
+  lenon uuid; ruben uuid; carol uuid;
 begin
-  if uid is null then return; end if;
-  insert into public.clt_responsibles(user_id,name) values(uid,'Lenon') on conflict(user_id,name) do nothing;
-  insert into public.clt_responsibles(user_id,name) values(uid,'Ruben Jr') on conflict(user_id,name) do nothing;
-  insert into public.clt_responsibles(user_id,name) values(uid,'Carol') on conflict(user_id,name) do nothing;
+  insert into public.clt_responsibles(user_id,name) values
+    (uid,'Lenon'),(uid,'Ruben Jr'),(uid,'Carol')
+  on conflict(user_id,name) do nothing;
+
   select id into lenon from public.clt_responsibles where user_id=uid and name='Lenon';
   select id into ruben from public.clt_responsibles where user_id=uid and name='Ruben Jr';
   select id into carol from public.clt_responsibles where user_id=uid and name='Carol';
+
   insert into public.clt_companies(user_id,responsible_id,name) values
-    (uid,lenon,'SGIV'),(uid,lenon,'IG Predial'),(uid,ruben,'AIV'),(uid,ruben,'SIV'),(uid,ruben,'SGI'),(uid,carol,'COTRAN'),(uid,carol,'Verificar PIV')
+    (uid,lenon,'SGIV'),(uid,lenon,'IG Predial'),
+    (uid,ruben,'AIV'),(uid,ruben,'SIV'),(uid,ruben,'SGI'),
+    (uid,carol,'COTRAN'),(uid,carol,'Verificar PIV')
   on conflict(user_id,name) do update set responsible_id=excluded.responsible_id;
-end $$;
+end $;
