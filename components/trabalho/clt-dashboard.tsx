@@ -29,8 +29,7 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
   const companies = data.companies.filter(c => companyIds.has(c.id));
   const campaigns = data.campaigns.filter(c => companyIds.has(c.company_id));
   const monthly = campaigns.filter(c => c.starts_on.slice(0,7) === mk || c.ends_on.slice(0,7) === mk || (c.starts_on < mk + "-01" && c.ends_on >= mk + "-01"));
-  const entriesPaid = data.entries.filter(e => companyIds.has(e.company_id) && e.status === "pago");
-  const totalBalance = entriesPaid.reduce((s,e)=>s+Number(e.amount),0) - campaigns.reduce((s,c)=>s+Number(c.spent_amount),0);
+  const totalBalance = companies.reduce((s,c)=>s+Number(c.current_ad_balance),0);
   const spent = monthly.reduce((s,c)=>s+Number(c.spent_amount),0);
   const messages = monthly.reduce((s,c)=>s+c.messages,0), sales=monthly.reduce((s,c)=>s+c.sales,0), views=monthly.reduce((s,c)=>s+c.views,0);
   const active = campaigns.filter(c => c.starts_on <= today && c.ends_on >= today);
@@ -72,6 +71,6 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
 
     <Card><CardHeader><CardTitle>Resultados por empresa — <span className="capitalize">{monthFmt.format(month)}</span></CardTitle></CardHeader><CardContent><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-muted-foreground"><tr><th className="pb-2">Empresa</th><th className="text-right">Gasto</th><th className="text-right">Mensagens</th><th className="text-right">Vendas</th><th className="text-right">Visualizações</th></tr></thead><tbody>{companies.map(co=>{const cc=monthly.filter(c=>c.company_id===co.id);return <tr key={co.id} className="border-t"><td className="py-3 font-medium">{co.name}</td><td className="text-right">{money.format(cc.reduce((s,c)=>s+Number(c.spent_amount),0))}</td><td className="text-right">{cc.reduce((s,c)=>s+c.messages,0)}</td><td className="text-right">{cc.reduce((s,c)=>s+c.sales,0)}</td><td className="text-right">{cc.reduce((s,c)=>s+c.views,0).toLocaleString("pt-BR")}</td></tr>})}</tbody></table></div></CardContent></Card>
 
-    <Card><CardHeader><CardTitle>Saldos atuais</CardTitle></CardHeader><CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{companies.map(co=>{const paid=data.entries.filter(e=>e.company_id===co.id&&e.status==="pago").reduce((s,e)=>s+Number(e.amount),0);const used=data.campaigns.filter(c=>c.company_id===co.id).reduce((s,c)=>s+Number(c.spent_amount),0);const pending=data.entries.filter(e=>e.company_id===co.id&&e.status==="pendente").reduce((s,e)=>s+Number(e.amount),0);return <div key={co.id} className="rounded-lg border p-3"><div className="font-medium">{co.name}</div><div className="text-lg font-semibold">{money.format(paid-used)}</div>{pending>0&&<div className="text-xs text-muted-foreground">{money.format(pending)} pendente</div>}</div>})}</CardContent></Card>
+    <Card><CardHeader><CardTitle>Saldos atuais</CardTitle></CardHeader><CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{companies.map(co=>{return <div key={co.id} className="rounded-lg border p-3"><div className="font-medium">{co.name}</div><div className="text-lg font-semibold">{money.format(co.current_ad_balance)}</div></div>})}</CardContent></Card>
   </div>;
 }
