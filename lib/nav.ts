@@ -16,6 +16,9 @@ import {
   Globe,
   AtSign,
   Video,
+  Megaphone,
+  FileText,
+  Building2,
   Settings,
   ShieldAlert,
   type LucideIcon,
@@ -49,7 +52,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Meu Dia", href: "/hoje", icon: Sun },
       { label: "Minha Rotina", href: "/rotina", icon: CalendarClock },
-      { label: "Trabalho / CLT", href: "/trabalho", icon: Briefcase },
       { label: "Tarefas", href: "/tarefas", icon: ListChecks },
       { label: "Histórico", href: "/historico", icon: History },
     ],
@@ -74,6 +76,16 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Financeiro", href: "/visionario/financeiro", icon: LineChart, module: "financeiro" },
       { label: "Sites", href: "/visionario/sites", icon: Globe, module: "sites" },
       { label: "Domínios", href: "/visionario/dominios", icon: AtSign, module: "sites" },
+    ],
+  },
+  {
+    label: "Trabalho / CLT",
+    items: [
+      { label: "Visão Geral", href: "/trabalho", icon: LayoutDashboard },
+      { label: "Empresas", href: "/trabalho/empresas", icon: Building2 },
+      { label: "Campanhas", href: "/trabalho/campanhas", icon: Megaphone },
+      { label: "Tarefas", href: "/trabalho/tarefas", icon: ListChecks },
+      { label: "Relatórios", href: "/trabalho/relatorios", icon: FileText },
     ],
   },
   {
