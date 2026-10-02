@@ -82,6 +82,13 @@ type ContractAction =
   | { type: "delete"; contract: ClientService }
   | { type: "generate"; contract: ClientService };
 
+function externalUrl(value: string) {
+  const url = value.trim();
+  if (!url) return "#";
+  if (/^https?:\/\//i.test(url)) return url;
+  return `https://${url}`;
+}
+
 export function ClientDetailClient({
   client,
   contracts,
@@ -256,14 +263,14 @@ export function ClientDetailClient({
         <WhatsAppButton phone={client.whatsapp || client.phone} />
         {client.instagram && (
           <Button variant="outline" size="sm" asChild>
-            <a href={client.instagram} target="_blank" rel="noopener noreferrer">
+            <a href={externalUrl(client.instagram)} target="_blank" rel="noopener noreferrer">
               <AtSign className="h-3.5 w-3.5" /> Instagram
             </a>
           </Button>
         )}
         {client.website && (
           <Button variant="outline" size="sm" asChild>
-            <a href={client.website} target="_blank" rel="noopener noreferrer">
+            <a href={externalUrl(client.website)} target="_blank" rel="noopener noreferrer">
               <Globe className="h-3.5 w-3.5" /> Site
             </a>
           </Button>
