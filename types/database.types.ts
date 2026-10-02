@@ -474,6 +474,7 @@ export type CltCompany = { id: string; user_id: string; responsible_id: string |
 export type CltCampaign = { id: string; user_id: string; company_id: string; name: string; objective: string | null; description: string | null; starts_on: string; ends_on: string; spent_amount: number; messages: number; sales: number; views: number; generated_revenue: number | null; notes: string | null; created_at: string; updated_at: string };
 export type CltTask = { id: string; user_id: string; company_id: string | null; title: string; description: string | null; kind: "prazo"|"dia"; due_date: string | null; scheduled_time: string | null; priority: "normal" | "importante"; status: "pendente" | "concluida"; notes: string | null; recurrence: "none"|"weekly"; weekdays: number[]; recurrence_start: string|null; recurrence_until: string|null; archived_at: string|null; completed_at: string | null; created_at: string; updated_at: string };
 export type CltCompanyNote = { id: string; user_id: string; company_id: string; note_date: string; content: string; created_at: string };
+export type CltTaskOccurrence = { id:string; task_id:string; user_id:string; occurrence_date:string; status:"pendente"|"concluida"; completed_at:string|null; created_at:string };
 
 export type GoalStatus = "em_andamento" | "concluida" | "cancelada";
 
@@ -805,6 +806,7 @@ export type Database = {
       clt_companies: { Row: CltCompany; Insert: Partial<CltCompany> & { user_id: string; name: string }; Update: Partial<Omit<CltCompany, "id">>; Relationships: [] };
       clt_campaigns: { Row: CltCampaign; Insert: Partial<CltCampaign> & { user_id: string; company_id: string; name: string; starts_on: string; ends_on: string }; Update: Partial<Omit<CltCampaign, "id">>; Relationships: [] };
       clt_tasks: { Row: CltTask; Insert: Partial<CltTask> & { user_id: string; title: string }; Update: Partial<Omit<CltTask, "id">>; Relationships: [] };
+      clt_task_occurrences: { Row: CltTaskOccurrence; Insert: Partial<CltTaskOccurrence> & { task_id:string; user_id:string; occurrence_date:string }; Update: Partial<Omit<CltTaskOccurrence, "id">>; Relationships: [] };
       clt_company_notes: { Row: CltCompanyNote; Insert: Partial<CltCompanyNote> & { user_id: string; company_id: string; content: string }; Update: Partial<Omit<CltCompanyNote, "id">>; Relationships: [] };
       goals: {
         Row: Goal;
