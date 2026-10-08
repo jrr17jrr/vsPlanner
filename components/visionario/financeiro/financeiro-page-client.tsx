@@ -196,7 +196,7 @@ export function FinanceiroPageClient({
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
-        {selectedMonth !== curMonth && <Button type="button" variant="outline" size="sm" onClick={() => setSelectedMonth(curMonth)}>Mês atual</Button>}
+        <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">Consultando: {monthLabel(selectedMonth)}</span>{selectedMonth !== curMonth && <Button type="button" variant="outline" size="sm" onClick={() => setSelectedMonth(curMonth)}>Mês atual</Button>}</div>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
@@ -303,10 +303,10 @@ export function FinanceiroPageClient({
         <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} />
       )}
       {tab === "a_receber" && (
-        <ChargesList {...listProps} kind="entrada" onCreate={() => setDialog({ kind: "entrada", pending: true })} />
+        <ChargesList {...listProps} kind="entrada" onCreate={() => setDialog({ kind: "entrada", pending: true })} selectedMonth={selectedMonth} />
       )}
       {tab === "a_pagar" && (
-        <ChargesList {...listProps} kind="saida" onCreate={() => setDialog({ kind: "saida", pending: true })} />
+        <ChargesList {...listProps} kind="saida" onCreate={() => setDialog({ kind: "saida", pending: true })} selectedMonth={selectedMonth} />
       )}
       {tab === "config" && (
         <FinancialConfigManager
