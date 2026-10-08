@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import type { Task, TaskOccurrence } from "@/types/database.types";
 
 type Tab = "dia" | "prazo" | "concluidas";
+const byPriority = <T extends {priority:string}>(a:T,b:T) => Number(b.priority === "importante") - Number(a.priority === "importante");
 
 export function TarefasPageClient({
   tasks,
@@ -45,13 +46,17 @@ export function TarefasPageClient({
   const toggle = useTaskToggle();
   const dialogs = useTaskDialogs(todayKey);
 
-  const todayEntries = getDayTaskEntries(tasks, occurrences, todayKey, todayKey);
-  const missed = getMissedDayTaskEntries(tasks, occurrences, todayKey, TASKS_PAGE_LOOKBACK_DAYS);
-  const upcoming = getUpcomingDayTaskEntries(tasks, todayKey);
-  const recurring = tasks.filter(isRecurringTask);
+  const todayEntries = getDayTaskEntries(tasks, occurrences, todayKey, todayKey).sort((a,b)=>byPriority(a.task,b.task));
+  const missed = getMissedDayTaskEntries(tasks, occurrences, todayKey, TASKS_PAGE_LOOKBACK_DAYS).sort((a,b)=>byPriority(a.task,b.task));
+  const upcoming = getUpcomingDayTaskEntries(tasks, todayKey).sort((a,b)=>byPriority(a.task,b.task));
+  const recurring = tasks.filter(isRecurringTask).sort(byPriority);
   const activeRecurring = recurring.filter((t) => !isRecurrenceEnded(t, todayKey));
   const endedRecurring = recurring.filter((t) => isRecurrenceEnded(t, todayKey));
   const deadlines = groupDeadlineTasks(tasks, todayKey);
+  deadlines.overdue.sort(byPriority);
+  deadlines.dueToday.sort(byPriority);
+  deadlines.upcoming.sort(byPriority);
+  deadlines.noDate.sort(byPriority);
   const completed = tasks
     .filter((t) => !isRecurringTask(t) && t.status === "concluida")
     .sort((a, b) => (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at));
