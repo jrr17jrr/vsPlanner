@@ -54,6 +54,7 @@ export function ChargesList({
   origins,
   permissions,
   onCreate,
+  selectedMonth,
 }: {
   scope: FinancialScope;
   kind: FinancialKind;
@@ -66,6 +67,7 @@ export function ChargesList({
   origins: FinancialOrigin[];
   permissions: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
   onCreate?: () => void;
+  selectedMonth: string;
 }) {
   const [bucket, setBucket] = useState<Bucket>("em_aberto");
   const [markingCharge, setMarkingCharge] = useState<ReceivablePayable | null>(null);
@@ -78,7 +80,7 @@ export function ChargesList({
   const originById = useMemo(() => new Map(origins.map((o) => [o.id, o])), [origins]);
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
-  const monthKey = today.slice(0, 7);
+  const monthKey = selectedMonth;
   const rows = useMemo(() => listChargesForKind(charges, payments, kind, today), [charges, payments, kind, today]);
   const filtered = useMemo(() => {
     if (bucket === "todas") return rows;
@@ -124,7 +126,7 @@ export function ChargesList({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm">
           <p className="text-muted-foreground">
-            {isEntrada ? "A receber" : "A pagar"} até o fim do mês: <span className="font-semibold text-foreground">{formatCurrency(totals.open)}</span>
+            {isEntrada ? "A receber" : "A pagar"} até o fim de {new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(Number(monthKey.slice(0,4)),Number(monthKey.slice(5,7))-1,1))}: <span className="font-semibold text-foreground">{formatCurrency(totals.open)}</span>
             <span className="text-xs"> · {totals.count} cobrança(s)</span>
           </p>
           {totals.overdue > 0 && (
@@ -148,6 +150,7 @@ export function ChargesList({
         categories={categories}
         permissions={{ canEdit: permissions.canEdit }}
       />
+      <div className="border-t border-border pt-3"><p className="text-sm font-semibold">Contas e cobranças de {new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(Number(monthKey.slice(0,4)),Number(monthKey.slice(5,7))-1,1))}</p><p className="text-xs text-muted-foreground">As recorrências acima são compromissos contínuos. A lista abaixo mostra cobranças individuais conforme o filtro escolhido.</p></div>
 
       <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
         <TabsList className="flex-wrap">
