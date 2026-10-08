@@ -140,15 +140,16 @@ export function RecurrencesPanel({
     <section aria-labelledby={`rec-${kind}`} className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id={`rec-${kind}`} className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          <Repeat className="h-3.5 w-3.5" aria-hidden /> Recorrências {isEntrada ? "a receber" : "a pagar"} · {activeRows.length} ativa(s)
+          <Repeat className="h-3.5 w-3.5" aria-hidden /> {isEntrada ? "Receitas recorrentes" : "Assinaturas e despesas recorrentes"} · {activeRows.length} ativa(s)
         </h2>
         {monthlyTotal > 0 && (
           <p className="text-xs text-muted-foreground">
-            Mensais: <span className="font-medium text-foreground">{formatCurrency(monthlyTotal)}/mês</span>
+            {isEntrada ? "Receita mensal recorrente" : "Custo mensal das recorrências"}: <span className="font-medium text-foreground">{formatCurrency(monthlyTotal)}/mês</span>
           </p>
         )}
       </div>
 
+      <p className="text-xs text-muted-foreground">Valores recorrentes ativos, separados do total pendente do mês selecionado. O botão registra somente a competência indicada.</p>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
         {visible.map((row) => {
           const { origin } = row;
@@ -201,8 +202,7 @@ export function RecurrencesPanel({
                   {payTarget && (
                     <Button size="sm" variant="outline" className="h-8" onClick={() => setPaying(payTarget)}>
                       <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden />
-                      Marcar {isEntrada ? "recebido" : "pago"}
-                      <span className="text-xs text-muted-foreground">· {formatMonthYear(payTarget.competency_date ?? payTarget.due_date).split(" ")[0]}</span>
+                      Registrar {isEntrada ? "recebimento" : "pagamento"} de {formatMonthYear(payTarget.competency_date ?? payTarget.due_date)}
                     </Button>
                   )}
                   {contract ? (
