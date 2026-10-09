@@ -130,6 +130,7 @@ export default async function VisionarioOverviewPage() {
 
   // ---------------------------------------------------------------- Financeiro
   let finance: DashboardData["finance"] = null;
+  let partnerExpenses: DashboardData["partnerExpenses"] = null;
   let receivables: DashboardData["receivables"] = null;
   let payables: DashboardData["payables"] = null;
   const attention: AttentionItem[] = [];
@@ -140,6 +141,11 @@ export default async function VisionarioOverviewPage() {
     const incoming = listChargesForKind(charges, payments, "entrada", today);
     const outgoing = listChargesForKind(charges, payments, "saida", today);
 
+    const partnerPaid = payments.filter((p) => p.payment_date.startsWith(monthKey) && charges.some((charge) => charge.id === p.charge_id && charge.kind === "saida"));
+    partnerExpenses = {
+      junior: partnerPaid.filter((p) => p.payer_label === "junior").reduce((sum, p) => sum + Number(p.amount), 0),
+      guilherme: partnerPaid.filter((p) => p.payer_label === "guilherme").reduce((sum, p) => sum + Number(p.amount), 0),
+    };
     finance = {
       mrr: calculateMRR(origins, charges, contracts).mrr,
       saldo: overview.saldo,
@@ -396,6 +402,7 @@ export default async function VisionarioOverviewPage() {
   const data: DashboardData = {
     today,
     finance,
+    partnerExpenses,
     activeClientsCount: canViewClientes ? activeClients.length : null,
     attention,
     attentionScopeVisible: canViewFinanceiro || canViewTrabalhos || canViewReunioes || canViewSites,
