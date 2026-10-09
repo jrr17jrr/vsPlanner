@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireModulePermission } from "@/lib/supabase/dal";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { listFinancialAccounts, listFinancialCharges, listFinancialPayments } from "@/lib/supabase/repositories/financial.repository";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, currentMonthKeySaoPaulo } from "@/lib/format";
 import { PartnerExpenseForm } from "@/components/visionario/financeiro/partner-expense-form";
 
 export default async function PartnerExpensesPage() {
@@ -10,11 +10,17 @@ export default async function PartnerExpensesPage() {
   const [charges, payments, accounts] = await Promise.all([listFinancialCharges(space.id), listFinancialPayments(space.id), listFinancialAccounts(space.id)]);
   const outgoing = new Map(charges.filter(c => c.kind === "saida").map(c => [c.id, c]));
   const rows = payments.filter(p => (p.payer_label === "junior" || p.payer_label === "guilherme") && outgoing.has(p.charge_id)).sort((a,b) => b.payment_date.localeCompare(a.payment_date));
+  const month = currentMonthKeySaoPaulo();
+  const monthOutgoing = payments.filter(p => p.payment_date.startsWith(month) && outgoing.has(p.charge_id));
+  const partnerMonth = monthOutgoing.filter(p => p.payer_label === "junior" || p.payer_label === "guilherme").reduce((s,p)=>s+Number(p.amount),0);
+  const companyMonth = monthOutgoing.filter(p => p.payer_label !== "junior" && p.payer_label !== "guilherme").reduce((s,p)=>s+Number(p.amount),0);
   const totals = { junior: 0, guilherme: 0 };
   for (const p of rows) if (p.payer_label === "junior" || p.payer_label === "guilherme") totals[p.payer_label] += Number(p.amount);
   const months = [...new Set(rows.map(p => p.payment_date.slice(0,7)))].sort().reverse();
   return <div className="space-y-6">
     <div><Link href="/visionario" className="text-sm text-primary hover:underline">← Voltar à visão geral</Link><h1 className="mt-2 text-2xl font-bold">Gastos dos sócios</h1><p className="text-sm text-muted-foreground">Pagamentos feitos do próprio bolso por Júnior e Guilherme. Gastos pagos pelo caixa da empresa não entram aqui.</p></div>
+    <div className="grid gap-3 sm:grid-cols-3">{[["Gastos da empresa",companyMonth],["Gastos dos sócios",partnerMonth],["Gasto total",companyMonth+partnerMonth]].map(([label,value])=><div key={String(label)} className="rounded-xl border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-xl font-bold">{formatCurrency(Number(value))}</p></div>)}</div>
+    <p className="text-xs text-muted-foreground">Valores pagos no mês atual. Gastos sem identificação de sócio entram como gastos da empresa.</p>
     <PartnerExpenseForm accounts={accounts} />
     <div className="grid gap-3 sm:grid-cols-3">
       {[["Total",totals.junior+totals.guilherme],["Júnior",totals.junior],["Guilherme",totals.guilherme]].map(([label,value]) => <div key={String(label)} className="rounded-xl border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-xl font-bold">{formatCurrency(Number(value))}</p></div>)}
