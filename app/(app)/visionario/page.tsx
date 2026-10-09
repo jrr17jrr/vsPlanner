@@ -145,6 +145,7 @@ export default async function VisionarioOverviewPage() {
     partnerExpenses = {
       junior: partnerPaid.filter((p) => p.payer_label === "junior").reduce((sum, p) => sum + Number(p.amount), 0),
       guilherme: partnerPaid.filter((p) => p.payer_label === "guilherme").reduce((sum, p) => sum + Number(p.amount), 0),
+      empresa: partnerPaid.filter((p) => p.payer_label !== "junior" && p.payer_label !== "guilherme").reduce((sum, p) => sum + Number(p.amount), 0),
     };
     finance = {
       mrr: calculateMRR(origins, charges, contracts).mrr,
