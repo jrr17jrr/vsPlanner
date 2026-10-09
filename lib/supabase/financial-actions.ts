@@ -381,6 +381,7 @@ export type RegisterPaymentInput = {
   paymentMethod: FinancialPaymentMethod;
   accountId: string;
   payerLabel?: "junior" | "guilherme" | "empresa";
+  recordOnly?: boolean;
   notes?: string;
   /**
    * true = este pagamento QUITA a cobrança mesmo com valor diferente do
@@ -411,8 +412,9 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
   if (charge.status === "cancelado") return { error: "Esta cobrança foi cancelada." };
 
   const externalPartner = scope === "visionario" && charge.kind === "saida" && input.payerLabel === "guilherme";
+  const noAccountMovement = externalPartner || input.recordOnly === true;
   if (input.payerLabel && scope !== "visionario") return { error: "Pagadores disponíveis apenas no Visionário Dev." };
-  if (!externalPartner) {
+  if (!noAccountMovement) {
     const accountError = await assertUsableAccount(supabase, input.accountId, space.id);
     if (accountError) return { error: accountError };
   }
@@ -456,7 +458,7 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
     amount,
     payment_date: input.paymentDate,
     payment_method: input.paymentMethod,
-    account_id: externalPartner ? null : input.accountId,
+    account_id: noAccountMovement ? null : input.accountId,
     ...(scope === "visionario" && charge.kind === "saida" && input.payerLabel ? { payer_label: input.payerLabel } : {}),
     notes: input.notes?.trim() || null,
     created_by: profile.id,
