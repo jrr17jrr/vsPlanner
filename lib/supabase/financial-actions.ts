@@ -380,6 +380,7 @@ export type RegisterPaymentInput = {
   paymentDate: string;
   paymentMethod: FinancialPaymentMethod;
   accountId: string;
+  payerLabel?: "junior" | "guilherme" | "empresa";
   notes?: string;
   /**
    * true = este pagamento QUITA a cobrança mesmo com valor diferente do
@@ -409,8 +410,12 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
   if (!charge) return { error: "Cobrança não encontrada." };
   if (charge.status === "cancelado") return { error: "Esta cobrança foi cancelada." };
 
-  const accountError = await assertUsableAccount(supabase, input.accountId, space.id);
-  if (accountError) return { error: accountError };
+  const externalPartner = scope === "visionario" && charge.kind === "saida" && input.payerLabel === "guilherme";
+  if (input.payerLabel && scope !== "visionario") return { error: "Pagadores disponíveis apenas no Visionário Dev." };
+  if (!externalPartner) {
+    const accountError = await assertUsableAccount(supabase, input.accountId, space.id);
+    if (accountError) return { error: accountError };
+  }
 
   const { data: existingPayments, error: paymentsError } = await supabase
     .from("financial_payments")
@@ -451,7 +456,8 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
     amount,
     payment_date: input.paymentDate,
     payment_method: input.paymentMethod,
-    account_id: input.accountId,
+    account_id: externalPartner ? null : input.accountId,
+    ...(scope === "visionario" && charge.kind === "saida" && input.payerLabel ? { payer_label: input.payerLabel } : {}),
     notes: input.notes?.trim() || null,
     created_by: profile.id,
   });
