@@ -128,7 +128,7 @@ export function MovementsList({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{charge?.description ?? "Movimentação"}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatDate(p.payment_date)} · {PAYMENT_METHOD_LABEL[p.payment_method]} · {accountById.get(p.account_id)?.name ?? "Conta"}
+                      {formatDate(p.payment_date)} · {PAYMENT_METHOD_LABEL[p.payment_method]} · {(p.payer_label === "guilherme" ? "Pago por Guilherme" : p.payer_label === "junior" ? `Pago por Júnior · ${p.account_id ? accountById.get(p.account_id)?.name ?? "Conta" : "Sem conta"}` : p.account_id ? accountById.get(p.account_id)?.name ?? "Conta" : "Sem conta")}
                       {client && ` · ${client.name}`}
                     </p>
                   </div>
