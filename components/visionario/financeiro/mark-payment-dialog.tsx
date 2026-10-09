@@ -43,6 +43,8 @@ export function MarkPaymentDialog({
   const [accountId, setAccountId] = useState(activeAccounts[0]?.id ?? "");
   const [settle, setSettle] = useState(true);
   const [notes, setNotes] = useState("");
+  const [payerLabel, setPayerLabel] = useState<"junior" | "guilherme" | "empresa">("empresa");
+  const externalPartner = scope === "visionario" && charge.kind === "saida" && payerLabel === "guilherme";
   const [pending, setPending] = useState(false);
 
   const isEntrada = charge.kind === "entrada";
@@ -55,7 +57,7 @@ export function MarkPaymentDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validValue) return toast.error("Informe um valor válido.");
-    if (!accountId) return toast.error("Escolha a conta financeira.");
+    if (!externalPartner && !accountId) return toast.error("Escolha a conta financeira.");
     if (!paymentDate) return toast.error("Informe a data real.");
 
     setPending(true);
@@ -64,6 +66,7 @@ export function MarkPaymentDialog({
       paymentDate,
       paymentMethod,
       accountId,
+      ...(scope === "visionario" && !isEntrada ? { payerLabel } : {}),
       settle,
       notes: notes || undefined,
     });
@@ -88,7 +91,7 @@ export function MarkPaymentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {activeAccounts.length === 0 ? (
+        {activeAccounts.length === 0 && !(scope === "visionario" && !isEntrada) ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
               Nenhuma conta financeira ativa neste espaço. Cadastre (ou reative) uma conta em{" "}
@@ -111,6 +114,20 @@ export function MarkPaymentDialog({
               </div>
             </div>
 
+            {scope === "visionario" && !isEntrada && (
+              <div className="flex flex-col gap-1.5">
+                <Label>Quem pagou?</Label>
+                <Select value={payerLabel} onValueChange={(v) => setPayerLabel(v as typeof payerLabel)} disabled={pending}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="empresa">Visionário Dev (caixa da empresa)</SelectItem>
+                    <SelectItem value="junior">Júnior</SelectItem>
+                    <SelectItem value="guilherme">Guilherme (sem conta cadastrada)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{externalPartner ? "O valor será registrado como pago por Guilherme, sem movimentar suas contas." : "O pagamento movimenta a conta selecionada abaixo."}</p>
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <Label>Forma de pagamento</Label>
@@ -123,7 +140,7 @@ export function MarkPaymentDialog({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-col gap-1.5">
+              {!externalPartner && <div className="flex flex-col gap-1.5">
                 <Label>Conta que {isEntrada ? "recebeu" : "pagou"}</Label>
                 <Select value={accountId} onValueChange={setAccountId} disabled={pending}>
                   <SelectTrigger aria-label="Conta financeira"><SelectValue placeholder="Escolha a conta" /></SelectTrigger>
@@ -131,10 +148,10 @@ export function MarkPaymentDialog({
                     {activeAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-              </div>
+              </div>}
             </div>
 
-            {selectedAccount && paymentDate && paymentDate < selectedAccount.initial_balance_date && (
+            {!externalPartner && selectedAccount && paymentDate && paymentDate < selectedAccount.initial_balance_date && (
               <p className="text-xs text-warning">
                 A data é anterior ao saldo inicial desta conta ({formatDate(selectedAccount.initial_balance_date)}) — o
                 saldo da conta não será alterado por este lançamento (considera-se já incluído no saldo inicial).
