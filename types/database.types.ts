@@ -352,7 +352,8 @@ export type FinancialPayment = {
   amount: number;
   payment_date: string;
   payment_method: FinancialPaymentMethod;
-  account_id: string;
+  account_id: string | null;
+  payer_label?: "junior" | "guilherme" | "empresa" | null;
   notes: string | null;
   created_by: string;
   created_at: string;
