@@ -93,7 +93,7 @@ export type DashboardData = {
     aReceber: PendingSummary;
     aPagar: PendingSummary;
   } | null;
-  partnerExpenses: { junior: number; guilherme: number } | null;
+  partnerExpenses: { junior: number; guilherme: number; empresa: number } | null;
   activeClientsCount: number | null;
   attention: AttentionItem[];
   attentionScopeVisible: boolean;
@@ -246,8 +246,8 @@ export function VisionarioDashboard({
             {data.partnerExpenses && (
               <Link href="/visionario/financeiro/socios" className="col-span-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/50 lg:col-span-4">
                 <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" /> Gastos pelos sócios</span><span className="flex items-center gap-1 text-xs text-primary">Ver detalhes <ArrowRight className="h-3 w-3" /></span></div>
-                <p className="mt-2 text-2xl font-semibold">{formatCurrency(data.partnerExpenses.junior + data.partnerExpenses.guilherme)}</p>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-muted/40 p-3"><p className="text-muted-foreground">Júnior</p><p className="font-semibold">{formatCurrency(data.partnerExpenses.junior)}</p></div><div className="rounded-lg bg-muted/40 p-3"><p className="text-muted-foreground">Guilherme</p><p className="font-semibold">{formatCurrency(data.partnerExpenses.guilherme)}</p></div></div>
+                <p className="mt-2 text-2xl font-semibold">{formatCurrency(data.partnerExpenses.junior + data.partnerExpenses.guilherme + data.partnerExpenses.empresa)}</p>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-muted/40 p-3"><p className="text-muted-foreground">Gastos da empresa</p><p className="font-semibold">{formatCurrency(data.partnerExpenses.empresa)}</p></div><div className="rounded-lg bg-muted/40 p-3"><p className="text-muted-foreground">Gastos dos sócios</p><p className="font-semibold">{formatCurrency(data.partnerExpenses.junior + data.partnerExpenses.guilherme)}</p></div><div className="rounded-lg bg-muted/40 p-3"><p className="text-muted-foreground">Júnior</p><p className="font-semibold">{formatCurrency(data.partnerExpenses.junior)}</p></div><div className="rounded-lg bg-muted/40 p-3"><p className="text-muted-foreground">Guilherme</p><p className="font-semibold">{formatCurrency(data.partnerExpenses.guilherme)}</p></div></div>
                 <p className="mt-2 text-xs text-muted-foreground">Valores pagos do próprio bolso neste mês.</p>
               </Link>
             )}
