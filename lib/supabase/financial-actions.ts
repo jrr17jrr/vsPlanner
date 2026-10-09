@@ -257,6 +257,8 @@ export type MovementFormInput = {
   settled: boolean;
   paymentMethod?: FinancialPaymentMethod;
   accountId?: string;
+  payerLabel?: "junior" | "guilherme";
+  recordOnly?: boolean;
   /** Data real do pagamento quando `settled` (padrão: a própria data da movimentação). */
   paymentDate?: string;
 
@@ -317,7 +319,8 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
     if (err) return { error: err };
   }
 
-  if (settled) {
+  if (input.payerLabel && (scope !== "visionario" || input.kind !== "saida" || input.tipo !== "unico")) return { error: "Gasto dos sócios permitido somente em saída única do Visionário Dev." };
+  if (settled && !input.recordOnly && input.payerLabel !== "guilherme") {
     const accountError = await assertUsableAccount(supabase, input.accountId, space.id);
     if (accountError) return { error: accountError };
   }
@@ -356,7 +359,8 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
       amount: Number(first.amount),
       payment_date: input.paymentDate && DATE_RE.test(input.paymentDate) ? input.paymentDate : input.dueDate,
       payment_method: input.paymentMethod!,
-      account_id: input.accountId!,
+      account_id: input.recordOnly || input.payerLabel === "guilherme" ? null : input.accountId!,
+      ...(input.payerLabel ? { payer_label: input.payerLabel } : {}),
       created_by: profile.id,
     });
     if (paymentError) {
