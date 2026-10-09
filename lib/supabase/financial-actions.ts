@@ -892,3 +892,27 @@ export async function updateChargeAction(
   revalidateFinancialViews(scope);
   return { success: "Cobrança atualizada." };
 }
+
+/** Lança uma despesa única dividida entre Júnior e Guilherme. */
+export async function createPartnerExpenseAction(input: {
+  description: string; amount: number; junior: number; guilherme: number;
+  date: string; juniorAccountId?: string; recordOnly: boolean;
+}): Promise<ActionState> {
+  const { space } = await requireScopedModulePermission("visionario", "financeiro", "create");
+  const round = (v: number) => Math.round(v * 100) / 100;
+  if (!input.description.trim() || !DATE_RE.test(input.date)) return { error: "Informe descrição e data válidas." };
+  if (![input.amount,input.junior,input.guilherme].every(v => Number.isFinite(v) && v >= 0) || input.amount <= 0 || round(input.junior + input.guilherme) !== round(input.amount)) return { error: "A soma dos valores dos sócios deve ser igual ao total." };
+  if (input.junior > 0 && !input.recordOnly && !input.juniorAccountId) return { error: "Escolha a conta do Júnior ou marque somente registrar." };
+  const created = await createMovementAction("visionario", { kind: "saida", description: input.description.trim(), originalAmount: input.amount, dueDate: input.date, tipo: "unico", settled: false });
+  if (created.error || !created.id) return created;
+  const supabase = await createSupabaseServerClient();
+  const { data: charge, error } = await supabase.from("financial_charges").select("id").eq("origin_id", created.id).eq("space_id", space.id).single();
+  if (error || !charge) return { error: "Despesa criada como pendente; não foi possível localizar a cobrança." };
+  for (const [payer, amount] of [["junior",input.junior],["guilherme",input.guilherme]] as const) {
+    if (amount <= 0) continue;
+    const paid = await registerPaymentAction("visionario", charge.id, { amount, paymentDate: input.date, paymentMethod: "pix", accountId: payer === "junior" ? input.juniorAccountId ?? "" : "", payerLabel: payer, recordOnly: payer === "guilherme" || input.recordOnly, settle: false });
+    if (paid.error) return { error: "Despesa criada, mas um pagamento ficou pendente: " + paid.error };
+  }
+  revalidateFinancialViews("visionario");
+  return { success: "Gasto dos sócios registrado." };
+}
