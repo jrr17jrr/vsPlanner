@@ -767,7 +767,7 @@ export type Database = {
           amount: number;
           payment_date: string;
           payment_method: FinancialPaymentMethod;
-          account_id: string;
+          account_id: string | null;
           created_by: string;
         };
         Update: Partial<Omit<FinancialPayment, "id">>;
