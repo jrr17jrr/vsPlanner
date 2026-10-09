@@ -134,6 +134,8 @@ function MovementForm({
   const [settled, setSettled] = useState(defaultSettled ?? true);
   const [paymentMethod, setPaymentMethod] = useState<FinancialPaymentMethod>("pix");
   const [accountId, setAccountId] = useState(accounts.find((a) => a.is_active)?.id ?? "");
+  const [recordOnly, setRecordOnly] = useState(false);
+  const [payerLabel, setPayerLabel] = useState<"junior" | "guilherme" | "empresa">("empresa");
   const activeAccounts = accounts.filter((a) => a.is_active);
 
   const [notes, setNotes] = useState("");
@@ -175,7 +177,7 @@ function MovementForm({
     const usesDay = tipo === "recorrente" && frequency !== "semanal";
     if (usesDay && !(Number(dueDay) >= 1 && Number(dueDay) <= 31)) return toast.error("Dia do vencimento precisa ser entre 1 e 31.");
     if (tipo === "recorrente" && hasEndDate && !endDate) return toast.error("Informe a data de término ou desmarque a opção.");
-    if (isSettled && !accountId) return toast.error("Escolha a conta que recebeu/pagou.");
+    if (isSettled && !recordOnly && payerLabel !== "guilherme" && !accountId) return toast.error("Escolha a conta que recebeu/pagou.");
 
     const input: MovementFormInput = {
       kind,
@@ -199,7 +201,9 @@ function MovementForm({
       recurrenceDay: usesDay ? Number(dueDay) : undefined,
       settled: isSettled,
       paymentMethod: isSettled ? paymentMethod : undefined,
-      accountId: isSettled ? accountId : undefined,
+      accountId: isSettled && !recordOnly && payerLabel !== "guilherme" ? accountId : undefined,
+      recordOnly: isSettled && (recordOnly || (scope === "visionario" && payerLabel === "guilherme")),
+      payerLabel: scope === "visionario" && kind === "saida" && payerLabel !== "empresa" ? payerLabel : undefined,
       paymentDate: isSettled ? paymentDate : undefined,
       notes: notes || undefined,
     };
@@ -440,6 +444,8 @@ function MovementForm({
             )}
             {settled && (
               <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2">
+                <label className="flex items-center justify-between gap-2 rounded-lg border p-3 text-sm sm:col-span-2"><span><strong>Movimentar saldo de uma conta?</strong><br/><span className="text-xs text-muted-foreground">Desative se o valor já foi descontado/recebido anteriormente.</span></span><Switch checked={!recordOnly} onCheckedChange={(checked) => setRecordOnly(!checked)} disabled={pending} /></label>
+                {scope === "visionario" && kind === "saida" && <div className="flex flex-col gap-1.5 sm:col-span-2"><Label>Quem pagou?</Label><Select value={payerLabel} onValueChange={(v)=>setPayerLabel(v as typeof payerLabel)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="empresa">Visionário Dev</SelectItem><SelectItem value="junior">Júnior</SelectItem><SelectItem value="guilherme">Guilherme</SelectItem></SelectContent></Select></div>}
                 <div className="flex flex-col gap-1.5">
                   <Label>Forma de pagamento</Label>
                   <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as FinancialPaymentMethod)} disabled={pending}>
@@ -451,7 +457,7 @@ function MovementForm({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex flex-col gap-1.5">
+                {!recordOnly && payerLabel !== "guilherme" && <div className="flex flex-col gap-1.5">
                   <Label>Conta</Label>
                   <Select value={accountId} onValueChange={setAccountId} disabled={pending || activeAccounts.length === 0}>
                     <SelectTrigger aria-label="Conta"><SelectValue placeholder={activeAccounts.length === 0 ? "Cadastre uma conta" : "Escolha a conta"} /></SelectTrigger>
@@ -459,12 +465,12 @@ function MovementForm({
                       {activeAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                </div>
+                </div>}
                 <div className="flex flex-col gap-1.5 sm:col-span-2">
                   <Label>Data real do {isEntrada ? "recebimento" : "pagamento"}</Label>
                   <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} disabled={pending} />
                 </div>
-                {activeAccounts.length === 0 && (
+                {activeAccounts.length === 0 && !recordOnly && payerLabel !== "guilherme" && (
                   <p className="text-xs text-warning sm:col-span-2">
                     Nenhuma conta ativa — cadastre em &quot;Contas e categorias&quot; ou lance como pendente.
                   </p>
