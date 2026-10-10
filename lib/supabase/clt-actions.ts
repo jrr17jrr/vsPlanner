@@ -5,6 +5,34 @@ type State={error?:string;success?:string};
 async function ctx(){const s=await createSupabaseServerClient();const {data,error}=await s.auth.getUser();if(error||!data.user)throw new Error("Sessão inválida.");return{s,user:data.user};}
 function refresh(){["/trabalho","/trabalho/empresas","/trabalho/campanhas","/trabalho/tarefas"].forEach((path) => revalidatePath(path))}
 export async function saveCltCompanyAction(input:{id?:string;name:string;responsibleId?:string;email?:string;instagram?:string;responsiblePhone?:string;companyPhone?:string;website?:string;notes?:string;currentAdBalance:number}):Promise<State>{const{s,user}=await ctx();if(!input.name.trim())return{error:"Nome é obrigatório."};const values={name:input.name.trim(),responsible_id:input.responsibleId||null,email:input.email?.trim()||null,instagram:input.instagram?.trim()||null,responsible_phone:input.responsiblePhone?.trim()||null,company_phone:input.companyPhone?.trim()||null,website:input.website?.trim()||null,notes:input.notes?.trim()||null,current_ad_balance:Math.max(0,input.currentAdBalance||0)};const q=input.id?s.from("clt_companies").update(values).eq("id",input.id).eq("user_id",user.id):s.from("clt_companies").insert({...values,user_id:user.id});const{error}=await q;if(error)return{error:error.message};refresh();return{success:input.id?"Empresa atualizada.":"Empresa cadastrada."}}
+
+export async function adjustCltCompanyBalancesAction(input: { companyIds: string[]; operation: "add" | "remove" | "set"; amount: number }): Promise<State> {
+  const { s, user } = await ctx();
+  const ids = [...new Set(input.companyIds)];
+  if (!ids.length) return { error: "Selecione pelo menos uma empresa." };
+  if (!["add", "remove", "set"].includes(input.operation) || !Number.isFinite(input.amount) || input.amount < 0 || Math.abs(input.amount * 100 - Math.round(input.amount * 100)) > 0.00001) return { error: "Valor inválido." };
+  if (input.operation !== "set" && input.amount === 0) return { error: "Informe um valor maior que zero." };
+  const { data: companies, error } = await s.from("clt_companies").select("id,name,current_ad_balance").eq("user_id", user.id).eq("is_active", true).in("id", ids);
+  if (error) return { error: error.message };
+  if (!companies || companies.length !== ids.length) return { error: "Empresa não encontrada." };
+  const amountCents = Math.round(input.amount * 100);
+  const updates = companies.map(c => {
+    const previousCents = Math.round(Number(c.current_ad_balance) * 100);
+    const nextCents = input.operation === "set" ? amountCents : previousCents + (input.operation === "add" ? amountCents : -amountCents);
+    return { ...c, previousCents, nextCents };
+  });
+  const insufficient = updates.find(c => c.nextCents < 0);
+  if (insufficient) return { error: "Saldo insuficiente em " + insufficient.name + "." };
+  let completed = 0;
+  for (const c of updates) {
+    const { data, error: updateError } = await s.from("clt_companies").update({ current_ad_balance: c.nextCents / 100 }).eq("id", c.id).eq("user_id", user.id).eq("current_ad_balance", c.previousCents / 100).select("id");
+    if (updateError || !data?.length) return { error: "Atualizadas " + completed + " de " + updates.length + " empresas. Confira os saldos antes de tentar novamente." };
+    completed++;
+  }
+  refresh();
+  return { success: "Saldo atualizado em " + completed + " empresa(s)." };
+}
+
 export async function saveCltCampaignAction(input:{companyId:string;name:string;objective?:string;description?:string;startsOn:string;endsOn:string;spentAmount:number;messages:number;sales:number;views:number;generatedRevenue?:number}):Promise<State>{const{s,user}=await ctx();if(!input.companyId||!input.name.trim()||!input.startsOn||!input.endsOn)return{error:"Preencha empresa, campanha, início e encerramento."};const{error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:input.companyId,name:input.name.trim(),objective:input.objective?.trim()||null,description:input.description?.trim()||null,starts_on:input.startsOn,ends_on:input.endsOn,spent_amount:Math.max(0,input.spentAmount||0),messages:Math.max(0,input.messages||0),sales:Math.max(0,input.sales||0),views:Math.max(0,input.views||0),generated_revenue:input.generatedRevenue||null});if(error)return{error:error.message};refresh();return{success:"Campanha cadastrada."}}
 export async function saveCltTaskAction(input:{id?:string;companyId?:string;title:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{const{s,user}=await ctx();if(!input.title.trim())return{error:"Título é obrigatório."};if(input.recurrence==="weekly"&&!input.weekdays.length)return{error:"Escolha pelo menos um dia da semana."};if(input.recurrence==="none"&&input.kind==="dia"&&!input.dueDate)return{error:"Informe o dia da tarefa."};const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});const values={company_id:input.companyId||null,title:input.title.trim(),kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};const q=input.id?s.from("clt_tasks").update(values).eq("id",input.id).eq("user_id",user.id):s.from("clt_tasks").insert({...values,user_id:user.id});const{error}=await q;if(error)return{error:error.message};refresh();revalidatePath("/trabalho/rotina");return{success:input.id?"Tarefa atualizada.":"Tarefa cadastrada."}}
 
