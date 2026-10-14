@@ -61,7 +61,7 @@ export function DayTaskItem({
             {entry.important && <Badge variant="destructive" className="border-0">Importante</Badge>}
             {entry.recurring && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Repeat className="h-3 w-3" /> {formatWeekdays(entry.task.weekdays)}
+                <Repeat className="h-3 w-3" /> {overdue ? "Recorrente" : formatWeekdays(entry.task.weekdays)}
               </span>
             )}
           </div>
