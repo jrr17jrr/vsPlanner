@@ -140,7 +140,7 @@ export function TarefasPageClient({
             <>
               {missed.length > 0 && (
                 <Section title="Ficou pendente" hint={`${missed.length}`}>
-                  {missed.map((e) => renderEntry(e, false))}
+                  {missed.map((e) => renderEntry(e))}
                 </Section>
               )}
 
