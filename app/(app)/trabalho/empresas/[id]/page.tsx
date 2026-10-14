@@ -18,7 +18,8 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  const company=data.companies.find(c=>c.id===id);
  if(!company)notFound();
  const supabase=await createSupabaseServerClient();
- const month=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit"}).format(new Date());
+ const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit"}).formatToParts(new Date());
+ const month=(parts.find(p=>p.type==="year")?.value||"2026")+"-"+(parts.find(p=>p.type==="month")?.value||"01");
  const [budgetQuery,resultsQuery,setsQuery]=await Promise.all([
  supabase.from("clt_monthly_budgets").select("*").eq("company_id",id).eq("month_key",month+"-01").maybeSingle(),
  supabase.from("clt_campaign_result_entries").select("*").in("campaign_id",data.campaigns.filter(c=>c.company_id===id).map(c=>c.id).length?data.campaigns.filter(c=>c.company_id===id).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]),
