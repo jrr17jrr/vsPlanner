@@ -75,6 +75,8 @@ export type WorkRow = {
 export type ChargesBlock = {
   overdue: ReceivableRow[];
   /** Só vencimentos de hoje em diante (previsão), nunca misturados com atrasados. */
+  current: ReceivableRow[];
+  currentTotalCount: number;
   upcoming: ReceivableRow[];
   upcomingTotalCount: number;
   /** Caixa do mês pela data real (recebido ou pago). */
@@ -450,7 +452,7 @@ function ChargesPanel({
   className?: string;
 }) {
   const isIn = kind === "entrada";
-  const { overdue, upcoming, upcomingTotalCount, settledThisMonth } = block;
+  const { overdue, current, currentTotalCount, upcoming, upcomingTotalCount, settledThisMonth } = block;
   const overdueShown = overdue.slice(0, 4);
   return (
     <Panel
@@ -489,7 +491,24 @@ function ChargesPanel({
         </div>
         <div className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wide text-warning">
-            {isIn ? "Próximos recebimentos" : "Próximos pagamentos"} {upcomingTotalCount > 0 && `· ${upcomingTotalCount}`}
+            {isIn ? "A receber neste mês" : "A pagar neste mês"} {currentTotalCount > 0 && `· ${currentTotalCount}`}
+          </p>
+          {current.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{isIn ? "Nenhum recebimento pendente neste mês." : "Nenhum pagamento pendente neste mês."}</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {current.map((row) => (
+                <ReceivableItem key={row.charge.id} row={row} canPay={canPay} onPay={onPay} />
+              ))}
+            </ul>
+          )}
+          {currentTotalCount > current.length && (
+            <p className="text-xs text-muted-foreground">+{currentTotalCount - current.length} no Financeiro.</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-warning">
+            {isIn ? "Próximo mês — a receber" : "Próximo mês — a pagar"} {upcomingTotalCount > 0 && `· ${upcomingTotalCount}`}
           </p>
           {upcoming.length === 0 ? (
             <p className="text-xs text-muted-foreground">{isIn ? "Nenhum recebimento previsto." : "Nenhum pagamento previsto."}</p>
