@@ -423,16 +423,17 @@ export async function ensureRecurringChargesForSpace(
     const firstDue = existing[0].due_date;
     const start = recurrenceStartDate(origin, existing);
     const template = existing[existing.length - 1];
-    // Competências que já têm ocorrência ativa — nunca criar outra no mesmo mês.
-    const activeCompetencies = new Set(
-      existing.filter((c) => c.status === "ativo").map((c) => c.competency_date ?? occurrenceCompetency(origin.recurrence_frequency, c.due_date))
+    // Reconstrói a linha do tempo desde o primeiro vencimento, inclusive
+    // lacunas intermediárias. Nunca recria competências já existentes,
+    // mesmo se pagas ou canceladas (preserva o histórico e decisões manuais).
+    const existingCompetencies = new Set(
+      existing.map((c) => c.competency_date ?? occurrenceCompetency(origin.recurrence_frequency, c.due_date))
     );
-    // Valor ATUAL da recorrência (migration 011); dados antigos: última cobrança.
     const amount = Number(origin.recurrence_amount ?? template.original_amount);
-    let cursor = template.due_date;
-    let occurrenceCount = existing.length;
+    let cursor = firstDue;
+    let occurrenceCount = 1;
 
-    for (let guard = 0; guard < 120; guard++) {
+    for (let guard = 0; guard < 240; guard++) {
       const nextDue = nextDueFor(origin, firstDue, cursor);
       if (nextDue > horizonKey) break;
       if (origin.recurrence_end_type === "em_data" && origin.recurrence_end_date && nextDue > origin.recurrence_end_date) break;
@@ -440,16 +441,15 @@ export async function ensureRecurringChargesForSpace(
         origin.recurrence_end_type === "apos_ocorrencias" &&
         origin.recurrence_end_occurrences &&
         occurrenceCount >= origin.recurrence_end_occurrences
-      )
-        break;
+      ) break;
 
       cursor = nextDue;
+      occurrenceCount += 1;
       if (!isOnOrAfterRecurrenceStart(nextDue, start)) continue;
       const competency = occurrenceCompetency(origin.recurrence_frequency, nextDue);
-      if (activeCompetencies.has(competency)) continue;
-      activeCompetencies.add(competency);
+      if (existingCompetencies.has(competency)) continue;
+      existingCompetencies.add(competency);
       rows.push(recurringChargeRow(origin, template, spaceId, profileId, nextDue, amount));
-      occurrenceCount += 1;
     }
   }
 
