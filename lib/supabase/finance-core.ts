@@ -303,7 +303,10 @@ function recurringChargeRow(origin: FinancialOrigin, template: FinancialCharge |
 async function insertOccurrences(supabase: Supa, rows: ChargeInsert[]): Promise<void> {
   for (const row of rows) {
     const { error } = await supabase.from("financial_charges").insert(row);
-    if (error && error.code !== "23505") break;
+    if (error && error.code !== "23505") {
+      console.error("[finance] Falha ao gerar cobrança recorrente", { originId: row.origin_id, dueDate: row.due_date, code: error.code, message: error.message });
+      throw new Error(`Falha ao gerar cobrança recorrente com vencimento ${row.due_date}: ${error.message}`);
+    }
   }
 }
 
@@ -395,7 +398,8 @@ export async function ensureRecurringChargesForSpace(
     .eq("space_id", spaceId)
     .eq("origin_type", "recorrente")
     .eq("is_active", true);
-  if (error || !origins || origins.length === 0) return;
+  if (error) throw new Error(`Falha ao carregar recorrências: ${error.message}`);
+  if (!origins || origins.length === 0) return;
 
   const { data: allCharges, error: chargesError } = await supabase
     .from("financial_charges")
@@ -405,7 +409,7 @@ export async function ensureRecurringChargesForSpace(
       origins.map((o) => o.id)
     )
     .order("due_date", { ascending: true });
-  if (chargesError) return;
+  if (chargesError) throw new Error(`Falha ao carregar cobranças recorrentes: ${chargesError.message}`);
 
   const byOrigin = new Map<string, FinancialCharge[]>();
   for (const c of allCharges ?? []) {
