@@ -39,7 +39,7 @@ import type {
 export type Supa = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 /** Quantos dias à frente a geração lazy materializa competências recorrentes. */
-export const RECURRENCE_HORIZON_DAYS = 45;
+export const RECURRENCE_HORIZON_DAYS = 100;
 
 /** Revalida tudo que mostra dados financeiros daquele escopo (páginas + dashboards). */
 export function revalidateFinancialViews(scope: FinancialScope) {
@@ -374,7 +374,7 @@ export async function resumeRecurringOrigin(supabase: Supa, spaceId: string, pro
 
 /**
  * Geração lazy e idempotente das próximas competências de TODAS as
- * recorrências ativas do space, até hoje + horizonte. Idempotente por
+ * recorrências ativas do space, até hoje + horizonte (100 dias, para cobrir os próximos meses). Idempotente por
  * construção (parte sempre da última cobrança existente) e protegida no
  * banco pelo índice único (origin_id, due_date) da migration 009 — duas
  * abas abertas ao mesmo tempo não duplicam a competência.
