@@ -120,6 +120,9 @@ export default async function VisionarioOverviewPage() {
 
   const today = todayKeySaoPaulo();
   const monthKey = currentMonthKeySaoPaulo();
+  const [year, month] = monthKey.split("-").map(Number);
+  const nextMonthDate = new Date(Date.UTC(year, month, 1));
+  const nextMonthKey = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, "0")}`;
   const soon = addDaysKey(today, SOON_DAYS);
   const in30 = addDaysKey(today, 30);
 
@@ -172,7 +175,7 @@ export default async function VisionarioOverviewPage() {
     };
 
     const overdueIn = incoming.filter((r) => r.bucket === "atrasadas");
-    const upcomingIn = incoming.filter((r) => r.bucket === "vence_hoje" || r.bucket === "proximas");
+    const upcomingIn = incoming.filter((r) => r.charge.due_date.startsWith(nextMonthKey) && r.status !== "pago");
     const kindByCharge = new Map(charges.map((c) => [c.id, c.kind]));
     const paymentsThisMonth = payments.filter((p) => p.payment_date.startsWith(monthKey) && kindByCharge.get(p.charge_id) === "entrada");
     receivables = {
@@ -192,7 +195,7 @@ export default async function VisionarioOverviewPage() {
       days: daysBetweenKeys(today, r.charge.due_date),
     });
     const overdueOutRows = outgoing.filter((r) => r.bucket === "atrasadas");
-    const upcomingOut = outgoing.filter((r) => r.bucket === "vence_hoje" || r.bucket === "proximas");
+    const upcomingOut = outgoing.filter((r) => r.charge.due_date.startsWith(nextMonthKey) && r.status !== "pago");
     payables = {
       overdue: overdueOutRows.map(toPayRow),
       upcoming: upcomingOut.slice(0, 5).map(toPayRow),
