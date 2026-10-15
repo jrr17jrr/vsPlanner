@@ -7,6 +7,9 @@ import { AuthProfileProvider } from "@/components/providers/auth-profile-provide
 import { AppShell } from "@/components/layout/app-shell";
 import type { ModulePermissionModule } from "@/types/database.types";
 
+// Private pages depend on the request session and must never be prerendered at build time.
+export const dynamic = "force-dynamic";
+
 const VISIONARIO_MODULES: ModulePermissionModule[] = [
   "visao_geral",
   "clientes",
