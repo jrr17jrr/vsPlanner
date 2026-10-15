@@ -86,9 +86,17 @@ export function ChargesList({
     if (bucket === "todas") return rows;
     // "Em aberto" = A pagar/A receber do mês (mesma regra do resumo); competências futuras ficam em "Próximas".
     if (bucket === "em_aberto") return rows.filter((r) => r.bucket !== "recebida_paga" && isDueUpToMonth(r.charge, monthKey));
-    if (bucket === "este_mes") return rows.filter((r) => r.charge.due_date.startsWith(monthKey));
+    if (bucket === "este_mes") {
+      // Mostra cobranças que vencem neste mês E as quitadas neste mês,
+      // mesmo quando o vencimento pertence a outra competência.
+      // Uma cobrança aparece apenas uma vez, inclusive se tiver vários pagamentos.
+      const paidChargeIds = new Set(
+        payments.filter((p) => p.payment_date.startsWith(monthKey)).map((p) => p.charge_id)
+      );
+      return rows.filter((r) => r.charge.due_date.startsWith(monthKey) || paidChargeIds.has(r.charge.id));
+    }
     return rows.filter((r) => r.bucket === bucket);
-  }, [rows, bucket, monthKey]);
+  }, [rows, payments, bucket, monthKey]);
 
   // Mesmo cálculo da Home/dashboards (`pendingUpToMonth`): nunca soma competências de meses futuros.
   const totals = useMemo(() => {
