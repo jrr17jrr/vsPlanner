@@ -809,6 +809,10 @@ export type Database = {
       };
       clt_responsibles: { Row: CltResponsible; Insert: Partial<CltResponsible> & { user_id: string; name: string }; Update: Partial<Omit<CltResponsible, "id">>; Relationships: [] };
       clt_companies: { Row: CltCompany; Insert: Partial<CltCompany> & { user_id: string; name: string }; Update: Partial<Omit<CltCompany, "id">>; Relationships: [] };
+      clt_monthly_budgets: { Row: CltMonthlyBudget; Insert: Partial<CltMonthlyBudget> & { user_id: string; company_id: string; month_key: string }; Update: Partial<Omit<CltMonthlyBudget, "id">>; Relationships: [] };
+      clt_campaign_result_entries: { Row: CltCampaignResultEntry; Insert: Partial<CltCampaignResultEntry> & { user_id: string; campaign_id: string; entry_date: string }; Update: Partial<Omit<CltCampaignResultEntry, "id">>; Relationships: [] };
+      clt_ad_sets: { Row: CltAdSet; Insert: Partial<CltAdSet> & { user_id: string; campaign_id: string; name: string }; Update: Partial<Omit<CltAdSet, "id">>; Relationships: [] };
+      clt_ad_creatives: { Row: CltAdCreative; Insert: Partial<CltAdCreative> & { user_id: string; ad_set_id: string; name: string; format: string }; Update: Partial<Omit<CltAdCreative, "id">>; Relationships: [] };
       clt_campaigns: { Row: CltCampaign; Insert: Partial<CltCampaign> & { user_id: string; company_id: string; name: string; starts_on: string; ends_on: string }; Update: Partial<Omit<CltCampaign, "id">>; Relationships: [] };
       clt_tasks: { Row: CltTask; Insert: Partial<CltTask> & { user_id: string; title: string }; Update: Partial<Omit<CltTask, "id">>; Relationships: [] };
       clt_task_occurrences: { Row: CltTaskOccurrence; Insert: Partial<CltTaskOccurrence> & { task_id:string; user_id:string; occurrence_date:string }; Update: Partial<Omit<CltTaskOccurrence, "id">>; Relationships: [] };
