@@ -175,11 +175,14 @@ export default async function VisionarioOverviewPage() {
     };
 
     const overdueIn = incoming.filter((r) => r.bucket === "atrasadas");
+    const currentIn = incoming.filter((r) => r.charge.due_date.startsWith(monthKey) && r.status !== "pago");
     const upcomingIn = incoming.filter((r) => r.charge.due_date.startsWith(nextMonthKey) && r.status !== "pago");
     const kindByCharge = new Map(charges.map((c) => [c.id, c.kind]));
     const paymentsThisMonth = payments.filter((p) => p.payment_date.startsWith(monthKey) && kindByCharge.get(p.charge_id) === "entrada");
     receivables = {
       overdue: overdueIn.map(toRow),
+      current: currentIn.slice(0, 5).map(toRow),
+      currentTotalCount: currentIn.length,
       upcoming: upcomingIn.slice(0, 5).map(toRow),
       upcomingTotalCount: upcomingIn.length,
       settledThisMonth: { total: overview.recebido, count: paymentsThisMonth.length },
@@ -195,9 +198,12 @@ export default async function VisionarioOverviewPage() {
       days: daysBetweenKeys(today, r.charge.due_date),
     });
     const overdueOutRows = outgoing.filter((r) => r.bucket === "atrasadas");
+    const currentOut = outgoing.filter((r) => r.charge.due_date.startsWith(monthKey) && r.status !== "pago");
     const upcomingOut = outgoing.filter((r) => r.charge.due_date.startsWith(nextMonthKey) && r.status !== "pago");
     payables = {
       overdue: overdueOutRows.map(toPayRow),
+      current: currentOut.slice(0, 5).map(toPayRow),
+      currentTotalCount: currentOut.length,
       upcoming: upcomingOut.slice(0, 5).map(toPayRow),
       upcomingTotalCount: upcomingOut.length,
       settledThisMonth: {
