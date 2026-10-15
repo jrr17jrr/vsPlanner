@@ -38,6 +38,7 @@ import {
   historicalSeries,
   financialMonthOverview,
   upcomingOpenCharges,
+  remainingAmount,
   type ReceivablePayable,
 } from "@/lib/financial-calc";
 import { chargeBadgeStatus } from "@/lib/finance-labels";
@@ -159,6 +160,16 @@ export function FinanceiroPageClient({
   const nextIn = useMemo(() => upcomingOpenCharges(charges, payments, "entrada", 5, today), [charges, payments, today]);
   const nextOut = useMemo(() => upcomingOpenCharges(charges, payments, "saida", 5, today), [charges, payments, today]);
   const { aReceber, aPagar, resultado } = overview;
+  const nextMonth = shiftMonthKey(selectedMonth, 1);
+  const nextMonthBills = useMemo(() => charges
+    .filter((charge) => charge.kind === "saida" && charge.status !== "cancelado" && charge.due_date.startsWith(nextMonth))
+    .map((charge) => ({ charge, remaining: remainingAmount(charge, payments) }))
+    .filter((row) => row.remaining > 0)
+    .sort((a, b) => a.charge.due_date.localeCompare(b.charge.due_date)), [charges, payments, nextMonth]);
+  const nextMonthReceivables = useMemo(() => charges
+    .filter((charge) => charge.kind === "entrada" && charge.status !== "cancelado" && charge.due_date.startsWith(nextMonth))
+    .reduce((total, charge) => total + remainingAmount(charge, payments), 0), [charges, payments, nextMonth]);
+  const nextMonthTotal = nextMonthBills.reduce((total, row) => total + row.remaining, 0);
 
   const listProps = {
     scope,
@@ -245,6 +256,45 @@ export function FinanceiroPageClient({
               hint={`A receber ${formatCurrency(aReceber.overdue)} · a pagar ${formatCurrency(aPagar.overdue)}`}
             />
           </div>
+
+          {scope === "visionario" && (
+            <Card className="p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-base font-semibold text-foreground">Próximo mês — {monthLabel(nextMonth)}</p>
+                  <p className="text-xs text-muted-foreground">Prévia das cobranças pendentes, sem valores já pagos ou cancelados.</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedMonth(nextMonth); setTab("a_pagar"); }}>
+                  Ver próximo mês <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Contas a pagar</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums text-destructive">{formatCurrency(nextMonthTotal)}</p>
+                  <p className="text-xs text-muted-foreground">{nextMonthBills.length} cobrança(s) pendente(s)</p>
+                </div>
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Contas a receber</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums text-success">{formatCurrency(nextMonthReceivables)}</p>
+                  <p className="text-xs text-muted-foreground">Recebimentos previstos ainda não quitados</p>
+                </div>
+              </div>
+              <div className="mt-3 divide-y divide-border">
+                {nextMonthBills.length === 0 ? (
+                  <p className="py-3 text-sm text-muted-foreground">Nenhuma conta pendente cadastrada para {monthLabel(nextMonth)}.</p>
+                ) : nextMonthBills.map(({ charge, remaining }) => (
+                  <div key={charge.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">{charge.description}</p>
+                      <p className="text-xs text-muted-foreground">Vence {formatDate(charge.due_date)}</p>
+                    </div>
+                    <span className="shrink-0 font-medium tabular-nums">{formatCurrency(remaining)}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <UpcomingCard title="Próximos recebimentos" kind="entrada" rows={nextIn} today={today} onSeeAll={() => setTab("a_receber")} />
