@@ -20,7 +20,7 @@ const number=(f:FormData,k:string)=>{
   const normalized=raw.replace(/[.\s]/g,"");
   return /^\d+$/.test(normalized)?Number(normalized):NaN;
  }
- return Number(raw.replace(/\s/g,"").replace(",","."));
+ const clean=raw.replace(/\s/g,""); return Number(clean.includes(",")?clean.replace(/\./g,"").replace(",","."):clean);
 };
 const fields=[["spent","Gasto real (R$)"],["messages","Conversas"],["views","Visualizações"],["impressions","Impressões"],["reach","Alcance"],["profileVisits","Visitas ao perfil"],["linkClicks","Cliques no link"],["engagements","Interações"],["thruplays","ThruPlays"],["leads","Leads"],["appointments","Agendamentos"],["sales","Vendas"],["revenue","Faturamento (R$)"]] as const;
 export function TrafficManager({companyId,month,budget,campaigns,results,sets}:{companyId:string;month:string;budget?:CltMonthlyBudget;campaigns:CltCampaign[];results:CltCampaignResultEntry[];sets:CltAdSet[]}){
