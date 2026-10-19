@@ -11,7 +11,17 @@ import {saveCltMonthlyBudgetAction,saveCltTrafficCampaignAction,saveCltCampaignR
 import type {CltCampaign,CltCampaignResultEntry,CltMonthlyBudget,CltAdSet} from "@/types/database.types";
 const dateBR=(date:string)=>/^\d{4}-\d{2}-\d{2}$/.test(date)?date.split("-").reverse().join("/"):date;
 const money=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-const number=(f:FormData,k:string)=>Number(f.get(k)||0);
+const integerMetrics=new Set(["messages","views","impressions","reach","profileVisits","linkClicks","engagements","thruplays","leads","appointments","sales"]);
+const number=(f:FormData,k:string)=>{
+ const raw=String(f.get(k)||"").trim();
+ if(!raw)return 0;
+ if(integerMetrics.has(k)){
+  // Aceita 50100, 50.100 e 50 100 como contagens inteiras.
+  const normalized=raw.replace(/[.\\s]/g,"");
+  return /^\\d+$/.test(normalized)?Number(normalized):NaN;
+ }
+ return Number(raw.replace(/\\s/g,"").replace(",","."));
+};
 const fields=[["spent","Gasto real (R$)"],["messages","Conversas"],["views","Visualizações"],["impressions","Impressões"],["reach","Alcance"],["profileVisits","Visitas ao perfil"],["linkClicks","Cliques no link"],["engagements","Interações"],["thruplays","ThruPlays"],["leads","Leads"],["appointments","Agendamentos"],["sales","Vendas"],["revenue","Faturamento (R$)"]] as const;
 export function TrafficManager({companyId,month,budget,campaigns,results,sets}:{companyId:string;month:string;budget?:CltMonthlyBudget;campaigns:CltCampaign[];results:CltCampaignResultEntry[];sets:CltAdSet[]}){
  const router=useRouter(),[pending,start]=useTransition(),[editing,setEditing]=useState<CltCampaign|null>(null),[open,setOpen]=useState<"budget"|"campaign"|"results"|"set"|"details"|null>(null),[selected,setSelected]=useState("");
@@ -42,7 +52,7 @@ export function TrafficManager({companyId,month,budget,campaigns,results,sets}:{
   revenue:selectedResults.reduce((sum,r)=>sum+Number(r.generated_revenue||0),0)
  };
  function submit(fn:()=>Promise<{error?:string;success?:string}>){start(async()=>{try{const r=await fn();if(r.error)toast.error(r.error);else{toast.success(r.success||"Salvo.");setOpen(null);router.refresh();}}catch(e){toast.error(e instanceof Error?e.message:"Erro ao salvar.");}})}
- const input=(name:string,label:string,value?:number)=> <div className="space-y-1"><Label>{label}</Label><Input name={name} type="number" min="0" step={["spent","revenue","budget","reserve","planned","daily","setBudget"].includes(name)?".01":"1"} defaultValue={value??0}/></div>;
+ const input=(name:string,label:string,value?:number)=> <div className="space-y-1"><Label>{label}</Label><Input name={name} type={integerMetrics.has(name)?"text":"number"} inputMode={integerMetrics.has(name)?"numeric":"decimal"} min={integerMetrics.has(name)?undefined:"0"} step={integerMetrics.has(name)?undefined:".01"} placeholder={integerMetrics.has(name)?"Ex.: 50.100":undefined} defaultValue={value??0}/></div>;
  return <div className="space-y-4">
  <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-semibold">Gestão de tráfego · {month.split("-").reverse().join("/")}</h2><div className="flex gap-2"><Button variant="outline" onClick={()=>setOpen(open==="budget"?null:"budget")}>Orçamento mensal</Button><Button onClick={()=>{setEditing(null);setOpen("campaign")}}>Nova campanha</Button></div></div>
  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[["Orçamento mensal",Number(budget?.budget_amount||0)],["Planejado",planned],["Gasto real",spent],["Disponível",available],["Comprometido restante",committed],["Reserva desejada",Number(budget?.reserve_target||0)],["Conversas",totalMessages],["Vendas",totalSales]].map(([label,value])=><Card key={String(label)}><CardContent className="p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{["Conversas","Vendas"].includes(String(label))?value:money(Number(value))}</p></CardContent></Card>)}</div>
