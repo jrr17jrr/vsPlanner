@@ -17,10 +17,10 @@ const number=(f:FormData,k:string)=>{
  if(!raw)return 0;
  if(integerMetrics.has(k)){
   // Aceita 50100, 50.100 e 50 100 como contagens inteiras.
-  const normalized=raw.replace(/[.\\s]/g,"");
-  return /^\\d+$/.test(normalized)?Number(normalized):NaN;
+  const normalized=raw.replace(/[.\s]/g,"");
+  return /^\d+$/.test(normalized)?Number(normalized):NaN;
  }
- return Number(raw.replace(/\\s/g,"").replace(",","."));
+ return Number(raw.replace(/\s/g,"").replace(",","."));
 };
 const fields=[["spent","Gasto real (R$)"],["messages","Conversas"],["views","Visualizações"],["impressions","Impressões"],["reach","Alcance"],["profileVisits","Visitas ao perfil"],["linkClicks","Cliques no link"],["engagements","Interações"],["thruplays","ThruPlays"],["leads","Leads"],["appointments","Agendamentos"],["sales","Vendas"],["revenue","Faturamento (R$)"]] as const;
 export function TrafficManager({companyId,month,budget,campaigns,results,sets}:{companyId:string;month:string;budget?:CltMonthlyBudget;campaigns:CltCampaign[];results:CltCampaignResultEntry[];sets:CltAdSet[]}){
