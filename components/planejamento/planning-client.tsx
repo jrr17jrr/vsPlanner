@@ -35,17 +35,17 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  };
  const save=()=>start(async()=>{
  const chosen=draft.filter(d=>d.selected).map(({selected,companyName,...rest})=>rest);
- if(!chosen.length)return toast.error("Selecione pelo menos um item.");
+ if(!chosen.length){toast.error("Selecione pelo menos um item.");return;}
  const r=await importPlanningItemsAction(chosen);
- if(r.error)return toast.error(r.error);
+ if(r.error){toast.error(r.error);return;}
  toast.success(r.success);setDraft([]);window.location.reload();
  });
  const change=(id:string,patch:{completed?:boolean;actualAmount?:number;views?:number;messages?:number})=>start(async()=>{
- const r=await updatePlanningItemAction(id,patch);if(r.error)return toast.error(r.error);
+ const r=await updatePlanningItemAction(id,patch);if(r.error){toast.error(r.error);return;}
  setItems(old=>old.map(x=>x.id===id?{...x,...(patch.completed!==undefined?{completed:patch.completed}:{}),...(patch.actualAmount!==undefined?{actual_amount:patch.actualAmount}:{})}:x));
  });
- const remove=(id:string)=>{if(!confirm("Excluir este item do planejamento?"))return;start(async()=>{const r=await deletePlanningItemAction(id);if(r.error)return toast.error(r.error);setItems(old=>old.filter(x=>x.id!==id));});};
- const create=(id:string)=>{if(!confirm("Criar registro desta campanha no VSPlanner? Isso NÃO publica anúncios no Meta Ads."))return;start(async()=>{const r=await createCampaignFromPlanningAction(id);if(r.error)return toast.error(r.error);toast.success(r.success);window.location.reload();});};
+ const remove=(id:string)=>{if(!confirm("Excluir este item do planejamento?"))return;start(async()=>{const r=await deletePlanningItemAction(id);if(r.error){toast.error(r.error);return;}setItems(old=>old.filter(x=>x.id!==id));});};
+ const create=(id:string)=>{if(!confirm("Criar registro desta campanha no VSPlanner? Isso NÃO publica anúncios no Meta Ads."))return;start(async()=>{const r=await createCampaignFromPlanningAction(id);if(r.error){toast.error(r.error);return;}toast.success(r.success);window.location.reload();});};
  const filtered=items.filter(i=>filter==="all"||i.area===filter||i.company_id===filter);
  const planned=filtered.reduce((s,i)=>s+Number(i.planned_amount||0),0),actual=filtered.reduce((s,i)=>s+Number(i.actual_amount||0),0);
  return <div className="space-y-6">
