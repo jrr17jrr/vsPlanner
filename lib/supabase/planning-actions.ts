@@ -1,5 +1,5 @@
-import type {SupabaseClient} from "@supabase/supabase-js";
 "use server";
+import type {SupabaseClient} from "@supabase/supabase-js";
 import {revalidatePath} from "next/cache";
 import {createSupabaseServerClient} from "@/lib/supabase/server";
 export type PlanningArea="clt"|"pessoal"|"rotina"|"visionario";
