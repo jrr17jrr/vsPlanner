@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import {useRouter} from "next/navigation";
+import {toast} from "sonner";
+import {saveCltWeeklyDayAction,markCltWeeklyReviewAction} from "@/lib/supabase/clt-weekly-actions";
 import { AlertTriangle, Building2, ChevronLeft, ChevronRight, Eye, Megaphone, MessageCircle, ShoppingCart, WalletCards, CheckSquare, ArrowRight, ListTodo } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,6 +24,8 @@ function daysUntil(date: string) {
 
 export function CltDashboard({ data }: { data: CltDashboardData }) {
   const [month, setMonth] = useState(() => new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const router=useRouter();
+  const [saving,startSaving]=useTransition();
   const [responsible, setResponsible] = useState("all");
   const [company, setCompany] = useState("all");
   const mk = monthKey(month);
@@ -39,6 +44,10 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
   const lowBalance = companies.filter(c => Number(c.current_ad_balance) <= 100);
   const attentionCampaigns = active.filter(c => daysUntil(c.ends_on) <= 2).sort((a,b)=>a.ends_on.localeCompare(b.ends_on));
   const attentionTasks = tasks.filter(t => t.due_date && (t.due_date < today || (t.due_date === today && t.priority === "importante")));
+  const currentWeekday=new Date(new Date().toLocaleString("en-US",{timeZone:"America/Sao_Paulo"})).getDay();
+  const todayCompanies=companies.filter(co=>(data.weeklyReviews.find(r=>r.company_id===co.id)?.weekday??(co.name.toLowerCase().includes("ig predial")?6:1))===currentWeekday);
+  const reviewedToday=companies.filter(co=>data.weeklyReviews.find(r=>r.company_id===co.id)?.last_reviewed_on===today).length;
+  function persist(action:()=>Promise<{error?:string;success?:string}>){startSaving(async()=>{try{const res=await action();if(res.error)toast.error(res.error);else{toast.success(res.success||"Salvo.");router.refresh();}}catch(e){toast.error(e instanceof Error?e.message:"Erro ao salvar.");}})}
   const companyName=(id:string)=>data.companies.find(c=>c.id===id)?.name ?? "Empresa";
 
   function shift(n:number){ setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth()+n, 1))); }
@@ -56,6 +65,17 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
         <Select value={responsible} onValueChange={v=>{setResponsible(v);setCompany("all")}}><SelectTrigger><SelectValue placeholder="Responsável"/></SelectTrigger><SelectContent><SelectItem value="all">Todos os responsáveis</SelectItem>{data.responsibles.map(r=><SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent></Select>
         <Select value={company} onValueChange={setCompany}><SelectTrigger><SelectValue placeholder="Empresa"/></SelectTrigger><SelectContent><SelectItem value="all">Todas as empresas</SelectItem>{data.companies.filter(c=>responsible==="all"||c.responsible_id===responsible).map(c=><SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
       </div>
+    </div>
+
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card className="border-primary/30"><CardHeader><CardTitle className="flex items-center justify-between gap-2"><span>Empresa do dia</span><span className="text-xs font-normal text-muted-foreground">{todayCompanies.length} programada(s)</span></CardTitle></CardHeader><CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">Faça a análise completa da empresa programada. Confira rapidamente as campanhas das demais todos os dias.</p>
+        {todayCompanies.length===0?<p className="text-sm text-muted-foreground">Nenhuma empresa programada para hoje. Ajuste os dias na agenda ao lado.</p>:todayCompanies.map(co=>{const review=data.weeklyReviews.find(r=>r.company_id===co.id);const checked=review?.last_reviewed_on===today;const pending=tasks.filter(t=>t.company_id===co.id).length;return <div key={co.id} className="rounded-xl border p-3"><div className="flex items-center justify-between gap-2"><div><p className="font-semibold">{co.name}</p><p className="text-xs text-muted-foreground">{pending} tarefa(s) pendente(s) · Saldo: {money.format(co.current_ad_balance)}</p></div><Button size="sm" variant={checked?"outline":"default"} disabled={saving} onClick={()=>persist(()=>markCltWeeklyReviewAction(co.id,!checked))}>{checked?"Reabrir":"Concluir revisão"}</Button></div><div className="mt-3 flex flex-wrap gap-2"><Button asChild size="sm" variant="outline"><Link href="/trabalho/empresas">Ver empresa</Link></Button><Button asChild size="sm" variant="outline"><Link href="/trabalho/campanhas">Campanhas</Link></Button><Button asChild size="sm" variant="outline"><Link href="/trabalho/tarefas">Tarefas</Link></Button></div></div>})}
+      </CardContent></Card>
+      <Card><CardHeader><CardTitle className="flex items-center justify-between gap-2"><span>Minha agenda semanal</span><span className="text-xs font-normal text-muted-foreground">{reviewedToday}/{companies.length} revisadas hoje</span></CardTitle></CardHeader><CardContent className="space-y-2">
+        <p className="text-xs text-muted-foreground">Escolha o dia fixo de cada empresa. É possível colocar várias no mesmo dia. As escolhas ficam salvas na sua conta.</p>
+        {companies.map((co,i)=>{const review=data.weeklyReviews.find(r=>r.company_id===co.id);const weekday=review?.weekday??(co.name.toLowerCase().includes("ig predial")?6:i%5+1);const checked=review?.last_reviewed_on===today;return <div key={co.id} className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"><div className="min-w-24 flex-1"><p className="text-sm font-medium">{co.name}</p><p className="text-xs text-muted-foreground">{checked?"Revisada hoje":review?.last_reviewed_on?"Última: "+review.last_reviewed_on.split("-").reverse().join("/"):"Ainda não revisada"}</p></div><select aria-label={"Dia da semana de "+co.name} disabled={saving} value={weekday} onChange={e=>persist(()=>saveCltWeeklyDayAction(co.id,Number(e.target.value)))} className="h-9 rounded-md border bg-background px-2 text-xs">{["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"].map((d,j)=><option key={d} value={j}>{d}</option>)}</select><input type="checkbox" aria-label={"Revisada hoje: "+co.name} checked={checked} disabled={saving} onChange={e=>persist(()=>markCltWeeklyReviewAction(co.id,e.target.checked))} className="h-4 w-4 accent-cyan-500"/></div>})}
+      </CardContent></Card>
     </div>
 
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{stats.map(([label,value,Icon])=><Card key={label}><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-muted-foreground"><span className="text-xs">{label}</span><Icon className="h-4 w-4"/></div><p className="text-xl font-semibold">{value}</p></CardContent></Card>)}</div>
