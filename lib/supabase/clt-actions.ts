@@ -64,6 +64,11 @@ export async function saveCltMonthlyBudgetAction(input:{companyId:string;month:s
  const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();if(!company)return{error:"Empresa inválida."};
  const {error}=await s.from("clt_monthly_budgets").upsert({user_id:user.id,company_id:input.companyId,month_key:input.month+"-01",budget_amount:input.budget,reserve_target:input.reserve},{onConflict:"user_id,company_id,month_key"});if(error)return{error:error.message};refresh();return{success:"Orçamento mensal salvo."};
 }
+export async function setCltCampaignCreatedInMetaAction(id:string,created:boolean):Promise<State>{
+ const {s,user}=await ctx();
+ const {error}=await s.from("clt_campaigns").update({created_in_meta:created}).eq("id",id).eq("user_id",user.id);
+ if(error)return {error:error.message};refresh();return {success:created?"Marcada como criada no Meta Ads.":"Marcada como ainda não criada no Meta Ads."};
+}
 export async function saveCltTrafficCampaignAction(input:{id?:string;companyId:string;name:string;objective:string;startsOn:string;endsOn:string;budgetType:"daily"|"total";dailyBudget:number;plannedAmount:number;status:"planejada"|"ativa"|"pausada"|"finalizada";managerUrl?:string;description?:string}):Promise<State>{
  const {s,user}=await ctx();if(!input.name.trim()||!input.startsOn||!input.endsOn||input.endsOn<input.startsOn||!Number.isFinite(input.plannedAmount)||input.plannedAmount<0||!Number.isFinite(input.dailyBudget)||input.dailyBudget<0)return{error:"Confira nome, datas e valores."};
  const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();if(!company)return{error:"Empresa inválida."};
