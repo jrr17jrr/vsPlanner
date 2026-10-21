@@ -4,7 +4,7 @@ import {toast} from "sonner";
 import {useRouter} from "next/navigation";
 import {addCltAdAccountMovementAction} from "@/lib/supabase/clt-report-actions";
 type Company={id:string;name:string;current_ad_balance:number};
-type Campaign={id:string;company_id:string;name:string;starts_on:string;ends_on:string;planned_amount:number|null};
+type Campaign={id:string;company_id:string;name:string;starts_on:string;ends_on:string;planned_amount:number|null|undefined};
 type Result={campaign_id:string;entry_date:string;spent_amount:number;generated_revenue:number;views:number;messages:number;sales:number};
 type Movement={company_id:string;movement_date:string;kind:string;amount:number};
 const br=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
