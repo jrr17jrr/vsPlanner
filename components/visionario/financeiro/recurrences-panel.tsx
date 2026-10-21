@@ -244,6 +244,12 @@ export function RecurrencesPanel({
         })}
       </div>
 
+      {paidRows.length > 0 && (
+        <button type="button" onClick={() => setShowPaid(v => !v)} className="flex w-fit items-center gap-1 text-xs text-success hover:underline">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {showPaid ? "Ocultar quitadas neste mês" : "Mostrar quitadas neste mês (" + paidRows.length + ")"}
+        </button>
+      )}
       {cancelledRows.length > 0 && (
         <button
           type="button"
