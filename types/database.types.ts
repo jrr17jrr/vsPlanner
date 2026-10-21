@@ -809,6 +809,7 @@ export type Database = {
       };
       clt_responsibles: { Row: CltResponsible; Insert: Partial<CltResponsible> & { user_id: string; name: string }; Update: Partial<Omit<CltResponsible, "id">>; Relationships: [] };
       clt_companies: { Row: CltCompany; Insert: Partial<CltCompany> & { user_id: string; name: string }; Update: Partial<Omit<CltCompany, "id">>; Relationships: [] };
+      tiktok_project_entries: { Row: {id:string;space_id:string;user_id:string;project:string;entry_date:string;description:string;kind:string;amount:number;created_at:string}; Insert: {space_id:string;user_id:string;project:string;entry_date:string;description:string;kind:string;amount:number;id?:string}; Update: Partial<{project:string;entry_date:string;description:string;kind:string;amount:number}>; Relationships: [] };
       clt_campaigns: { Row: CltCampaign; Insert: Partial<CltCampaign> & { user_id: string; company_id: string; name: string; starts_on: string; ends_on: string }; Update: Partial<Omit<CltCampaign, "id">>; Relationships: [] };
       clt_monthly_budgets: { Row: CltMonthlyBudget; Insert: Partial<CltMonthlyBudget> & {user_id:string;company_id:string;month_key:string}; Update: Partial<Omit<CltMonthlyBudget,"id">>; Relationships: [] };
       clt_campaign_result_entries: { Row: CltCampaignResultEntry; Insert: Partial<CltCampaignResultEntry> & {user_id:string;campaign_id:string;entry_date:string}; Update: Partial<Omit<CltCampaignResultEntry,"id">>; Relationships: [] };
