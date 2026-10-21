@@ -44,7 +44,8 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
   const lowBalance = companies.filter(c => Number(c.current_ad_balance) <= 100);
   const attentionCampaigns = active.filter(c => daysUntil(c.ends_on) <= 2).sort((a,b)=>a.ends_on.localeCompare(b.ends_on));
   const attentionTasks = tasks.filter(t => t.due_date && (t.due_date < today || (t.due_date === today && t.priority === "importante")));
-  const currentWeekday=new Date(new Date().toLocaleString("en-US",{timeZone:"America/Sao_Paulo"})).getDay();
+  const weekdayLabel=new Intl.DateTimeFormat("en-US",{weekday:"short",timeZone:"America/Sao_Paulo"}).format(new Date());
+  const currentWeekday=({Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6} as Record<string,number>)[weekdayLabel] ?? new Date().getDay();
   const todayCompanies=companies.filter(co=>(data.weeklyReviews.find(r=>r.company_id===co.id)?.weekday??(co.name.toLowerCase().includes("ig predial")?6:1))===currentWeekday);
   const reviewedToday=companies.filter(co=>data.weeklyReviews.find(r=>r.company_id===co.id)?.last_reviewed_on===today).length;
   function persist(action:()=>Promise<{error?:string;success?:string}>){startSaving(async()=>{try{const res=await action();if(res.error)toast.error(res.error);else{toast.success(res.success||"Salvo.");router.refresh();}}catch(e){toast.error(e instanceof Error?e.message:"Erro ao salvar.");}})}
