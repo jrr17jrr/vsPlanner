@@ -151,6 +151,7 @@ export function ChargesList({
       <RecurrencesPanel
         scope={scope}
         kind={kind}
+        selectedMonth={selectedMonth}
         origins={origins}
         charges={charges}
         payments={payments}
