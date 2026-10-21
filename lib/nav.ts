@@ -97,6 +97,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // dashboard financeiro — exige financeiro.view igual à própria
       // página, nunca só acesso ao space.
       { label: "Visão Geral", href: "/tiktok", icon: Video, module: "financeiro" },
+      { label: "Sofia IA / Maria", href: "/tiktok/projetos", icon: Wallet, module: "financeiro" },
       { label: "Financeiro", href: "/tiktok/financeiro", icon: LineChart, module: "financeiro" },
     ],
   },
