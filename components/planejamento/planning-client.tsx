@@ -28,7 +28,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(area==="clt"&&name&&!company)throw new Error("Empresa não encontrada: "+name+". Cadastre-a antes de importar.");
  const amount=Number(x.plannedAmount||0),daily=Number(x.dailyBudget||0);
  if(!Number.isFinite(amount)||amount<0||!Number.isFinite(daily)||daily<0)throw new Error("Orçamento inválido no item "+(i+1));
- return {area,title:x.title.trim(),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,selected:true};
+ return {area,title:x.title.trim(),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),endsOn:String(x.endsOn||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,selected:true};
  });
  setDraft(parsed);toast.success("Arquivo lido. Confira a prévia antes de salvar.");
  }catch(e){toast.error(e instanceof Error?e.message:"Arquivo inválido.");setDraft([]);}
@@ -49,7 +49,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  const filtered=items.filter(i=>filter==="all"||i.area===filter||i.company_id===filter);
  const planned=filtered.reduce((s,i)=>s+Number(i.planned_amount||0),0),actual=filtered.reduce((s,i)=>s+Number(i.actual_amount||0),0);
  return <div className="space-y-6">
- <div><h1 className="text-2xl font-semibold">Planejamento</h1><p className="text-sm text-muted-foreground">Checklist semanal, campanhas, rotina e tarefas. Importe apenas o que escolher.</p></div>
+ <div><h1 className="text-2xl font-semibold">Planejamento</h1><p className="text-sm text-muted-foreground">Importe campanhas e tarefas diretamente nos módulos corretos. Revise antes de confirmar.</p></div>
  {loadError&&<p className="rounded-lg border border-amber-500 p-3 text-sm">A tabela de planejamento ainda precisa da migração SQL no Supabase: {loadError}</p>}
  <section className="space-y-3 rounded-xl border p-4">
  <h2 className="font-semibold">Importar planejamento JSON</h2>
@@ -71,6 +71,6 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  {item.area==="clt"&&item.company_id&&!item.campaign_id&&<Button size="sm" variant="outline" disabled={busy||!item.planned_date} onClick={()=>create(item.id)}>Criar campanha no VSPlanner</Button>}{item.campaign_id&&<span className="text-xs text-emerald-600">Campanha vinculada</span>}
  </div><Button variant="ghost" size="sm" disabled={busy} onClick={()=>remove(item.id)}>Excluir</Button></div>)}
  </section>
- <p className="text-xs text-muted-foreground">Importações adicionam itens ao planejamento, não publicam anúncios e não alteram automaticamente o saldo real da Meta.</p>
+ <p className="text-xs text-muted-foreground">Novas importações criam registros diretamente em Campanhas, Tarefas ou Rotina. Não publicam anúncios nem alteram o saldo real da Meta. Os itens importados anteriormente continuam nesta lista.</p>
  </div>;
 }
