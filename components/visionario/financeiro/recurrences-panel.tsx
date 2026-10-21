@@ -60,6 +60,7 @@ function scheduleLabel(origin: FinancialOrigin, dueDay: number | null): string {
 export function RecurrencesPanel({
   scope,
   kind,
+  selectedMonth,
   origins,
   charges,
   payments,
@@ -69,6 +70,7 @@ export function RecurrencesPanel({
 }: {
   scope: FinancialScope;
   kind: FinancialKind;
+  selectedMonth: string;
   origins: FinancialOrigin[];
   charges: FinancialCharge[];
   payments: FinancialPayment[];
@@ -135,7 +137,12 @@ export function RecurrencesPanel({
     .filter((r) => (r.origin.recurrence_frequency ?? "mensal") === "mensal")
     .reduce((s, r) => s + r.amount, 0);
   const isEntrada = kind === "entrada";
-  const visible = showCancelled ? rows : activeRows;
+  const paidInMonth = (row: RecurrenceRow) => {
+    const charge = charges.find(c => c.origin_id === row.origin.id && c.status !== "cancelado" && (c.competency_date ?? c.due_date).startsWith(selectedMonth));
+    return !!charge && chargeStatus(charge, payments) === "pago" && row.overdue.length === 0;
+  };
+  const paidRows = activeRows.filter(paidInMonth);
+  const visible = (showCancelled ? rows : activeRows).filter(row => !row.origin.is_active || showPaid || !paidInMonth(row));
 
   return (
     <section aria-labelledby={`rec-${kind}`} className="flex flex-col gap-2">
