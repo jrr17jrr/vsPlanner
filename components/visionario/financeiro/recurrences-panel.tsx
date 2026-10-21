@@ -77,6 +77,7 @@ export function RecurrencesPanel({
   permissions: { canEdit: boolean };
 }) {
   const [showCancelled, setShowCancelled] = useState(false);
+  const [showPaid, setShowPaid] = useState(false);
   const [paying, setPaying] = useState<FinancialCharge | null>(null);
   const [editing, setEditing] = useState<RecurrenceRow | null>(null);
   const [confirm, setConfirm] = useState<{ type: "stop" | "resume"; row: RecurrenceRow } | null>(null);
