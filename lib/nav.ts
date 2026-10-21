@@ -3,6 +3,7 @@ import {
   Sun,
   CalendarClock,
   ListChecks,
+  ClipboardList,
   History,
   Wallet,
   Target,
@@ -51,6 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Minha Vida",
     items: [
       { label: "Meu Dia", href: "/hoje", icon: Sun },
+      { label: "Planejamento", href: "/planejamento", icon: ClipboardList },
       { label: "Minha Rotina", href: "/rotina", icon: CalendarClock },
       { label: "Tarefas", href: "/tarefas", icon: ListChecks },
       { label: "Histórico", href: "/historico", icon: History },
@@ -83,6 +85,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Visão Geral", href: "/trabalho", icon: LayoutDashboard },
       { label: "Empresas", href: "/trabalho/empresas", icon: Building2 },
+      { label: "Planejamento", href: "/planejamento?area=clt", icon: ClipboardList },
       { label: "Campanhas", href: "/trabalho/campanhas", icon: Megaphone },
       { label: "Tarefas", href: "/trabalho/tarefas", icon: ListChecks },
       { label: "Rotina", href: "/trabalho/rotina", icon: CalendarClock },
