@@ -13,10 +13,11 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  const {data:companies,error:ce}=await s.from("clt_companies").select("id").eq("user_id",user.id);
  if(ce)return {error:ce.message};
  const allowed=new Set((companies||[]).map(c=>c.id));
- const rows=[];
+ const prepared=[];
  for(const item of items){
  if(!["clt","pessoal","rotina","visionario"].includes(item.area)||typeof item.title!=="string"||!item.title.trim()||item.title.length>240)return {error:"Um item possui título ou área inválida."};
  if(item.companyId&&!allowed.has(item.companyId))return {error:"Empresa não encontrada na sua conta."};
+ if(item.area==="clt"&&!item.companyId)return {error:"Informe a empresa CLT de cada item."};
  if(item.area!=="clt"&&item.companyId)return {error:"Empresa só pode ser vinculada ao CLT."};
  if(item.plannedDate&&!/^\d{4}-\d{2}-\d{2}$/.test(item.plannedDate))return {error:"Data inválida."};
  if(item.scheduledTime&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(item.scheduledTime))return {error:"Horário inválido."};
@@ -24,11 +25,51 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  if(!Number.isFinite(daily)||daily<0||!Number.isFinite(planned)||planned<0)return {error:"Orçamento inválido."};
  const weekdays=item.weekdays||[];
  if(!Array.isArray(weekdays)||weekdays.some(d=>!Number.isInteger(d)||d<0||d>6))return {error:"Dias da semana inválidos."};
- rows.push({user_id:user.id,area:item.area,company_id:item.companyId||null,title:item.title.trim(),notes:item.notes?.slice(0,4000)||null,planned_date:item.plannedDate||null,scheduled_time:item.scheduledTime||null,recurrence_weekdays:weekdays,objective:item.objective?.slice(0,200)||null,daily_budget:daily,planned_amount:planned});
+ prepared.push({...item,title:item.title.trim(),dailyBudget:daily,plannedAmount:planned,weekdays});
  }
- const {error}=await (s as unknown as SupabaseClient).from("planning_items").insert(rows);
- if(error)return {error:error.message};
- refresh();return {success:`${rows.length} itens importados.`};
+ if(prepared.some(x=>x.area==="visionario"))return {error:"Importação da Visionário Dev ainda não está integrada ao módulo de Trabalhos. Nenhum item foi importado."};
+ const {data:spaces,error:se}=await s.from("spaces").select("id,type").eq("owner_id",user.id).eq("type","personal").limit(1);
+ if(se&&prepared.some(x=>x.area!=="clt"))return {error:se.message};
+ const personalSpace=spaces?.[0]?.id;
+ if(prepared.some(x=>x.area!=="clt")&&!personalSpace)return {error:"Espaço pessoal não encontrado. Nenhum item foi importado."};
+ let created=0,skipped=0;
+ for(const item of prepared){
+ const notes=item.notes?.trim().slice(0,4000)||null;
+ if(item.area==="clt"){
+ const companyId=item.companyId!;
+ const isCampaign=item.dailyBudget>0||item.plannedAmount>0||!!item.objective?.trim();
+ if(isCampaign){
+ if(!item.plannedDate){skipped++;continue;}
+ const {data:existing,error:checkError}=await s.from("clt_campaigns").select("id").eq("user_id",user.id).eq("company_id",companyId).ilike("name",item.title).limit(1);
+ if(checkError)return {error:checkError.message+" ("+created+" itens já criados)"};
+ if(existing?.length){skipped++;continue;}
+ const {error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:companyId,name:item.title,objective:item.objective||"Engajamento",description:notes,starts_on:item.plannedDate,ends_on:item.plannedDate,budget_type:"daily",daily_budget:item.dailyBudget,planned_amount:item.plannedAmount,campaign_status:"planejada",spent_amount:0,messages:0,sales:0,views:0});
+ if(error)return {error:error.message+" ("+created+" itens já criados)"};
+ }else{
+ const {data:existing,error:checkError}=await s.from("clt_tasks").select("id").eq("user_id",user.id).eq("company_id",companyId).eq("title",item.title).limit(1);
+ if(checkError)return {error:checkError.message+" ("+created+" itens já criados)"};
+ if(existing?.length){skipped++;continue;}
+ const weekly=item.weekdays.length>0;
+ const {error}=await s.from("clt_tasks").insert({user_id:user.id,company_id:companyId,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:"normal",notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null});
+ if(error)return {error:error.message+" ("+created+" itens já criados)"};
+ }
+ }else if(item.area==="pessoal"){
+ const {data:existing}=await s.from("tasks").select("id").eq("user_id",user.id).eq("space_id",personalSpace!).eq("title",item.title).limit(1);
+ if(existing?.length){skipped++;continue;}
+ const weekly=item.weekdays.length>0;
+ const {error}=await s.from("tasks").insert({user_id:user.id,space_id:personalSpace!,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:"normal",notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null});
+ if(error)return {error:error.message+" ("+created+" itens já criados)"};
+ }else if(item.area==="rotina"){
+ const {data:existing}=await s.from("activities").select("id").eq("user_id",user.id).eq("space_id",personalSpace!).eq("title",item.title).limit(1);
+ if(existing?.length){skipped++;continue;}
+ if(!item.scheduledTime||!item.weekdays.length){skipped++;continue;}
+ const {error}=await s.from("activities").insert({user_id:user.id,space_id:personalSpace!,title:item.title,start_time:item.scheduledTime,weekdays:item.weekdays,notes,is_active:true});
+ if(error)return {error:error.message+" ("+created+" itens já criados)"};
+ }
+ created++;
+ }
+ ["/planejamento","/trabalho","/trabalho/campanhas","/trabalho/tarefas","/tarefas","/rotina","/hoje"].forEach(p=>revalidatePath(p));
+ return {success:created+" itens criados nos módulos corretos. "+skipped+" ignorados (duplicados ou incompletos)."};
  }catch(e){return {error:e instanceof Error?e.message:"Erro ao importar."};}
 }
 export async function updatePlanningItemAction(id:string,patch:{completed?:boolean;actualAmount?:number;views?:number;messages?:number}){
