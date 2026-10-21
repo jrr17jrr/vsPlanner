@@ -8,8 +8,8 @@ import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Label} from "@/components/ui/label";
 type Entry={id:string;project:string;kind:string;description:string;amount:number;entry_date:string};
-export function TikTokProjectsClient({entries}:{entries:Entry[]}){
- const [project,setProject]=useState<"sofia"|"maria">("sofia");
+export function TikTokProjectsClient({entries,initialProject="sofia"}:{entries:Entry[];initialProject?:"sofia"|"maria"}){
+ const [project,setProject]=useState<"sofia"|"maria">(initialProject);
  const [share,setShare]=useState(50);
  const [pending,start]=useTransition();
  const router=useRouter();
