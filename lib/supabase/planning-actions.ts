@@ -3,7 +3,7 @@ import type {SupabaseClient} from "@supabase/supabase-js";
 import {revalidatePath} from "next/cache";
 import {createSupabaseServerClient} from "@/lib/supabase/server";
 export type PlanningArea="clt"|"pessoal"|"rotina"|"visionario";
-export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number};
+export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;endsOn?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number};
 async function context(){const s=await createSupabaseServerClient();const {data:{user}}=await s.auth.getUser();if(!user)throw new Error("Faça login.");return{s,user};}
 function refresh(){revalidatePath("/planejamento");revalidatePath("/trabalho/campanhas");revalidatePath("/trabalho");}
 export async function importPlanningItemsAction(items:PlanningInput[]){
@@ -20,6 +20,8 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  if(item.area==="clt"&&!item.companyId)return {error:"Informe a empresa CLT de cada item."};
  if(item.area!=="clt"&&item.companyId)return {error:"Empresa só pode ser vinculada ao CLT."};
  if(item.plannedDate&&!/^\d{4}-\d{2}-\d{2}$/.test(item.plannedDate))return {error:"Data inválida."};
+ if(item.endsOn&&!/^\d{4}-\d{2}-\d{2}$/.test(item.endsOn))return {error:"Data final inválida."};
+ if(item.endsOn&&item.plannedDate&&item.endsOn<item.plannedDate)return {error:"Data final anterior ao início."};
  if(item.scheduledTime&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(item.scheduledTime))return {error:"Horário inválido."};
  const daily=Number(item.dailyBudget||0),planned=Number(item.plannedAmount||0);
  if(!Number.isFinite(daily)||daily<0||!Number.isFinite(planned)||planned<0)return {error:"Orçamento inválido."};
@@ -43,7 +45,7 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  const {data:existing,error:checkError}=await s.from("clt_campaigns").select("id").eq("user_id",user.id).eq("company_id",companyId).ilike("name",item.title).limit(1);
  if(checkError)return {error:checkError.message+" ("+created+" itens já criados)"};
  if(existing?.length){skipped++;continue;}
- const {error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:companyId,name:item.title,objective:item.objective||"Engajamento",description:notes,starts_on:item.plannedDate,ends_on:item.plannedDate,budget_type:"daily",daily_budget:item.dailyBudget,planned_amount:item.plannedAmount,campaign_status:"planejada",spent_amount:0,messages:0,sales:0,views:0});
+ const {error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:companyId,name:item.title,objective:item.objective||"Engajamento",description:notes,starts_on:item.plannedDate,ends_on:item.endsOn||item.plannedDate,budget_type:"daily",daily_budget:item.dailyBudget,planned_amount:item.plannedAmount,campaign_status:"planejada",spent_amount:0,messages:0,sales:0,views:0});
  if(error)return {error:error.message+" ("+created+" itens já criados)"};
  }else{
  const {data:existing,error:checkError}=await s.from("clt_tasks").select("id").eq("user_id",user.id).eq("company_id",companyId).eq("title",item.title).limit(1);
