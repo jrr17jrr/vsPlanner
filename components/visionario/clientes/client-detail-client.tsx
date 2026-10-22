@@ -152,6 +152,8 @@ export function ClientDetailClient({
         .sort((a, b) => a.due_date.localeCompare(b.due_date)),
     [charges, payments]
   );
+  const futureCharges = useMemo(() => charges.filter((c) => c.kind === "entrada" && c.status !== "cancelado" && c.due_date.slice(0,7) > todayKey.slice(0,7) && chargeStatus(c, payments) !== "pago").sort((a,b)=>a.due_date.localeCompare(b.due_date)),[charges,payments,todayKey]);
+  const currentOpenCharges = openCharges.filter(c=>c.due_date.slice(0,7)<=todayKey.slice(0,7));
   const chargeById = useMemo(() => new Map(charges.map((c) => [c.id, c])), [charges]);
 
   function nextDueFor(contract: ClientService): string | null {
@@ -513,12 +515,12 @@ export function ClientDetailClient({
             </div>
 
             <section className="mt-4">
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Cobranças pendentes</h2>
-              {openCharges.length === 0 ? (
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Cobranças pendentes (até o mês atual)</h2>
+              {currentOpenCharges.length === 0 ? (
                 <EmptyState icon={Receipt} title="Nenhuma cobrança pendente" description="Tudo recebido por aqui." />
               ) : (
                 <div className="flex flex-col gap-2">
-                  {openCharges.map((c) => {
+                  {currentOpenCharges.map((c) => {
                     const status = chargeStatus(c, payments);
                     const remaining = remainingAmount(c, payments);
                     const overdue = c.due_date < todayKey;
@@ -546,6 +548,12 @@ export function ClientDetailClient({
                   })}
                 </div>
               )}
+            </section>
+
+            <section className="mt-4">
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">Próximas cobranças</h2>
+              <p className="mb-2 text-xs text-muted-foreground">Cobranças de meses futuros, fora do total a receber atual.</p>
+              {futureCharges.length===0?<EmptyState icon={CalendarClock} title="Nenhuma cobrança futura"/>:<div className="flex flex-col gap-2">{futureCharges.map(c=><div key={c.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-3"><div><p className="text-sm font-medium">{c.description}</p><p className="text-xs text-muted-foreground">Vencimento {formatDate(c.due_date)}</p></div><span className="text-sm font-semibold">{formatCurrency(remainingAmount(c,payments))}</span></div>)}</div>}
             </section>
 
             <section className="mt-4">
