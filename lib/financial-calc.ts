@@ -374,7 +374,8 @@ export function clientFinancialSummary(
   const active = charges.filter((c) => c.status !== "cancelado" && c.kind === "entrada");
   const chargeIds = new Set(active.map((c) => c.id));
   const clientPayments = payments.filter((p) => chargeIds.has(p.charge_id));
-  const pending = active.filter((c) => chargeStatus(c, payments) !== "pago");
+  const currentMonth = todayKeySaoPaulo().slice(0, 7);
+  const pending = active.filter((c) => c.due_date.slice(0, 7) <= currentMonth && chargeStatus(c, payments) !== "pago");
   return {
     mrr: contracts.reduce((s, c) => s + contractMonthlyValue(c), 0),
     aReceber: pending.reduce((s, c) => s + remainingAmount(c, payments), 0),
