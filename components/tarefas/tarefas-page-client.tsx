@@ -1,3 +1,4 @@
+import { Subtasks } from "@/components/shared/subtasks";
 "use client";
 
 import { useState } from "react";
@@ -67,7 +68,7 @@ export function TarefasPageClient({
   function renderEntry(entry: DayTaskEntry, withActions = true) {
     const recurringTask = entry.recurring;
     return (
-      <DayTaskItem
+      <div key={entry.key}><DayTaskItem
         key={entry.key}
         entry={entry}
         done={toggle.isEntryDone(entry)}
@@ -75,13 +76,13 @@ export function TarefasPageClient({
         onEdit={withActions && !entry.task.archived_at ? () => dialogs.openEdit(entry.task) : undefined}
         onEndRecurrence={withActions && recurringTask && !isRecurrenceEnded(entry.task, todayKey) ? () => dialogs.askEnd(entry.task) : undefined}
         onDelete={withActions && !entry.task.archived_at ? () => dialogs.askDelete(entry.task) : undefined}
-      />
+      /><Subtasks parentType="pessoal" parentId={entry.task.id}/></div>
     );
   }
 
   function renderDeadline(task: Task, overdue = false) {
     return (
-      <ChecklistItem
+      <div key={task.id}><ChecklistItem
         key={task.id}
         title={task.title}
         done={toggle.isTaskDone(task)}
@@ -99,7 +100,7 @@ export function TarefasPageClient({
             {task.category && <span className="text-[11px] text-muted-foreground">{task.category}</span>}
           </>
         }
-      />
+      /><Subtasks parentType="pessoal" parentId={task.id}/></div>
     );
   }
 
