@@ -1,3 +1,4 @@
+import { Subtasks } from "@/components/shared/subtasks";
 "use client";
 
 import { useMemo, useState } from "react";
@@ -201,7 +202,7 @@ export function TrabalhosPageClient({
                     <StatusBadge status={w.priority} />
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+                <Subtasks parentType="visionario" parentId={w.id}/><div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
                   {permissions.canConclude && w.status !== "concluido" && (
                     <Button variant="outline" size="sm" onClick={() => handleStatusChange(w, "concluido")}>
                       <CheckCircle2 className="h-3.5 w-3.5" /> Concluir
