@@ -1,5 +1,5 @@
-import { Subtasks } from "@/components/shared/subtasks";
 "use client";
+import { Subtasks } from "@/components/shared/subtasks";
 
 import { Check, MapPin, MoreVertical, Pencil, Repeat, Square, Trash2, CircleStop } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
