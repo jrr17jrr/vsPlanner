@@ -1,5 +1,5 @@
-import { Subtasks } from "@/components/shared/subtasks";
 "use client";
+import { Subtasks } from "@/components/shared/subtasks";
 import{useOptimistic,useState,useTransition}from"react";import{toast}from"sonner";import{Repeat,MoreVertical,Trash2,CircleStop}from"lucide-react";import{Badge}from"@/components/ui/badge";import{Button}from"@/components/ui/button";import{Tabs,TabsContent,TabsList,TabsTrigger}from"@/components/ui/tabs";import{DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger}from"@/components/ui/dropdown-menu";import{ChecklistItem}from"@/components/shared/checklist-item";import{EditCltTaskButton,NewCltTaskButton}from"./new-clt-task-button";import{toggleCltTaskStatusAction,toggleCltTaskOccurrenceAction,deleteCltTaskAction,endCltTaskRecurrenceAction}from"@/lib/supabase/clt-actions";import type{CltCompany,CltTask}from"@/types/database.types";
 type Occ={task_id:string;occurrence_date:string;status:string;completed_at:string|null};
 const byPriority=(a:CltTask,b:CltTask)=>Number(b.priority==="importante")-Number(a.priority==="importante");const fmt=(d:string)=>new Intl.DateTimeFormat("pt-BR",{timeZone:"UTC"}).format(new Date(d+"T12:00:00Z"));const week=["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
