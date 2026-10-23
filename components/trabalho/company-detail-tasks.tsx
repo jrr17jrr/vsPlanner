@@ -1,5 +1,6 @@
 "use client";
-import {useTransition} from "react";import {useRouter} from "next/navigation";
+import {useTransition} from "react";
+import {Subtasks} from "@/components/shared/subtasks";import {useRouter} from "next/navigation";
 import {toast} from "sonner";
 import {Card,CardContent} from "@/components/ui/card";import {Checkbox} from "@/components/ui/checkbox";
 import {Button} from "@/components/ui/button";
@@ -19,7 +20,7 @@ export function CompanyDetailTasks({tasks,companies,occurrences,companyId}:{task
  {current.length?current.map(t=><div key={t.id} className={"flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-3 transition-opacity "+(done(t)?"opacity-60":"")}>
  <Checkbox checked={done(t)} disabled={pending||!activeToday(t)} onCheckedChange={()=>toggle(t)} aria-label={"Concluir "+t.title} className="shrink-0"/>
  <div className="min-w-0 flex-1"><p className={"text-sm font-medium text-foreground "+(done(t)?"line-through":"")}>{t.title}</p>
- <p className="mt-0.5 text-xs text-muted-foreground">{t.recurrence==="weekly"?"Repete: "+t.weekdays.map(d=>weekdays[d]).join(", ")+(activeToday(t)?"":" · Não agendada para hoje"):t.due_date?"Data: "+t.due_date.split("-").reverse().join("/"):"Sem prazo"}{t.scheduled_time?" · "+t.scheduled_time.slice(0,5):""}{t.priority==="importante"?" · Importante":""}</p></div>
+ <p className="mt-0.5 text-xs text-muted-foreground">{t.recurrence==="weekly"?"Repete: "+t.weekdays.map(d=>weekdays[d]).join(", ")+(activeToday(t)?"":" · Não agendada para hoje"):t.due_date?"Data: "+t.due_date.split("-").reverse().join("/"):"Sem prazo"}{t.scheduled_time?" · "+t.scheduled_time.slice(0,5):""}{t.priority==="importante"?" · Importante":""}</p><Subtasks parentType="clt" parentId={t.id}/></div>
  <EditCltTaskButton companies={companies} task={t}/></div>):<p className="text-sm text-muted-foreground">Nenhuma tarefa cadastrada para esta empresa.</p>}
  </CardContent></Card>;
 }
