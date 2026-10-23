@@ -1,3 +1,4 @@
+import { Subtasks } from "@/components/shared/subtasks";
 "use client";
 
 import { Check, MapPin, MoreVertical, Pencil, Repeat, Square, Trash2, CircleStop } from "lucide-react";
@@ -45,6 +46,7 @@ export function DayTaskItem({
 
       <div className="min-w-0 flex-1">
         <p className={cn("break-words text-sm font-medium text-foreground", done && "line-through")}>{entry.title}</p>
+        <Subtasks parentType="pessoal" parentId={entry.task.id}/>
         {entry.location && (
           <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3 shrink-0" />
