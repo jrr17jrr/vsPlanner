@@ -1,5 +1,5 @@
-import { Subtasks } from "@/components/shared/subtasks";
 "use client";
+import { Subtasks } from "@/components/shared/subtasks";
 
 import { useState } from "react";
 import { toast } from "sonner";
