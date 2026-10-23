@@ -51,7 +51,7 @@ export async function saveVideoDetails(parentId:string,subtaskId:string,input:{s
 
 export async function createMonthlyVideoPlans(month:string) {
  const {db,user}=await auth();
- if(!/^\\d{4}-\\d{2}$/.test(month))return {error:"Mês inválido."};
+ if(!/^[0-9]{4}-[0-9]{2}$/.test(month))return {error:"Mês inválido."};
  const {data:companies,error:companyError}=await db.from("clt_companies").select("id,name").eq("user_id",user.id).eq("is_active",true);
  if(companyError)return {error:companyError.message};
  const included=(companies??[]).filter(c=>!["piv","verificar"].includes(c.name.trim().toLowerCase()));
