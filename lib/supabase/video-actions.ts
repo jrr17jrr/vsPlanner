@@ -48,3 +48,33 @@ export async function saveVideoDetails(parentId:string,subtaskId:string,input:{s
  revalidatePath("/trabalho/empresas");
  return {success:true};
 }
+
+export async function createMonthlyVideoPlans(month:string) {
+ const {db,user}=await auth();
+ if(!/^\\d{4}-\\d{2}$/.test(month))return {error:"Mês inválido."};
+ const {data:companies,error:companyError}=await db.from("clt_companies").select("id,name").eq("user_id",user.id).eq("is_active",true);
+ if(companyError)return {error:companyError.message};
+ const included=(companies??[]).filter(c=>!["piv","verificar"].includes(c.name.trim().toLowerCase()));
+ const title="Produção de Vídeos | Mensal";
+ const labels=["Vídeo 01 — WhatsApp Principal","Vídeo 02 — Engajamento","Vídeo 03 — WhatsApp Teste"];
+ let created=0;
+ for(const company of included){
+  const {data:existing,error:findError}=await db.from("clt_tasks").select("id").eq("user_id",user.id).eq("company_id",company.id).eq("title",title).eq("notes","Plano de vídeos: "+month).limit(1);
+  if(findError)return {error:findError.message};
+  let id=existing?.[0]?.id as string|undefined;
+  if(!id){
+   const {data:task,error}=await db.from("clt_tasks").insert({user_id:user.id,company_id:company.id,title,kind:"prazo",priority:"importante",status:"pendente",notes:"Plano de vídeos: "+month,recurrence:"none",weekdays:[]}).select("id").single();
+   if(error)return {error:error.message};
+   id=task.id;created++;
+  }
+  const {data:subtasks,error:subError}=await db.from("task_subtasks").select("title").eq("user_id",user.id).eq("parent_type","clt").eq("parent_id",id);
+  if(subError)return {error:subError.message};
+  const missing=labels.filter(label=>!(subtasks??[]).some(x=>x.title===label));
+  if(missing.length){
+   const {error}=await db.from("task_subtasks").insert(missing.map((label,index)=>({parent_type:"clt",parent_id:id,user_id:user.id,title:label,position:labels.indexOf(label),production_status:"roteiro"})));
+   if(error)return {error:error.message};
+  }
+ }
+ revalidatePath("/trabalho/empresas");revalidatePath("/trabalho/empresas/[id]","page");
+ return {success:true,created,companies:included.length};
+}
