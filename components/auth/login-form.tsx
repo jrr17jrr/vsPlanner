@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
-import { Sparkles } from "lucide-react";
+import { useActionState, useState } from "react";
+import { Sparkles, Eye, EyeOff } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ const initialState: LoginActionState = {};
 
 export function LoginForm() {
   const [state, action, pending] = useActionState(loginAction, initialState);
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <div className="flex min-h-dvh w-full items-center justify-center bg-background px-4 py-10">
@@ -43,15 +44,21 @@ export function LoginForm() {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="login-password">Senha</Label>
+              <div className="relative">
               <Input
                 id="login-password"
                 name="password"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
                 placeholder="••••••••"
                 required
                 disabled={pending}
+                className="pr-11"
               />
+              <button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"} aria-pressed={showPassword} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-r-md" disabled={pending}>
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+              </div>
             </div>
 
             {state?.error && (
