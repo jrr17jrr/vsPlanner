@@ -43,9 +43,9 @@ export function MarkPaymentDialog({
   const [accountId, setAccountId] = useState(activeAccounts[0]?.id ?? "");
   const [settle, setSettle] = useState(true);
   const [notes, setNotes] = useState("");
-  const [payerLabel, setPayerLabel] = useState<"junior" | "guilherme" | "empresa">("empresa");
+  const [payerLabel, setPayerLabel] = useState<"junior" | "empresa">("empresa");
   const [recordOnly, setRecordOnly] = useState(false);
-  const externalPartner = scope === "visionario" && charge.kind === "saida" && payerLabel === "guilherme";
+  const externalPartner = false;
   const noAccountMovement = recordOnly || externalPartner;
   const [pending, setPending] = useState(false);
 
@@ -129,7 +129,7 @@ export function MarkPaymentDialog({
                   <SelectContent>
                     <SelectItem value="empresa">Visionário Dev (caixa da empresa)</SelectItem>
                     <SelectItem value="junior">Júnior</SelectItem>
-                    <SelectItem value="guilherme">Guilherme (sem conta cadastrada)</SelectItem>
+                    
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">{noAccountMovement ? "O lançamento não movimentará nenhuma conta." : "O pagamento movimenta a conta selecionada abaixo."}</p>
