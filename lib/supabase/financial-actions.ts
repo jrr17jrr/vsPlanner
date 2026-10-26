@@ -917,3 +917,30 @@ export async function createPartnerExpenseAction(input: {
   revalidateFinancialViews("visionario");
   return { success: "Gasto dos sócios registrado." };
 }
+
+/** Registra a dívida histórica com pagamento inicial, sem movimentar novamente o caixa. */
+export async function initializeFormerPartnerDebtAction(): Promise<ActionState> {
+  const { space } = await requireScopedModulePermission("visionario", "financeiro", "create");
+  const supabase = await createSupabaseServerClient();
+  const description = "Dívida — Ex-sócio G";
+  const { data: existing, error: lookupError } = await supabase.from("financial_charges")
+    .select("id").eq("space_id", space.id).eq("description", description).limit(1);
+  if (lookupError) return { error: lookupError.message };
+  if (existing?.length) return { error: "Essa dívida já está cadastrada." };
+  const created = await createMovementAction("visionario", {
+    kind: "saida", description, supplierName: "G", originalAmount: 1000,
+    dueDate: todayKeySaoPaulo(), tipo: "unico", settled: false,
+    notes: "Dívida com ex-sócio. Pagamento anterior de R$ 172 registrado apenas para histórico, sem novo débito no caixa."
+  });
+  if (created.error || !created.id) return created;
+  const { data: charge, error } = await supabase.from("financial_charges")
+    .select("id").eq("space_id", space.id).eq("origin_id", created.id).single();
+  if (error || !charge) return { error: "Dívida criada, mas não foi possível localizar a cobrança para registrar os R$ 172." };
+  const payment = await registerPaymentAction("visionario", charge.id, {
+    amount: 172, paymentDate: todayKeySaoPaulo(), paymentMethod: "pix",
+    accountId: "", recordOnly: true, settle: false,
+    notes: "Pagamento anterior informado pelo usuário; data exata não informada."
+  });
+  if (payment.error) return { error: "Dívida criada, mas o pagamento inicial precisa ser registrado: " + payment.error };
+  return { success: "Dívida cadastrada: R$ 1.000, com R$ 172 já pagos." };
+}
