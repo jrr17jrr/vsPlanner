@@ -85,3 +85,31 @@ export async function saveCltAdSetAction(input:{campaignId:string;name:string;au
  const {s,user}=await ctx();const {data:campaign}=await s.from("clt_campaigns").select("id").eq("id",input.campaignId).eq("user_id",user.id).single();if(!campaign||!input.name.trim()||!Number.isFinite(input.budget)||input.budget<0)return{error:"Dados inválidos."};
  const {error}=await s.from("clt_ad_sets").insert({user_id:user.id,campaign_id:input.campaignId,name:input.name.trim(),audience:input.audience||null,location:input.location||null,budget_amount:input.budget,notes:input.notes||null});if(error)return{error:error.message};refresh();return{success:"Conjunto cadastrado."};
 }
+
+
+export async function importCltCampaignJsonAction(input:{companyId:string;date:string;campaigns:{name:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null;status?:string}[]}):Promise<State>{
+ const {s,user}=await ctx();
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||!Array.isArray(input.campaigns)||!input.campaigns.length||input.campaigns.length>50)return {error:"Arquivo inválido ou com mais de 50 campanhas."};
+ const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();
+ if(!company)return {error:"Empresa não encontrada."};
+ const valid=(n:number|null)=>n===null||(typeof n==="number"&&Number.isFinite(n)&&n>=0);
+ if(input.campaigns.some(c=>!c.name?.trim()||c.name.length>160||![c.spent,c.messages,c.views,c.sales,c.revenue].every(valid)))return {error:"Existem campanhas com valores inválidos."};
+ const {data:existing,error:readError}=await s.from("clt_campaigns").select("id,name").eq("company_id",input.companyId).eq("user_id",user.id);
+ if(readError)return {error:readError.message};
+ const normalize=(v:string)=>v.trim().toLocaleLowerCase("pt-BR");
+ const existingNames=new Set((existing||[]).map(c=>normalize(c.name)));
+ const unique=new Set<string>();
+ if(input.campaigns.some(c=>{const n=normalize(c.name);if(unique.has(n))return true;unique.add(n);return false;}))return {error:"O arquivo contém campanhas duplicadas."};
+ const duplicates=input.campaigns.filter(c=>existingNames.has(normalize(c.name)));
+ if(duplicates.length)return {error:"Já existem campanhas com estes nomes: "+duplicates.map(c=>c.name).join(", ")+". Nenhum dado foi importado. Renomeie ou confira as campanhas existentes para evitar duplicação."};
+ let created=0;
+ for(const c of input.campaigns){
+  const {data:campaign,error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:input.companyId,name:c.name.trim(),objective:"mensagens",starts_on:input.date,ends_on:input.date,budget_type:"total",daily_budget:0,planned_amount:0,campaign_status:c.status==="em_andamento"?"ativa":"finalizada",spent_amount:0,messages:0,sales:0,views:0,description:"Importada de JSON. Data de referência do arquivo; período real da campanha não informado."}).select("id").single();
+  if(error||!campaign)return {error:"Importadas "+created+" campanhas antes de um erro: "+(error?.message||"Falha ao criar campanha")};
+  const {error:resultError}=await s.from("clt_campaign_result_entries").insert({user_id:user.id,campaign_id:campaign.id,entry_date:input.date,spent_amount:c.spent??0,messages:c.messages??0,views:c.views??0,sales:c.sales??0,generated_revenue:c.revenue??0,notes:"Importação JSON: valores acumulados na data de referência. Campos ausentes foram mantidos como 0 no banco; não significam resultado zero confirmado."});
+  if(resultError)return {error:"Campanha "+c.name+" criada, mas resultados não foram salvos: "+resultError.message};
+  created++;
+ }
+ refresh();revalidatePath("/trabalho/relatorios");
+ return {success:created+" campanhas importadas com resultados."};
+}
