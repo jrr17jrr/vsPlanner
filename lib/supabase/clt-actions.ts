@@ -105,7 +105,7 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
  for(const c of input.campaigns){
   const old=existingByName.get(normalize(c.name));
   if(old){
-   const changes:Record<string,number>={};
+   const changes:Partial<{spent_amount:number;messages:number;views:number;sales:number;generated_revenue:number}>={};
    for(const [source,target] of fields){if(c[source]!==null)changes[target]=c[source] as number;}
    if(!Object.keys(changes).length)continue;
    const {data:entries,error:entriesError}=await s.from("clt_campaign_result_entries").select("id,entry_date").eq("campaign_id",old.id).eq("user_id",user.id).eq("entry_date",input.date).order("id",{ascending:true});
