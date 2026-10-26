@@ -97,19 +97,35 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
  const {data:existing,error:readError}=await s.from("clt_campaigns").select("id,name").eq("company_id",input.companyId).eq("user_id",user.id);
  if(readError)return {error:readError.message};
  const normalize=(v:string)=>v.trim().toLocaleLowerCase("pt-BR");
- const existingNames=new Set((existing||[]).map(c=>normalize(c.name)));
+ const existingByName=new Map((existing||[]).map(c=>[normalize(c.name),c]));
  const unique=new Set<string>();
  if(input.campaigns.some(c=>{const n=normalize(c.name);if(unique.has(n))return true;unique.add(n);return false;}))return {error:"O arquivo contém campanhas duplicadas."};
- const duplicates=input.campaigns.filter(c=>existingNames.has(normalize(c.name)));
- if(duplicates.length)return {error:"Já existem campanhas com estes nomes: "+duplicates.map(c=>c.name).join(", ")+". Nenhum dado foi importado. Renomeie ou confira as campanhas existentes para evitar duplicação."};
- let created=0;
+ let created=0,updated=0;
+ const fields=[["spent","spent_amount"],["messages","messages"],["views","views"],["sales","sales"],["revenue","generated_revenue"]] as const;
  for(const c of input.campaigns){
+  const old=existingByName.get(normalize(c.name));
+  if(old){
+   const changes:Record<string,number>={};
+   for(const [source,target] of fields){if(c[source]!==null)changes[target]=c[source] as number;}
+   if(!Object.keys(changes).length)continue;
+   const {data:entries,error:entriesError}=await s.from("clt_campaign_result_entries").select("id,entry_date").eq("campaign_id",old.id).eq("user_id",user.id).eq("entry_date",input.date).order("id",{ascending:true});
+   if(entriesError)return {error:"Erro ao localizar resultados de "+c.name+": "+entriesError.message};
+   if((entries||[]).length>1)return {error:"Há vários registros na mesma data para "+c.name+". Atualize manualmente para evitar inconsistências."};
+   if(entries?.length){
+    const {error}=await s.from("clt_campaign_result_entries").update(changes).eq("id",entries[0].id).eq("user_id",user.id);
+    if(error)return {error:"Erro ao atualizar "+c.name+": "+error.message};
+   }else{
+    const {error}=await s.from("clt_campaign_result_entries").insert({user_id:user.id,campaign_id:old.id,entry_date:input.date,spent_amount:c.spent??0,messages:c.messages??0,views:c.views??0,sales:c.sales??0,generated_revenue:c.revenue??0,notes:"Atualização parcial via JSON. Campos não informados não foram alterados nos registros anteriores."});
+    if(error)return {error:"Erro ao registrar atualização de "+c.name+": "+error.message};
+   }
+   updated++;continue;
+  }
   const {data:campaign,error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:input.companyId,name:c.name.trim(),objective:"mensagens",starts_on:input.date,ends_on:input.date,budget_type:"total",daily_budget:0,planned_amount:0,campaign_status:c.status==="em_andamento"?"ativa":"finalizada",spent_amount:0,messages:0,sales:0,views:0,description:"Importada de JSON. Data de referência do arquivo; período real da campanha não informado."}).select("id").single();
-  if(error||!campaign)return {error:"Importadas "+created+" campanhas antes de um erro: "+(error?.message||"Falha ao criar campanha")};
-  const {error:resultError}=await s.from("clt_campaign_result_entries").insert({user_id:user.id,campaign_id:campaign.id,entry_date:input.date,spent_amount:c.spent??0,messages:c.messages??0,views:c.views??0,sales:c.sales??0,generated_revenue:c.revenue??0,notes:"Importação JSON: valores acumulados na data de referência. Campos ausentes foram mantidos como 0 no banco; não significam resultado zero confirmado."});
+  if(error||!campaign)return {error:"Criadas "+created+" e atualizadas "+updated+" campanhas antes de um erro: "+(error?.message||"Falha ao criar campanha")};
+  const {error:resultError}=await s.from("clt_campaign_result_entries").insert({user_id:user.id,campaign_id:campaign.id,entry_date:input.date,spent_amount:c.spent??0,messages:c.messages??0,views:c.views??0,sales:c.sales??0,generated_revenue:c.revenue??0,notes:"Importação JSON: campos ausentes foram registrados como zero, sem confirmação de resultado zero."});
   if(resultError)return {error:"Campanha "+c.name+" criada, mas resultados não foram salvos: "+resultError.message};
   created++;
  }
  refresh();revalidatePath("/trabalho/relatorios");
- return {success:created+" campanhas importadas com resultados."};
+ return {success:created+" campanhas criadas e "+updated+" campanhas atualizadas."};
 }
