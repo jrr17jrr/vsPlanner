@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { initializeFormerPartnerDebtAction } from "@/lib/supabase/financial-actions";
+import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
 import Link from "next/link";
 import {
   Plus,
@@ -132,6 +136,13 @@ export function FinanceiroPageClient({
   permissions: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  const router = useRouter();
+  const [debtBusy, setDebtBusy] = useState(false);
+  const [payDebt, setPayDebt] = useState(false);
+  const formerDebt = charges.find(c => c.kind === "saida" && c.description === "Dívida — Ex-sócio G");
+  const formerDebtPayments = formerDebt ? payments.filter(p => p.charge_id === formerDebt.id) : [];
+  const formerDebtPaid = formerDebtPayments.reduce((total,p)=>total+Number(p.amount),0);
+  const formerDebtRemaining = formerDebt ? Math.max(0,Number(formerDebt.amount)-formerDebtPaid) : 0;
   const [period, setPeriod] = useState<PeriodPreset>("6m");
   const [dialog, setDialog] = useState<DialogPreset>(null);
   const curMonth = currentMonthKeySaoPaulo();
@@ -256,6 +267,27 @@ export function FinanceiroPageClient({
               hint={`A receber ${formatCurrency(aReceber.overdue)} · a pagar ${formatCurrency(aPagar.overdue)}`}
             />
           </div>
+
+          {scope === "visionario" && (
+            <Card className="p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><p className="text-base font-semibold">Dívidas · Ex-sócio G</p><p className="text-xs text-muted-foreground">Controle separado das despesas mensais, com pagamentos parciais.</p></div>
+                {!formerDebt && permissions.canCreate && <Button disabled={debtBusy} onClick={async()=>{setDebtBusy(true);try{const result=await initializeFormerPartnerDebtAction();if(result.error)toast.error(result.error);else{toast.success(result.success);router.refresh();}}finally{setDebtBusy(false);}}}>Cadastrar dívida de R$ 1.000</Button>}
+                {formerDebt && formerDebtRemaining>0 && permissions.canEdit && <Button onClick={()=>setPayDebt(true)}>Registrar pagamento</Button>}
+              </div>
+              {formerDebt ? <>
+                <div className="mt-4 grid grid-cols-3 gap-3">
+                  <div><p className="text-xs text-muted-foreground">Total</p><p className="font-semibold">{formatCurrency(Number(formerDebt.amount))}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Pago</p><p className="font-semibold text-success">{formatCurrency(formerDebtPaid)}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Restante</p><p className="font-semibold">{formatCurrency(formerDebtRemaining)}</p></div>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-emerald-500" style={{width:`${Math.min(100,formerDebtPaid/Math.max(1,Number(formerDebt.amount))*100)}%`}} /></div>
+                <p className="mt-4 text-sm font-medium">Histórico de pagamentos</p>
+                {formerDebtPayments.length ? <div className="mt-2 divide-y">{[...formerDebtPayments].sort((a,b)=>b.payment_date.localeCompare(a.payment_date)).map(p=><div key={p.id} className="flex justify-between gap-2 py-2 text-sm"><span>{formatDate(p.payment_date)}{p.notes ? ` · ${p.notes}` : ""}</span><span className="font-medium">{formatCurrency(Number(p.amount))}</span></div>)}</div> : <p className="mt-2 text-xs text-muted-foreground">Nenhum pagamento registrado.</p>}
+                {payDebt && <MarkPaymentDialog scope="visionario" charge={formerDebt} remaining={formerDebtRemaining} accounts={accounts} onOpenChange={setPayDebt} onSaved={()=>{setPayDebt(false);router.refresh();}} />}
+              </> : <p className="mt-3 text-sm text-muted-foreground">Dívida ainda não cadastrada. Ao cadastrar, R$ 172 serão registrados como pagamento histórico, sem descontar novamente do caixa.</p>}
+            </Card>
+          )}
 
           {scope === "visionario" && (
             <Card className="p-4 sm:p-5">
