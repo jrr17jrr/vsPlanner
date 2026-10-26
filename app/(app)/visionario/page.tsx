@@ -134,6 +134,7 @@ export default async function VisionarioOverviewPage() {
   // ---------------------------------------------------------------- Financeiro
   let finance: DashboardData["finance"] = null;
   let partnerExpenses: DashboardData["partnerExpenses"] = null;
+  let formerPartnerDebt: DashboardData["formerPartnerDebt"] = null;
   let receivables: DashboardData["receivables"] = null;
   let payables: DashboardData["payables"] = null;
   const attention: AttentionItem[] = [];
@@ -144,6 +145,11 @@ export default async function VisionarioOverviewPage() {
     const incoming = listChargesForKind(charges, payments, "entrada", today);
     const outgoing = listChargesForKind(charges, payments, "saida", today);
 
+    const debt = charges.find(c => c.kind === "saida" && c.description === "Dívida — Ex-sócio G");
+    if (debt) {
+      const paid = payments.filter(p => p.charge_id === debt.id).reduce((sum,p)=>sum+Number(p.amount),0);
+      formerPartnerDebt = { total: Number(debt.amount), paid, remaining: Math.max(0,Number(debt.amount)-paid) };
+    }
     const partnerPaid = payments.filter((p) => p.payment_date.startsWith(monthKey) && charges.some((charge) => charge.id === p.charge_id && charge.kind === "saida"));
     partnerExpenses = {
       junior: partnerPaid.filter((p) => p.payer_label === "junior").reduce((sum, p) => sum + Number(p.amount), 0),
@@ -413,6 +419,7 @@ export default async function VisionarioOverviewPage() {
     today,
     finance,
     partnerExpenses,
+    formerPartnerDebt,
     activeClientsCount: canViewClientes ? activeClients.length : null,
     attention,
     attentionScopeVisible: canViewFinanceiro || canViewTrabalhos || canViewReunioes || canViewSites,
