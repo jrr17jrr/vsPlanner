@@ -1,5 +1,6 @@
 "use client";
 import {useState,useTransition} from "react";
+import {importCltCampaignJsonAction} from "@/lib/supabase/clt-actions";
 import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
@@ -12,6 +13,10 @@ const money=(v:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency
 const areas:{value:PlanningArea;label:string}[]=[{value:"clt",label:"Trabalho / CLT"},{value:"pessoal",label:"Tarefas pessoais"},{value:"rotina",label:"Rotina"},{value:"visionario",label:"Visionário Dev"}];
 export function PlanningClient({initial,companies,loadError}:{initial:Item[];companies:Company[];loadError?:string}){
  const [items,setItems]=useState(initial),[draft,setDraft]=useState<Draft[]>([]),[filter,setFilter]=useState("all"),[busy,start]=useTransition();
+ const [campaignDraft,setCampaignDraft]=useState<{name:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null;status?:string}[]>([]);
+ const [campaignCompany,setCampaignCompany]=useState("");
+ const [referenceDate,setReferenceDate]=useState(new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}));
+ const [fileSummary,setFileSummary]=useState("");
  const companyName=(id?:string|null)=>companies.find(c=>c.id===id)?.name||"";
  const readFile=async(file?:File)=>{
  if(!file)return;
@@ -19,6 +24,18 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(file.size>1024*1024)throw new Error("Arquivo acima de 1 MB.");
  const data=JSON.parse(await file.text());
  const raw=Array.isArray(data)?data:data.items;
+ if(!Array.isArray(raw)&&Array.isArray(data.campanhas)){
+  const companyLabel=String(data.empresa||data.company||data.nome_empresa||"").trim();
+  const matched=companies.find(c=>c.name.toLowerCase()===companyLabel.toLowerCase());
+  setCampaignCompany(matched?.id||"");
+  const metric=(v:unknown):number|null=>{if(v===null||v===undefined||v==="")return null;const n=typeof v==="number"?v:Number(String(v).replace(/\\./g,"").replace(",","."));if(!Number.isFinite(n)||n<0)throw Error("Valor inválido no arquivo.");return n;};
+  const parsed=data.campanhas.map((c:Record<string,unknown>)=>({name:String(c.nome||c.name||"").trim(),spent:metric(c.investimento??c.spent),messages:metric(c.conversas??c.messages),views:metric(c.visualizacoes??c.views),sales:metric(c.vendas??c.sales),revenue:metric(c.faturamento??c.revenue),status:String(c.status||"")}));
+  if(!parsed.length||parsed.length>50||parsed.some((c:{name:string})=>!c.name))throw Error("Lista de campanhas inválida (máximo 50).");
+  setCampaignDraft(parsed);setDraft([]);
+  setFileSummary("Relatório de campanhas: "+parsed.length+" campanhas; "+(companyLabel?"empresa informada: "+companyLabel:"empresa não informada")+". Investimento, conversas, visualizações, vendas e faturamento identificados. Revise a empresa e a data antes de importar.");
+  toast.success("Relatório reconhecido. Confira o resumo antes de salvar.");return;
+ }
+ if(!Array.isArray(raw))throw Error("Formato não reconhecido. Aceitamos planejamento com items ou relatório com campanhas. Nenhum dado foi salvo.");
  if(!Array.isArray(raw)||raw.length>150)throw new Error("Arquivo inválido: use um JSON com items (máximo 150).");
  const parsed:Draft[]=raw.map((x:Record<string,unknown>,i:number)=>{
  const area=String(x.area||"clt") as PlanningArea;
@@ -30,9 +47,10 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(!Number.isFinite(amount)||amount<0||!Number.isFinite(daily)||daily<0)throw new Error("Orçamento inválido no item "+(i+1));
  return {area,title:x.title.trim(),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),endsOn:String(x.endsOn||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,selected:true};
  });
- setDraft(parsed);toast.success("Arquivo lido. Confira a prévia antes de salvar.");
- }catch(e){toast.error(e instanceof Error?e.message:"Arquivo inválido.");setDraft([]);}
+ setCampaignDraft([]);setFileSummary("Planejamento: "+parsed.length+" itens identificados. Confira antes de importar.");setDraft(parsed);toast.success("Arquivo lido. Confira a prévia antes de salvar.");
+ }catch(e){toast.error(e instanceof Error?e.message:"Arquivo inválido.");setDraft([]);setCampaignDraft([]);setFileSummary("");}
  };
+ const saveCampaigns=()=>start(async()=>{if(!campaignCompany){toast.error("Escolha a empresa de destino.");return;}const r=await importCltCampaignJsonAction({companyId:campaignCompany,date:referenceDate,campaigns:campaignDraft});if(r.error){toast.error(r.error);return;}toast.success(r.success);setCampaignDraft([]);setFileSummary("");window.location.reload();});
  const save=()=>start(async()=>{
  const chosen=draft.filter(d=>d.selected).map(({selected,companyName,...rest})=>rest);
  if(!chosen.length){toast.error("Selecione pelo menos um item.");return;}
@@ -52,9 +70,11 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  <div><h1 className="text-2xl font-semibold">Planejamento</h1><p className="text-sm text-muted-foreground">Importe campanhas e tarefas diretamente nos módulos corretos. Revise antes de confirmar.</p></div>
  {loadError&&<p className="rounded-lg border border-amber-500 p-3 text-sm">A tabela de planejamento ainda precisa da migração SQL no Supabase: {loadError}</p>}
  <section className="space-y-3 rounded-xl border p-4">
- <h2 className="font-semibold">Importar planejamento JSON</h2>
- <p className="text-sm text-muted-foreground">Selecione um arquivo .json. Nada será salvo antes de você revisar e confirmar.</p>
+ <h2 className="font-semibold">Importar JSON · Planejamentos e resultados</h2>
+ <p className="text-sm text-muted-foreground">Aceita planejamento (items) ou resultados de campanhas (campanhas). O sistema identifica o tipo e mostra um resumo antes de salvar.</p>
  <Input type="file" accept=".json,application/json" onChange={e=>readFile(e.target.files?.[0])}/>
+ {fileSummary&&<p className="rounded-lg border border-cyan-500/40 bg-cyan-500/5 p-3 text-sm">{fileSummary}</p>}
+ {campaignDraft.length>0&&<div className="space-y-3 rounded-lg border p-3"><h3 className="font-semibold">Prévia do relatório de campanhas</h3><div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 text-sm">Empresa de destino<select className="w-full rounded border bg-background p-2" value={campaignCompany} onChange={e=>setCampaignCompany(e.target.value)}><option value="">Selecione a empresa</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="space-y-1 text-sm">Data de referência<input className="w-full rounded border bg-background p-2" type="date" value={referenceDate} onChange={e=>setReferenceDate(e.target.value)}/></label></div><p className="text-xs text-muted-foreground">Resultados acumulados entram no mês da data escolhida. O período real da campanha pode ser diferente. Campanhas com nomes já cadastrados serão bloqueadas para evitar duplicações.</p><div className="max-h-64 space-y-2 overflow-y-auto">{campaignDraft.map((c,i)=><div key={i} className="rounded border p-2 text-xs"><b>{c.name}</b><p>Investimento: {c.spent===null?"Não informado":money(c.spent)} · Visualizações: {c.views??"Não informado"} · Conversas: {c.messages??"Não informado"} · Vendas: {c.sales??"Não informado"} · Faturamento: {c.revenue===null?"Não informado":money(c.revenue)}</p></div>)}</div><div className="flex justify-end gap-2"><Button variant="outline" onClick={()=>{setCampaignDraft([]);setFileSummary("");}}>Cancelar</Button><Button disabled={busy||!campaignCompany} onClick={saveCampaigns}>Confirmar importação das campanhas</Button></div></div>}
  {draft.length>0&&<div className="space-y-3 rounded-lg border p-3">
  <div className="flex flex-wrap items-center justify-between gap-2"><b>Prévia: {draft.filter(x=>x.selected).length} de {draft.length} selecionados</b><Button variant="outline" size="sm" onClick={()=>setDraft(old=>old.map(x=>({...x,selected:!old.every(d=>d.selected)})))}>Selecionar/desmarcar todos</Button></div>
  {draft.map((d,i)=><div key={i} className="flex items-start gap-3 border-b py-2">
