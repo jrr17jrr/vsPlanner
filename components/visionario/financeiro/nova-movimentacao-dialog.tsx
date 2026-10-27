@@ -201,7 +201,7 @@ function MovementForm({
       recurrenceDay: usesDay ? Number(dueDay) : undefined,
       settled: isSettled,
       paymentMethod: isSettled ? paymentMethod : undefined,
-      accountId: isSettled && !recordOnly && payerLabel !== "guilherme" ? accountId : undefined,
+      accountId: isSettled && !recordOnly ? accountId : undefined,
       recordOnly: isSettled && (recordOnly),
       payerLabel: scope === "visionario" && kind === "saida" && payerLabel !== "empresa" ? payerLabel : undefined,
       paymentDate: isSettled ? paymentDate : undefined,
@@ -457,7 +457,7 @@ function MovementForm({
                     </SelectContent>
                   </Select>
                 </div>
-                {!recordOnly && payerLabel !== "guilherme" && <div className="flex flex-col gap-1.5">
+                {!recordOnly && <div className="flex flex-col gap-1.5">
                   <Label>Conta</Label>
                   <Select value={accountId} onValueChange={setAccountId} disabled={pending || activeAccounts.length === 0}>
                     <SelectTrigger aria-label="Conta"><SelectValue placeholder={activeAccounts.length === 0 ? "Cadastre uma conta" : "Escolha a conta"} /></SelectTrigger>
@@ -470,7 +470,7 @@ function MovementForm({
                   <Label>Data real do {isEntrada ? "recebimento" : "pagamento"}</Label>
                   <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} disabled={pending} />
                 </div>
-                {activeAccounts.length === 0 && !recordOnly && payerLabel !== "guilherme" && (
+                {activeAccounts.length === 0 && !recordOnly && (
                   <p className="text-xs text-warning sm:col-span-2">
                     Nenhuma conta ativa — cadastre em &quot;Contas e categorias&quot; ou lance como pendente.
                   </p>
