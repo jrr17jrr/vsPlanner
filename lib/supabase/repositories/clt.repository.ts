@@ -23,5 +23,23 @@ export async function getCltDashboardData(): Promise<CltDashboardData> {
     user?(supabase as unknown as SupabaseClient).from("clt_weekly_reviews").select("company_id,weekday,last_reviewed_on").eq("user_id",user.id):Promise.resolve({data:[],error:null}),
   ]);
   for (const result of [companies, responsibles, campaigns, tasks, occurrences, weeklyReviews]) if (result.error) throw result.error;
-  return { companies: companies.data ?? [], responsibles: responsibles.data ?? [], campaigns: campaigns.data ?? [], tasks: tasks.data ?? [], weeklyReviews: (weeklyReviews.data ?? []) as CltDashboardData["weeklyReviews"], occurrences: occurrences.data ?? [] };
+  // A campanha permanece ativa até o fim do dia de encerramento (horário de Brasília).
+  // Ao consultar o painel depois da data final, sincroniza o status no banco.
+  const today = new Date().toLocaleDateString("en-CA", {timeZone:"America/Sao_Paulo"});
+  const expired = (campaigns.data ?? []).filter(c => c.campaign_status === "ativa" && c.ends_on < today);
+  if (user && expired.length) {
+    const {error: closeError} = await supabase.from("clt_campaigns")
+      .update({campaign_status:"finalizada"})
+      .eq("user_id",user.id)
+      .eq("campaign_status","ativa")
+      .lt("ends_on",today)
+      .in("id",expired.map(c=>c.id));
+    if (closeError) console.error("Falha ao finalizar campanhas vencidas:",closeError.message);
+  }
+  const currentCampaigns = (campaigns.data ?? []).map(c =>
+    c.campaign_status === "ativa" && c.ends_on < today
+      ? {...c,campaign_status:"finalizada" as const}
+      : c
+  );
+  return { companies: companies.data ?? [], responsibles: responsibles.data ?? [], campaigns: currentCampaigns, tasks: tasks.data ?? [], weeklyReviews: (weeklyReviews.data ?? []) as CltDashboardData["weeklyReviews"], occurrences: occurrences.data ?? [] };
 }
