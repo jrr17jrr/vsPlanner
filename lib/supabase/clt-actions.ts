@@ -129,3 +129,20 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
  refresh();revalidatePath("/trabalho/relatorios");
  return {success:created+" campanhas criadas e "+updated+" campanhas atualizadas."};
 }
+
+export async function saveCltCampaignComparisonAction(input:{companyId:string;oldIds:string[];newIds:string[]}):Promise<State>{
+ const {s,user}=await ctx();
+ const oldIds=[...new Set(input.oldIds)],newIds=[...new Set(input.newIds)];
+ if(!input.companyId||!oldIds.length||!newIds.length||oldIds.some(id=>newIds.includes(id)))return {error:"Selecione campanhas antigas e novas diferentes."};
+ const {data:campaigns,error:readError}=await s.from("clt_campaigns").select("id,company_id,objective").eq("user_id",user.id).eq("company_id",input.companyId).in("id",[...oldIds,...newIds]);
+ if(readError)return {error:readError.message};
+ if(!campaigns||campaigns.length!==oldIds.length+newIds.length)return {error:"Campanhas inválidas ou de outra empresa."};
+ if(campaigns.some(c=>!String(c.objective||"").toLowerCase().includes("mensag")))return {error:"Compare apenas campanhas com objetivo de mensagens."};
+ const {error}=await s.from("clt_campaign_comparisons").upsert({user_id:user.id,company_id:input.companyId,old_campaign_ids:oldIds,new_campaign_ids:newIds,updated_at:new Date().toISOString()},{onConflict:"user_id,company_id"});
+ if(error)return {error:error.message};refresh();revalidatePath("/trabalho/relatorios");return {success:"Comparativo salvo."};
+}
+export async function deleteCltCampaignComparisonAction(companyId:string):Promise<State>{
+ const {s,user}=await ctx();
+ const {error}=await s.from("clt_campaign_comparisons").delete().eq("user_id",user.id).eq("company_id",companyId);
+ if(error)return {error:error.message};refresh();revalidatePath("/trabalho/relatorios");return {success:"Comparativo removido."};
+}
