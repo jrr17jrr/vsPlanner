@@ -55,7 +55,7 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  const weekly=item.weekdays.length>0;
  const {data:createdTask,error}=await s.from("clt_tasks").insert({user_id:user.id,company_id:companyId,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:"normal",notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null}).select("id").single();
  if(error||!createdTask)return {error:(error?.message||"Falha ao criar tarefa")+" ("+created+" itens já criados)"};
- if(item.subtasks.length){const {error:subError}=await s.from("task_subtasks").insert(item.subtasks.map((title,position)=>({parent_type:"clt",parent_id:createdTask.id,user_id:user.id,title,position})));if(subError)return {error:"Tarefa criada, mas falhou ao criar subtarefas: "+subError.message};}
+ if(item.subtasks.length){const {error:subError}=await (s as unknown as SupabaseClient).from("task_subtasks").insert(item.subtasks.map((title,position)=>({parent_type:"clt",parent_id:createdTask.id,user_id:user.id,title,position})));if(subError)return {error:"Tarefa criada, mas falhou ao criar subtarefas: "+subError.message};}
  }
  }else if(item.area==="pessoal"){
  const {data:existing}=await s.from("tasks").select("id").eq("user_id",user.id).eq("space_id",personalSpace!).eq("title",item.title).limit(1);
