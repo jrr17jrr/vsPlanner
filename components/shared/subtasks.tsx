@@ -22,6 +22,21 @@ export function Subtasks({ parentType, parentId, initialOpen = false }: { parent
   useEffect(() => { if (open && !loaded) void reload(); }, [open, loaded, parentId]);
   const done = items.filter(x => x.is_done).length;
   const pct = items.length ? Math.round(done / items.length * 100) : 0;
+  function toggleDone(item: Subtask, checked: boolean) {
+    setItems(current => current.map(x => x.id === item.id ? {...x, is_done: checked} : x));
+    start(async () => {
+      try {
+        const result = await setSubtaskDone(parentType, parentId, item.id, checked);
+        if (result.error) {
+          setItems(current => current.map(x => x.id === item.id ? {...x, is_done: item.is_done} : x));
+          toast.error(result.error);
+        }
+      } catch (error) {
+        setItems(current => current.map(x => x.id === item.id ? {...x, is_done: item.is_done} : x));
+        toast.error(error instanceof Error ? error.message : "Erro ao salvar subtarefa.");
+      }
+    });
+  }
   function run(action: () => Promise<{ error?: string }>) {
     start(async () => {
       try { const r = await action(); if (r.error) toast.error(r.error); else await reload(); }
@@ -36,7 +51,7 @@ export function Subtasks({ parentType, parentId, initialOpen = false }: { parent
     {loaded && items.length > 0 && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary"><div className="h-full bg-primary transition-all" style={{width: `${pct}%`}}/></div>}
     {open && <div className="mt-3 space-y-2">
       {items.map((item, i) => <div key={item.id} className="flex items-center gap-2 rounded-md border p-2">
-        <input aria-label={`Concluir ${item.title}`} type="checkbox" checked={item.is_done} disabled={pending} onChange={e => run(() => setSubtaskDone(parentType, parentId, item.id, e.target.checked))}/>
+        <input aria-label={`Concluir ${item.title}`} type="checkbox" checked={item.is_done} onChange={e => toggleDone(item, e.target.checked)}/>
         <div className="min-w-0 flex-1"><span className={item.is_done ? "line-through text-muted-foreground" : ""}>{item.title}</span>{item.due_date && <div className="text-xs text-muted-foreground">Prazo: {item.due_date.split("-").reverse().join("/")}</div>}</div>
         <button disabled={pending || i === 0} aria-label="Subir" onClick={() => run(() => moveSubtask(parentType,parentId,item.id,-1))}><ArrowUp className="h-3.5 w-3.5"/></button>
         <button disabled={pending || i === items.length-1} aria-label="Descer" onClick={() => run(() => moveSubtask(parentType,parentId,item.id,1))}><ArrowDown className="h-3.5 w-3.5"/></button>
