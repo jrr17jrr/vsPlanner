@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "VSPlanner",
   description: "Central para organizar vida pessoal e negócios",
+  applicationName: "VS Planner",
+  appleWebApp: { capable: true, title: "VS Planner", statusBarStyle: "black-translucent" },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
