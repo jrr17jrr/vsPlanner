@@ -45,7 +45,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(area==="clt"&&name&&!company)throw new Error("Empresa não encontrada: "+name+". Cadastre-a antes de importar.");
  const amount=Number(x.plannedAmount||0),daily=Number(x.dailyBudget||0);
  if(!Number.isFinite(amount)||amount<0||!Number.isFinite(daily)||daily<0)throw new Error("Orçamento inválido no item "+(i+1));
- return {area,title:x.title.trim(),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),endsOn:String(x.endsOn||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,selected:true};
+ return {area,title:x.title.trim(),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),endsOn:String(x.endsOn||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,subtasks:Array.isArray(x.subtasks)?x.subtasks.map(String):[],selected:true};
  });
  setCampaignDraft([]);setFileSummary("Planejamento: "+parsed.length+" itens identificados. Confira antes de importar.");setDraft(parsed);toast.success("Arquivo lido. Confira a prévia antes de salvar.");
  }catch(e){toast.error(e instanceof Error?e.message:"Arquivo inválido.");setDraft([]);setCampaignDraft([]);setFileSummary("");}
@@ -79,7 +79,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  <div className="flex flex-wrap items-center justify-between gap-2"><b>Prévia: {draft.filter(x=>x.selected).length} de {draft.length} selecionados</b><Button variant="outline" size="sm" onClick={()=>setDraft(old=>old.map(x=>({...x,selected:!old.every(d=>d.selected)})))}>Selecionar/desmarcar todos</Button></div>
  {draft.map((d,i)=><div key={i} className="flex items-start gap-3 border-b py-2">
  <Checkbox checked={d.selected} onCheckedChange={v=>setDraft(old=>old.map((x,j)=>i===j?{...x,selected:v===true}:x))}/>
- <div className="min-w-0 flex-1"><p className="text-sm font-medium">{d.title}</p><p className="text-xs text-muted-foreground">{areas.find(a=>a.value===d.area)?.label} {d.companyId?"· "+companyName(d.companyId):""} {d.plannedDate?"· "+d.plannedDate:""} {d.plannedAmount?"· Previsto "+money(d.plannedAmount):""}</p>{d.notes&&<p className="text-xs text-muted-foreground">{d.notes}</p>}</div>
+ <div className="min-w-0 flex-1"><p className="text-sm font-medium">{d.title}</p><p className="text-xs text-muted-foreground">{areas.find(a=>a.value===d.area)?.label} {d.companyId?"· "+companyName(d.companyId):""} {d.plannedDate?"· "+d.plannedDate:""} {d.plannedAmount?"· Previsto "+money(d.plannedAmount):""}</p>{d.notes&&<p className="text-xs text-muted-foreground">{d.notes}</p>}{!!d.subtasks?.length&&<p className="text-xs text-muted-foreground">{d.subtasks.length} subtarefas serão criadas</p>}</div>
  </div>)}
  <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm">Total previsto selecionado: <b>{money(draft.filter(x=>x.selected).reduce((s,x)=>s+(x.plannedAmount||0),0))}</b></span><div className="flex gap-2"><Button variant="outline" onClick={()=>setDraft([])}>Cancelar</Button><Button disabled={busy||!draft.some(x=>x.selected)} onClick={save}>Confirmar importação</Button></div></div>
  </div>}
