@@ -29,10 +29,10 @@ export function NotificationsBell() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-4.5 w-4.5" />
+        <Button variant="ghost" size="icon" className="relative h-12 w-12 rounded-xl sm:h-9 sm:w-9" aria-label="Notificações">
+          <Bell className="h-6 w-6 sm:h-5 sm:w-5" />
           {urgentCount > 0 && (
-            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
+            <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 sm:right-0 sm:top-0 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
               {urgentCount}
             </span>
           )}
