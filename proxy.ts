@@ -13,8 +13,15 @@ import type { Database } from "@/types/database.types";
  */
 
 const PUBLIC_ROUTES = new Set(["/login"]);
+const PUBLIC_PWA_ROUTES = new Set(["/icon", "/apple-icon", "/manifest.webmanifest", "/favicon.ico"]);
 
 export async function proxy(request: NextRequest) {
+  // iOS/Safari busca os ícones sem cookies de autenticação.
+  // Nunca redirecionar assets PWA para /login.
+  if (PUBLIC_PWA_ROUTES.has(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
   const { url, anonKey } = getSupabaseEnv();
 
   let supabaseResponse = NextResponse.next({ request });
