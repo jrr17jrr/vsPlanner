@@ -20,13 +20,13 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
       href={item.href}
       onClick={onNavigate}
       className={cn(
-        "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
+        "flex min-h-12 items-center gap-3 rounded-lg px-3 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-2.5 lg:rounded-md lg:px-2.5 lg:py-2 lg:text-sm",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground"
           : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
       )}
     >
-      <Icon className="h-4 w-4 shrink-0" />
+      <Icon className="h-5 w-5 shrink-0 lg:h-4 lg:w-4" />
       <span className="truncate">{item.label}</span>
     </Link>
   );
