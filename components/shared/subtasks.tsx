@@ -50,10 +50,10 @@ export function Subtasks({ parentType, parentId, initialOpen = false }: { parent
     </button>
     {loaded && items.length > 0 && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary"><div className="h-full bg-primary transition-all" style={{width: `${pct}%`}}/></div>}
     {open && <div className="mt-3 space-y-2">
-      {items.map((item, i) => <div key={item.id} className="flex items-center gap-2 rounded-md border p-2">
+      {items.map((item, i) => <div key={item.id} className="flex min-h-12 items-center gap-2 rounded-md border p-2.5">
         <input aria-label={`Concluir ${item.title}`} type="checkbox" checked={item.is_done} onChange={e => toggleDone(item, e.target.checked)}/>
         <div className="min-w-0 flex-1"><span className={item.is_done ? "line-through text-muted-foreground" : ""}>{item.title}</span>{item.due_date && <div className="text-xs text-muted-foreground">Prazo: {item.due_date.split("-").reverse().join("/")}</div>}</div>
-        <button disabled={pending || i === 0} aria-label="Subir" onClick={() => run(() => moveSubtask(parentType,parentId,item.id,-1))}><ArrowUp className="h-3.5 w-3.5"/></button>
+        <button disabled={pending || i === 0} aria-label="Subir" onClick={() => run(() => moveSubtask(parentType,parentId,item.id,-1))}><ArrowUp className="h-4 w-4"/></button>
         <button disabled={pending || i === items.length-1} aria-label="Descer" onClick={() => run(() => moveSubtask(parentType,parentId,item.id,1))}><ArrowDown className="h-3.5 w-3.5"/></button>
         <button disabled={pending} aria-label="Editar" onClick={() => {setEditing(item.id);setTitle(item.title);setDueDate(item.due_date ?? "");}}><Pencil className="h-3.5 w-3.5"/></button>
         <button disabled={pending} aria-label="Excluir" onClick={() => {if(confirm("Excluir esta subtarefa?"))run(() => deleteSubtask(parentType,parentId,item.id));}}><Trash2 className="h-3.5 w-3.5"/></button>
