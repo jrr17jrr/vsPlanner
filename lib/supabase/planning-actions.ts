@@ -3,7 +3,7 @@ import type {SupabaseClient} from "@supabase/supabase-js";
 import {revalidatePath} from "next/cache";
 import {createSupabaseServerClient} from "@/lib/supabase/server";
 export type PlanningArea="clt"|"pessoal"|"rotina"|"visionario";
-export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;endsOn?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number};
+export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;endsOn?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number;subtasks?:string[]};
 async function context(){const s=await createSupabaseServerClient();const {data:{user}}=await s.auth.getUser();if(!user)throw new Error("Faça login.");return{s,user};}
 function refresh(){revalidatePath("/planejamento");revalidatePath("/trabalho/campanhas");revalidatePath("/trabalho");}
 export async function importPlanningItemsAction(items:PlanningInput[]){
@@ -27,7 +27,8 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  if(!Number.isFinite(daily)||daily<0||!Number.isFinite(planned)||planned<0)return {error:"Orçamento inválido."};
  const weekdays=item.weekdays||[];
  if(!Array.isArray(weekdays)||weekdays.some(d=>!Number.isInteger(d)||d<0||d>6))return {error:"Dias da semana inválidos."};
- prepared.push({...item,title:item.title.trim(),dailyBudget:daily,plannedAmount:planned,weekdays});
+ if(item.subtasks!==undefined&&(!Array.isArray(item.subtasks)||item.subtasks.length>50||item.subtasks.some(t=>typeof t!=="string"||!t.trim()||t.length>300)))return {error:"Subtarefas inválidas (máximo 50, até 300 caracteres cada)."};
+ prepared.push({...item,title:item.title.trim(),subtasks:(item.subtasks||[]).map(t=>t.trim()),dailyBudget:daily,plannedAmount:planned,weekdays});
  }
  if(prepared.some(x=>x.area==="visionario"))return {error:"Importação da Visionário Dev ainda não está integrada ao módulo de Trabalhos. Nenhum item foi importado."};
  const {data:spaces,error:se}=await s.from("spaces").select("id,type").eq("owner_id",user.id).eq("type","personal").limit(1);
@@ -52,8 +53,9 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  if(checkError)return {error:checkError.message+" ("+created+" itens já criados)"};
  if(existing?.length){skipped++;continue;}
  const weekly=item.weekdays.length>0;
- const {error}=await s.from("clt_tasks").insert({user_id:user.id,company_id:companyId,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:"normal",notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null});
- if(error)return {error:error.message+" ("+created+" itens já criados)"};
+ const {data:createdTask,error}=await s.from("clt_tasks").insert({user_id:user.id,company_id:companyId,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:"normal",notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null}).select("id").single();
+ if(error||!createdTask)return {error:(error?.message||"Falha ao criar tarefa")+" ("+created+" itens já criados)"};
+ if(item.subtasks.length){const {error:subError}=await s.from("task_subtasks").insert(item.subtasks.map((title,position)=>({parent_type:"clt",parent_id:createdTask.id,user_id:user.id,title,position})));if(subError)return {error:"Tarefa criada, mas falhou ao criar subtarefas: "+subError.message};}
  }
  }else if(item.area==="pessoal"){
  const {data:existing}=await s.from("tasks").select("id").eq("user_id",user.id).eq("space_id",personalSpace!).eq("title",item.title).limit(1);
