@@ -111,8 +111,8 @@ export function GlobalSearch() {
         <Search className="h-3.5 w-3.5" />
         Buscar…
       </Button>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} className="sm:hidden">
-        <Search className="h-4.5 w-4.5" />
+      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} className="h-12 w-12 rounded-xl sm:hidden" aria-label="Buscar">
+        <Search className="h-6 w-6" />
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
