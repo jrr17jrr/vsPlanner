@@ -36,7 +36,7 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur sm:px-4">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-background/90 px-3 backdrop-blur sm:h-14 sm:px-4">
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-72 p-0 lg:hidden">
           <SheetHeader className="border-b border-sidebar-border px-4 py-4">
@@ -57,10 +57,11 @@ export function Header() {
       <Button
         variant="ghost"
         size="icon"
-        className="lg:hidden"
+        className="h-12 w-12 rounded-xl lg:hidden"
+        aria-label="Abrir menu de navegação"
         onClick={() => setMobileOpen(true)}
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-7 w-7" />
       </Button>
 
       <div className="flex-1" />
@@ -70,8 +71,8 @@ export function Header() {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="flex items-center gap-2 rounded-full p-0.5 transition-colors hover:bg-secondary">
-            <Avatar className="h-8 w-8">
+          <button className="flex h-12 w-12 items-center justify-center rounded-xl transition-colors hover:bg-secondary sm:h-9 sm:w-9 sm:rounded-full" aria-label="Abrir perfil">
+            <Avatar className="h-10 w-10 sm:h-8 sm:w-8">
               <AvatarFallback className="bg-primary/15 text-primary">
                 {initials(profile.name)}
               </AvatarFallback>
