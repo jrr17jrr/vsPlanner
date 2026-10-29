@@ -18,11 +18,13 @@ export async function POST() {
     let sent = 0;
     for (const row of data) {
       try {
-        await webpush.sendNotification(row.subscription as webpush.PushSubscription, JSON.stringify({
-          title: "VS Planner • Teste", body: "Notificação de teste recebida com sucesso!", url: "/hoje",
-          tag: "vs-test-" + Date.now()
-        }));
-        sent++;
+        for (let i = 1; i <= 5; i++) {
+          await webpush.sendNotification(row.subscription as webpush.PushSubscription, JSON.stringify({
+            title: "VS Planner • Teste " + i + "/5", body: "Notificação de teste número " + i + ".", url: "/hoje",
+            tag: "vs-test-" + i + "-" + Date.now()
+          }));
+          sent++;
+        }
       } catch (e) {
         if (typeof e === "object" && e && "statusCode" in e && [404,410].includes(Number(e.statusCode)))
           await admin.from("push_subscriptions").delete().eq("endpoint", row.endpoint);
