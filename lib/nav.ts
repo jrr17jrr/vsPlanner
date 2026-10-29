@@ -42,7 +42,7 @@ export interface NavItem {
 export interface NavGroup {
   label: string;
   items: NavItem[];
-  requires?: "visionario" | "tiktok";
+  requires?: "visionario" | "tiktok" | "clt";
 }
 
 export const NAV_HOME: NavItem = { label: "Início", href: "/", icon: Home };
@@ -82,6 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "Trabalho / CLT",
+    requires: "clt",
     items: [
       { label: "Visão Geral", href: "/trabalho", icon: LayoutDashboard },
       { label: "Empresas", href: "/trabalho/empresas", icon: Building2 },
