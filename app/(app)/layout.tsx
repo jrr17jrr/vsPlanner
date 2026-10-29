@@ -50,6 +50,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
 
   const canAccessVisionario = !!visionario;
   const canAccessTiktok = !!tiktok;
+  const canAccessClt = profile.system_role === "super_admin" || profile.clt_access !== false;
 
   const visionarioModulePermissions: Partial<Record<ModulePermissionModule, boolean>> = {};
   if (visionario) {
@@ -73,6 +74,7 @@ export default async function AppGroupLayout({ children }: { children: React.Rea
       mySpaces={mySpaces}
       canAccessVisionario={canAccessVisionario}
       canAccessTiktok={canAccessTiktok}
+      canAccessClt={canAccessClt}
       visionarioModulePermissions={visionarioModulePermissions}
       tiktokModulePermissions={tiktokModulePermissions}
       notifications={notifications}
