@@ -134,3 +134,12 @@ export async function changeSpaceMemberRoleAction(
   revalidatePath(`/dev/usuarios/${userId}`);
   return { success: "Role no espaço atualizada." };
 }
+
+/** Bound from a Server Component: avoids passing an inline function to a Client Component. */
+export async function grantSpaceAccessForUserAction(
+  userId: string,
+  spaceId: string,
+  role: SpaceRole
+): Promise<AdminActionState> {
+  return grantSpaceAccessAction(spaceId, userId, role);
+}
