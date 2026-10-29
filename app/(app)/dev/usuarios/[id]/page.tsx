@@ -29,7 +29,7 @@ export default async function AdminUserDetailPage({
 
   if (!user) notFound();
 
-  const spaceNameById = new Map(allSpaces.map((s) => [s.id, s.name]));
+  const spaceNameById = Object.fromEntries(allSpaces.map((s) => [s.id, s.name]));
   const memberSpaceIds = new Set(memberships.map((m) => m.space_id));
   const availableSpaces = allSpaces.filter((s) => !memberSpaceIds.has(s.id));
   const isSelf = user.id === actor.id;
