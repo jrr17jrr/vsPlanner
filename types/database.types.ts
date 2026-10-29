@@ -26,6 +26,7 @@ export type Profile = {
   avatar_url: string | null;
   phone: string | null;
   system_role: SystemRole;
+  clt_access: boolean;
   status: ProfileStatus;
   created_at: string;
   updated_at: string;
