@@ -174,4 +174,7 @@ label:has(> input[type="checkbox"]:checked) {
   background-color: rgba(0, 225, 255, .07);
 }
 label:has(> input[type="checkbox"]):hover { border-color: rgba(0,225,255,.65); }
-\n/* Prevent iOS standalone PWA from retaining a horizontally scrolled viewport. */\nhtml, body { width: 100%; max-width: 100%; overflow-x: clip; }\nbody { min-width: 0; }\n
+
+/* Prevent iOS standalone PWA from retaining a horizontally scrolled viewport. */
+html, body { width: 100%; max-width: 100%; overflow-x: clip; }
+body { min-width: 0; }
