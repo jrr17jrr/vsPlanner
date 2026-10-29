@@ -8,6 +8,7 @@ import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { UserAccountPanel } from "@/components/dev/user-account-panel";
+import { CltAccessControl } from "@/components/dev/clt-access-control";
 import { UserAccessList } from "@/components/dev/user-access-list";
 import { GrantAccessForm } from "@/components/dev/grant-access-form";
 import { VisionarioPermissionsPanel } from "@/components/dev/visionario-permissions-panel";
@@ -52,6 +53,7 @@ export default async function AdminUserDetailPage({
       <UserAccountPanel user={user} isSelf={isSelf} />
 
       <UserAccessList userId={user.id} memberships={memberships} spaceNameById={spaceNameById} />
+      <Card className="p-4"><p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Permissões de áreas</p><CltAccessControl userId={user.id} enabled={user.clt_access !== false} isSelf={isSelf} /></Card>
 
       <Card className="p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
