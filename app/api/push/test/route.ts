@@ -12,11 +12,12 @@ export async function POST() {
   try {
     webpush.setVapidDetails("mailto:admin@visionariodev.com.br", pub, priv);
     const admin = getSupabaseAdminClient();
-    const { data, error } = await admin.from("push_subscriptions").select("subscription,endpoint").eq("user_id", user.id);
+    const { data, error } = await admin.schema("public").from("push_subscriptions" as never).select("subscription,endpoint").eq("user_id", user.id);
     if (error) throw error;
-    if (!data?.length) return NextResponse.json({ error: "Ative as notificações neste aparelho primeiro." }, { status: 400 });
+    const subscriptions = (data ?? []) as unknown as Array<{ subscription: webpush.PushSubscription; endpoint: string }>;
+    if (!subscriptions.length) return NextResponse.json({ error: "Ative as notificações neste aparelho primeiro." }, { status: 400 });
     let sent = 0;
-    for (const row of data) {
+    for (const row of subscriptions) {
       try {
         for (let i = 1; i <= 5; i++) {
           await webpush.sendNotification(row.subscription as webpush.PushSubscription, JSON.stringify({
@@ -27,7 +28,7 @@ export async function POST() {
         }
       } catch (e) {
         if (typeof e === "object" && e && "statusCode" in e && [404,410].includes(Number(e.statusCode)))
-          await admin.from("push_subscriptions").delete().eq("endpoint", row.endpoint);
+          await admin.schema("public").from("push_subscriptions" as never).delete().eq("endpoint", row.endpoint);
       }
     }
     return NextResponse.json({ ok: sent > 0, sent });
