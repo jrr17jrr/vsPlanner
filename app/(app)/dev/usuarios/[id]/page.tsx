@@ -3,7 +3,7 @@ import { requireSuperAdmin } from "@/lib/supabase/dal";
 import { adminGetUser } from "@/lib/supabase/repositories/admin.repository";
 import { listMySpaces, listSpaceMembersForUser } from "@/lib/supabase/repositories/spaces.repository";
 import { listModulePermissionOverrides } from "@/lib/supabase/repositories/module-permissions.repository";
-import { grantSpaceAccessAction } from "@/lib/supabase/admin-spaces-actions";
+import { grantSpaceAccessForUserAction } from "@/lib/supabase/admin-spaces-actions";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
@@ -61,7 +61,7 @@ export default async function AdminUserDetailPage({
           <GrantAccessForm
             options={availableSpaces.map((s) => ({ value: s.id, label: s.name }))}
             optionLabel="Espaço"
-            onSubmit={(spaceId, role) => grantSpaceAccessAction(spaceId, user.id, role)}
+            onSubmit={grantSpaceAccessForUserAction.bind(null, user.id)}
           />
         ) : (
           <p className="text-sm text-muted-foreground">
