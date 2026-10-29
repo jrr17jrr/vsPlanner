@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireSuperAdmin } from "@/lib/supabase/dal";
-import { adminGetUser } from "@/lib/supabase/repositories/admin.repository";
+import { adminGetUserCltAccess, adminGetUser } from "@/lib/supabase/repositories/admin.repository";
 import { listMySpaces, listSpaceMembersForUser } from "@/lib/supabase/repositories/spaces.repository";
 import { listModulePermissionOverrides } from "@/lib/supabase/repositories/module-permissions.repository";
 import { grantSpaceAccessForUserAction } from "@/lib/supabase/admin-spaces-actions";
@@ -22,10 +22,11 @@ export default async function AdminUserDetailPage({
   const { id } = await params;
   const { profile: actor } = await requireSuperAdmin();
 
-  const [user, allSpaces, memberships] = await Promise.all([
+  const [user, allSpaces, memberships, cltAccess] = await Promise.all([
     adminGetUser(id),
     listMySpaces(),
     listSpaceMembersForUser(id),
+    adminGetUserCltAccess(id),
   ]);
 
   if (!user) notFound();
@@ -53,7 +54,7 @@ export default async function AdminUserDetailPage({
       <UserAccountPanel user={user} isSelf={isSelf} />
 
       <UserAccessList userId={user.id} memberships={memberships} spaceNameById={spaceNameById} />
-      <Card className="p-4"><p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Permissões de áreas</p><CltAccessControl userId={user.id} enabled={user.clt_access !== false} isSelf={isSelf} /></Card>
+      <Card className="p-4"><p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Permissões de áreas</p><CltAccessControl userId={user.id} enabled={cltAccess} isSelf={isSelf} /></Card>
 
       <Card className="p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
