@@ -20,13 +20,13 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
       href={item.href}
       onClick={onNavigate}
       className={cn(
-        "flex min-h-12 items-center gap-3 rounded-lg px-3 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-2.5 lg:rounded-md lg:px-2.5 lg:py-2 lg:text-sm",
+        "flex min-h-12 items-center gap-3.5 rounded-xl px-3.5 py-3 text-[15px] font-medium transition-colors lg:min-h-0 lg:gap-2.5 lg:rounded-md lg:px-2.5 lg:py-2 lg:text-sm",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground"
           : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
       )}
     >
-      <Icon className="h-5 w-5 shrink-0 lg:h-4 lg:w-4" />
+      <Icon className="h-[22px] w-[22px] shrink-0 stroke-[2.1] lg:h-4 lg:w-4" />
       <span className="truncate">{item.label}</span>
     </Link>
   );
@@ -41,7 +41,7 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   const isSuperAdmin = profile.system_role === "super_admin";
 
   return (
-    <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-2 no-scrollbar">
+    <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-x-hidden overflow-y-auto px-3 py-3 pb-8 no-scrollbar">
       <NavLink item={NAV_HOME} onNavigate={onNavigate} />
 
       {NAV_GROUPS.map((group) => {
