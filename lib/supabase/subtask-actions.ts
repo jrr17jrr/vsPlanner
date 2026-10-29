@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type SubtaskParent = "pessoal" | "clt" | "visionario";
-export type Subtask = { id: string; parent_type: SubtaskParent; parent_id: string; user_id: string; title: string; due_date: string | null; is_done: boolean; position: number };
+export type Subtask = { id: string; parent_type: SubtaskParent; parent_id: string; user_id: string; title: string; due_date: string | null; is_done: boolean; position: number; parent_subtask_id: string | null };
 
 async function context(parentType: SubtaskParent, parentId: string) {
   const db = (await createSupabaseServerClient()) as unknown as SupabaseClient;
@@ -29,17 +29,21 @@ export async function listSubtasks(parentType: SubtaskParent, parentId: string):
   return (data ?? []) as Subtask[];
 }
 
-export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: { id?: string; title: string; dueDate?: string | null }) {
+export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: { id?: string; title: string; dueDate?: string | null; parentSubtaskId?: string | null }) {
   const { db, user } = await context(parentType, parentId);
   const title = input.title.trim();
   if (!title || title.length > 300) return { error: "Informe um título de até 300 caracteres." };
   if (input.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) return { error: "Data inválida." };
+  if (input.parentSubtaskId) {
+    const { data: parent } = await db.from("task_subtasks").select("id,parent_subtask_id").eq("id",input.parentSubtaskId).eq("parent_type",parentType).eq("parent_id",parentId).eq("user_id",user.id).maybeSingle();
+    if (!parent || parent.parent_subtask_id) return { error: "Só é permitido um nível de checklist dentro das etapas." };
+  }
   if (input.id) {
     const { error } = await db.from("task_subtasks").update({ title, due_date: input.dueDate || null, updated_at: new Date().toISOString() }).eq("id", input.id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
     if (error) return { error: error.message };
   } else {
     const { data } = await db.from("task_subtasks").select("position").eq("parent_type", parentType).eq("parent_id", parentId).order("position", { ascending: false }).limit(1);
-    const { error } = await db.from("task_subtasks").insert({ parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, position: (data?.[0]?.position ?? -1) + 1 });
+    const { error } = await db.from("task_subtasks").insert({ parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, parent_subtask_id: input.parentSubtaskId || null, position: (data?.[0]?.position ?? -1) + 1 });
     if (error) return { error: error.message };
   }
   refresh();
@@ -48,6 +52,10 @@ export async function saveSubtask(parentType: SubtaskParent, parentId: string, i
 
 export async function setSubtaskDone(parentType: SubtaskParent, parentId: string, id: string, done: boolean) {
   const { db, user } = await context(parentType, parentId);
+  if (done) {
+    const { data: children } = await db.from("task_subtasks").select("id,is_done").eq("parent_subtask_id",id).eq("parent_type",parentType).eq("parent_id",parentId);
+    if (children?.some(x=>!x.is_done)) return { error: "Conclua os itens do checklist antes de finalizar a etapa." };
+  }
   const { error } = await db.from("task_subtasks").update({ is_done: done, updated_at: new Date().toISOString() }).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
   if (error) return { error: error.message };
   refresh();
