@@ -18,7 +18,7 @@ export function UserAccessList({
 }: {
   userId: string;
   memberships: SpaceMember[];
-  spaceNameById: Map<string, string>;
+  spaceNameById: Record<string, string>;
 }) {
   return (
     <Card className="p-4">
@@ -32,7 +32,7 @@ export function UserAccessList({
           </p>
         )}
         {memberships.map((m) => {
-          const spaceName = spaceNameById.get(m.space_id) ?? m.space_id;
+          const spaceName = spaceNameById[m.space_id] ?? m.space_id;
           return (
             <div
               key={m.id}
