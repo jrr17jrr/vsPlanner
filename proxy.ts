@@ -13,7 +13,7 @@ import type { Database } from "@/types/database.types";
  */
 
 const PUBLIC_ROUTES = new Set(["/login"]);
-const PUBLIC_PWA_ROUTES = new Set(["/icon", "/apple-icon", "/manifest.webmanifest", "/favicon.ico"]);
+const PUBLIC_PWA_ROUTES = new Set(["/icon", "/apple-icon", "/manifest.webmanifest", "/favicon.ico", "/sw.js"]);
 
 export async function proxy(request: NextRequest) {
   // iOS/Safari busca os ícones sem cookies de autenticação.
