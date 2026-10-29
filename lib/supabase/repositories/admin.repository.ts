@@ -21,3 +21,10 @@ export async function adminGetUser(id: string): Promise<AdminUserRow | null> {
   const users = await adminListUsers();
   return users.find((u) => u.id === id) ?? null;
 }
+
+export async function adminGetUserCltAccess(id: string): Promise<boolean> {
+  const supabase = await createSupabaseServerClient();
+  const {data,error}=await supabase.from("profiles").select("clt_access").eq("id",id).single();
+  if(error) throw error;
+  return data.clt_access !== false;
+}
