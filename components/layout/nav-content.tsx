@@ -36,7 +36,7 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   // Tudo real (ver app/(app)/layout.tsx): system_role, acesso a
   // Visionário Dev/TikTok e a permissão de CADA módulo vêm da sessão
   // Supabase de quem está navegando, nunca de uma persona mock fixa.
-  const { profile, canAccessVisionario, canAccessTiktok, visionarioModulePermissions, tiktokModulePermissions } =
+  const { profile, canAccessVisionario, canAccessTiktok, canAccessClt, visionarioModulePermissions, tiktokModulePermissions } =
     useAuthProfile();
   const isSuperAdmin = profile.system_role === "super_admin";
 
@@ -47,6 +47,7 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       {NAV_GROUPS.map((group) => {
         if (group.requires === "visionario" && !canAccessVisionario) return null;
         if (group.requires === "tiktok" && !canAccessTiktok) return null;
+        if (group.requires === "clt" && !canAccessClt) return null;
         // Cada item com `module` só aparece se `has_module_permission`
         // (real, calculada no layout) permitir — nunca só "faz parte do
         // space". É o que faz Financeiro sumir do menu pra quem tem
