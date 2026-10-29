@@ -36,9 +36,9 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-background/90 px-3 backdrop-blur sm:h-14 sm:px-4">
+    <header className="sticky top-0 z-30 flex h-16 w-full min-w-0 shrink-0 items-center gap-1.5 overflow-visible border-b border-border bg-background/95 px-3 backdrop-blur sm:h-14 sm:gap-2 sm:px-4">
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-72 p-0 lg:hidden">
+        <SheetContent side="left" className="w-[min(88vw,340px)] max-w-full overflow-hidden p-0 lg:hidden">
           <SheetHeader className="border-b border-sidebar-border px-4 py-4">
             <SheetTitle className="flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
@@ -57,21 +57,21 @@ export function Header() {
       <Button
         variant="ghost"
         size="icon"
-        className="h-12 w-12 rounded-xl lg:hidden"
+        className="h-11 w-11 shrink-0 rounded-xl text-foreground lg:hidden"
         aria-label="Abrir menu de navegação"
         onClick={() => setMobileOpen(true)}
       >
-        <Menu className="h-7 w-7" />
+        <Menu className="h-6 w-6 stroke-[2.25]" />
       </Button>
 
-      <div className="flex-1" />
+      <div className="min-w-0 flex-1" />
 
       <GlobalSearch />
       <NotificationsBell />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="flex h-12 w-12 items-center justify-center rounded-xl transition-colors hover:bg-secondary sm:h-9 sm:w-9 sm:rounded-full" aria-label="Abrir perfil">
+          <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-secondary sm:h-9 sm:w-9 sm:rounded-full" aria-label="Abrir perfil">
             <Avatar className="h-10 w-10 sm:h-8 sm:w-8">
               <AvatarFallback className="bg-primary/15 text-primary">
                 {initials(profile.name)}
