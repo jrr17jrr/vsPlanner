@@ -12,6 +12,7 @@ interface AuthProfileContextValue {
   mySpaces: Space[];
   canAccessVisionario: boolean;
   canAccessTiktok: boolean;
+  canAccessClt: boolean;
   /** `has_module_permission(space, módulo, 'view')` por módulo — decide o que aparece no menu. */
   visionarioModulePermissions: Partial<Record<ModulePermissionModule, boolean>>;
   tiktokModulePermissions: Partial<Record<ModulePermissionModule, boolean>>;
@@ -27,6 +28,7 @@ export function AuthProfileProvider({
   mySpaces,
   canAccessVisionario,
   canAccessTiktok,
+  canAccessClt,
   visionarioModulePermissions,
   tiktokModulePermissions,
   notifications,
@@ -40,6 +42,7 @@ export function AuthProfileProvider({
         mySpaces,
         canAccessVisionario,
         canAccessTiktok,
+        canAccessClt,
         visionarioModulePermissions,
         tiktokModulePermissions,
         notifications,
