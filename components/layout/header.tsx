@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, LogOut, Settings, Sparkles, UserCog } from "lucide-react";
+import { LogOut, Settings, Sparkles, UserCog } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,11 +57,11 @@ export function Header() {
       <Button
         variant="ghost"
         size="icon"
-        className="h-11 w-11 shrink-0 rounded-xl text-foreground lg:hidden"
+        className="h-12 w-12 shrink-0 rounded-xl border border-border/70 bg-secondary/40 text-foreground active:bg-secondary lg:hidden"
         aria-label="Abrir menu de navegação"
         onClick={() => setMobileOpen(true)}
       >
-        <Menu className="h-6 w-6 stroke-[2.25]" />
+        <span aria-hidden="true" className="flex h-7 w-7 flex-col justify-center gap-[5px]"><span className="block h-[3px] w-7 rounded-full bg-current" /><span className="block h-[3px] w-7 rounded-full bg-current" /><span className="block h-[3px] w-7 rounded-full bg-current" /></span>
       </Button>
 
       <div className="min-w-0 flex-1" />
