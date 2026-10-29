@@ -27,6 +27,7 @@ export type Profile = {
   phone: string | null;
   system_role: SystemRole;
   clt_access: boolean;
+  notification_preferences: Record<"tasks"|"routine"|"meetings"|"finance"|"clt",boolean>;
   status: ProfileStatus;
   created_at: string;
   updated_at: string;
