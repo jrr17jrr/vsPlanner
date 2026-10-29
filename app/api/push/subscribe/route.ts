@@ -11,9 +11,9 @@ export async function POST(request: Request) {
       body.endpoint.length > 2048) return NextResponse.json({ error: "Assinatura inválida" }, { status: 400 });
   try {
     const admin = getSupabaseAdminClient();
-    const { error } = await admin.from("push_subscriptions").upsert({
+    const { error } = await admin.schema("public").from("push_subscriptions" as never).upsert({
       user_id: user.id, endpoint: body.endpoint, subscription: body
-    }, { onConflict: "endpoint" });
+    } as never, { onConflict: "endpoint" });
     if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "Falha ao salvar" }, { status: 500 }); }
