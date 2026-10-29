@@ -23,3 +23,4 @@ export function NotificationPreferencesPanel({initial,canAccessClt}:{initial:Not
  <Button className="mt-4" size="sm" disabled={pending} onClick={()=>startTransition(async()=>{const result=await saveNotificationPreferencesAction(value);if(result.error)toast.error(result.error);else toast.success(result.success);})}>{pending?"Salvando...":"Salvar preferências"}</Button>
  </Card>;
 }
+
