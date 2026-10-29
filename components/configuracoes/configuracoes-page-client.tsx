@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PushSettings } from "@/components/configuracoes/push-settings";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
@@ -76,6 +77,8 @@ export function ConfiguracoesPageClient({
           {pending ? "Salvando…" : "Salvar perfil"}
         </Button>
       </Card>
+
+      <PushSettings />
 
       <Card className="p-4">
         <p className="mb-3 text-sm font-medium text-foreground">Preferências</p>
