@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { NotificationPreferencesPanel } from "@/components/configuracoes/notification-preferences";
 import { PushSettings } from "@/components/configuracoes/push-settings";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/page-header";
@@ -79,6 +80,7 @@ export function ConfiguracoesPageClient({
       </Card>
 
       <PushSettings />
+      <NotificationPreferencesPanel initial={{tasks:true,routine:true,meetings:true,finance:true,clt:true,...profile.notification_preferences}} canAccessClt={profile.system_role==="super_admin"||profile.clt_access!==false} />
 
       <Card className="p-4">
         <p className="mb-3 text-sm font-medium text-foreground">Preferências</p>
