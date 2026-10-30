@@ -8,7 +8,7 @@ export default async function Page(){
  const [companies,campaigns,results,movements,comparisons]=await Promise.all([
  s.from("clt_companies").select("id,name,current_ad_balance").eq("user_id",user.id).eq("is_active",true).order("name"),
  s.from("clt_campaigns").select("id,company_id,name,starts_on,ends_on,planned_amount").eq("user_id",user.id),
- s.from("clt_campaign_result_entries").select("campaign_id,entry_date,spent_amount,generated_revenue,views,messages,sales").eq("user_id",user.id),
+ s.from("clt_campaign_result_entries").select("campaign_id,entry_date,spent_amount,generated_revenue,views,impressions,thruplays,messages,sales").eq("user_id",user.id),
  s.from("clt_ad_account_movements").select("company_id,movement_date,kind,amount").eq("user_id",user.id),
  s.from("clt_campaign_comparisons").select("company_id,old_campaign_ids,new_campaign_ids").eq("user_id",user.id)
  ]);
