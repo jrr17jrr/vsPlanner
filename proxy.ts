@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { Database } from "@/types/database.types";
 
@@ -19,6 +20,13 @@ export async function proxy(request: NextRequest) {
   // iOS/Safari busca os ícones sem cookies de autenticação.
   // Nunca redirecionar assets PWA para /login.
   if (PUBLIC_PWA_ROUTES.has(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
+  // Rotas de cron não têm cookie de sessão (chamadas pelo Supabase Cron /
+  // Vercel Cron) e se autenticam com `Authorization: Bearer CRON_SECRET`
+  // dentro da própria rota. Sem isto, eram redirecionadas para /login.
+  if (request.nextUrl.pathname.startsWith("/api/cron/")) {
     return NextResponse.next();
   }
 
@@ -49,10 +57,20 @@ export async function proxy(request: NextRequest) {
   // cookies atualizados via `setAll` acima.
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
   const isPublicRoute = PUBLIC_ROUTES.has(pathname);
+
+  // Falha de REDE/5xx ao validar ou renovar a sessão (ex.: iPhone saindo do
+  // modo de espera com a conexão ainda voltando) não significa sessão
+  // inválida: o auth-js mantém os cookies nesse caso. Redirecionar para
+  // /login aqui era uma das causas de "pedir login de novo" no PWA. Deixa
+  // passar — o DAL mostra a tela de erro com "Tentar novamente".
+  if (!user && error && isAuthRetryableFetchError(error)) {
+    return supabaseResponse;
+  }
 
   if (!user && !isPublicRoute) {
     const loginUrl = request.nextUrl.clone();

@@ -25,6 +25,8 @@ export const viewport: Viewport = {
   themeColor: "#0a0d12",
   width: "device-width",
   initialScale: 1,
+  // Necessário para env(safe-area-inset-*) no PWA do iPhone (status bar translúcida).
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -49,7 +49,7 @@ function DialogContent({
       >
         {children}
         {showClose && (
-          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-60 transition-opacity hover:opacity-100 outline-none">
+          <DialogPrimitive.Close className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring outline-none">
             <X className="size-4" />
             <span className="sr-only">Fechar</span>
           </DialogPrimitive.Close>
@@ -63,7 +63,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-1 pr-6", className)}
+      className={cn("flex flex-col gap-1 pr-10", className)}
       {...props}
     />
   );

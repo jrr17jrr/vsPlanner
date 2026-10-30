@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { redirect } from "next/navigation";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { listMySpaces, ensureBusinessSpace, getPersonalSpace } from "@/lib/supabase/repositories/spaces.repository";
 import { hasModulePermission } from "@/lib/supabase/repositories/permissions.repository";
@@ -27,9 +28,15 @@ export const requireActiveProfile = cache(async (): Promise<{
 
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
 
   if (!user) {
+    // Erro de rede não é logout: mostra a tela de erro (com "Tentar
+    // novamente") em vez de mandar para /login com a sessão ainda válida.
+    if (authError && isAuthRetryableFetchError(authError)) {
+      throw new Error("Não foi possível confirmar sua sessão agora (conexão instável). Tente novamente.");
+    }
     redirect("/login");
   }
 
