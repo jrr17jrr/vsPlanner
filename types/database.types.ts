@@ -878,3 +878,5 @@ export type Database = {
     CompositeTypes: Record<string, never>;
   };
 };
+
+export type CltAdLevelResult = {id:string;campaign_id:string;ad_set_id:string;creative_id:string|null;entry_date:string;spent_amount:number;messages:number;sales:number;generated_revenue:number;views:number};
