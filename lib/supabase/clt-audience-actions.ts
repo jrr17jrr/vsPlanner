@@ -10,7 +10,8 @@ export async function saveCltAudienceAction(companyId:string,input:AudienceInput
  const {data:all,error:readError}=await s.from("clt_audiences").select("id,audience_type").eq("company_id",companyId).eq("user_id",user.id);if(readError)throw readError;
  const byId=new Map((all||[]).map(a=>[a.id,a.audience_type]));const included=[...new Set(input.included_audience_ids||[])];const excluded=[...new Set(input.excluded_audience_ids||[])];
  if(input.audience_type==="semelhante"&&(!input.source_audience_id||!byId.has(input.source_audience_id)))throw Error("Selecione um público de origem válido.");
- if(input.audience_type==="salvo"&&(!included.length||included.some(id=>!byId.has(id)||byId.get(id)==="salvo")||excluded.some(id=>!byId.has(id)||byId.get(id)==="salvo")))throw Error("Selecione públicos personalizados ou semelhantes válidos.");
+ // Público salvo = segmentação (local, idade, interesses); incluir públicos personalizados é opcional.
+ if(input.audience_type==="salvo"&&(included.some(id=>!byId.has(id)||byId.get(id)==="salvo")||excluded.some(id=>!byId.has(id)||byId.get(id)==="salvo")))throw Error("Selecione públicos personalizados ou semelhantes válidos.");
  if(input.id&&(included.includes(input.id)||input.source_audience_id===input.id))throw Error("Um público não pode incluir a si próprio.");
  const values={name,audience_type:input.audience_type,settings:input.settings||{},source_audience_id:input.audience_type==="semelhante"?input.source_audience_id:null,included_audience_ids:input.audience_type==="salvo"?included:[],excluded_audience_ids:input.audience_type==="salvo"?excluded:[]};
  const query=input.id?s.from("clt_audiences").update(values).eq("id",input.id).eq("company_id",companyId).eq("user_id",user.id):s.from("clt_audiences").insert({...values,company_id:companyId,user_id:user.id});
@@ -30,7 +31,7 @@ export async function importCltAudiencesJsonAction(companyId:string,raw:unknown)
  const origin=a.source?resolve(a.source):null;const includes=a.included.map(resolve).filter((id):id is string=>typeof id==="string");const excludes=a.excluded.map(resolve).filter((id):id is string=>typeof id==="string");
  if(includes.length!==a.included.length||excludes.length!==a.excluded.length)throw Error("Públicos incluídos/excluídos não encontrados em "+a.name);
  if(type==="semelhante"&&!origin)throw Error("Origem não encontrada: "+a.source);
- if(type==="salvo"&&(!includes.length||includes.some(x=>!x)||excludes.some(x=>!x)))throw Error("Públicos incluídos/excluídos não encontrados em "+a.name);
+ if(type==="salvo"&&(includes.some(x=>!x)||excludes.some(x=>!x)))throw Error("Públicos incluídos/excluídos não encontrados em "+a.name);
  const values={name:a.name,audience_type:type,settings:a.settings,source_audience_id:type==="semelhante"?origin:null,included_audience_ids:type==="salvo"?includes:[],excluded_audience_ids:type==="salvo"?excludes:[]};
  const prior=lookup.get(a.name.toLowerCase());if(prior&&prior.audience_type!==type)throw Error("Tipo diferente para "+a.name);
  const q=prior?s.from("clt_audiences").update(values).eq("id",prior.id).eq("user_id",user.id).select("id").single():s.from("clt_audiences").insert({...values,user_id:user.id,company_id:companyId}).select("id").single();

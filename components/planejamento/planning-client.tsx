@@ -3,6 +3,7 @@ import {useState,useTransition} from "react";
 import {importCltAudiencesJsonAction} from "@/lib/supabase/clt-audience-actions";
 import {importCltCampaignJsonAction} from "@/lib/supabase/clt-actions";
 import {toast} from "sonner";
+import {parseBrNumber} from "@/lib/import/values";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Checkbox} from "@/components/ui/checkbox";
@@ -28,13 +29,14 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(file.size>1024*1024)throw new Error("Arquivo acima de 1 MB.");
  const data=JSON.parse(await file.text());
  const raw=Array.isArray(data)?data:data.items;
+ if(!Array.isArray(raw)&&(Array.isArray(data.audiences)||Array.isArray(data.campaigns))){setDraft([]);setCampaignDraft([]);setAudienceDraft([]);setFileSummary("Este arquivo usa o formato novo (audiences/campaigns). Use o Importador inteligente em Trabalho › Importar — ele valida vínculos, IDs do Meta e métricas por período.");toast.message("Use o Importador inteligente (Trabalho › Importar).");return;}
  if(Array.isArray(data.publicos)&&!Array.isArray(data.campanhas)&&!Array.isArray(raw)){if(!data.publicos.length||data.publicos.length>100)throw Error("Lista de públicos inválida.");setAudienceDraft(data.publicos);setCampaignDraft([]);setDraft([]);setFileSummary(data.publicos.length+" públicos reconhecidos. Selecione a empresa e confirme a importação.");const companyLabel=String(data.empresa||"");setCampaignCompany(companies.find(c=>c.name.toLowerCase()===companyLabel.toLowerCase())?.id||"");return;}
  setAudienceDraft([]);
  if(!Array.isArray(raw)&&Array.isArray(data.campanhas)){
   const companyLabel=String(data.empresa||data.company||data.nome_empresa||"").trim();
   const matched=companies.find(c=>c.name.toLowerCase()===companyLabel.toLowerCase());
   setCampaignCompany(matched?.id||"");
-  const metric=(v:unknown):number|null=>{if(v===null||v===undefined||v==="")return null;const n=typeof v==="number"?v:Number(String(v).replace(/\\./g,"").replace(",","."));if(!Number.isFinite(n)||n<0)throw Error("Valor inválido no arquivo.");return n;};
+  const metric=(v:unknown):number|null=>{const n=parseBrNumber(v);if(n===null)return null;if(n===undefined||n<0)throw Error("Valor inválido no arquivo: "+String(v));return n;};
   const parsed:ImportedCampaign[]=data.campanhas.map((c:Record<string,unknown>)=>({name:String(c.nome||c.name||"").trim(),spent:metric(c.investimento??c.spent),messages:metric(c.conversas??c.messages),views:metric(c.visualizacoes??c.views),sales:metric(c.vendas??c.sales),revenue:metric(c.faturamento??c.revenue),status:String(c.status||""),publicos:Array.isArray(c.publicos)?c.publicos:Array.isArray(data.publicos)?data.publicos:[],sets:Array.isArray(c.conjuntos)?(c.conjuntos as Record<string,unknown>[]).map(set=>({name:String(set.nome||"").trim(),publico:String(set.publico||""),ads:Array.isArray(set.anuncios)?(set.anuncios as Record<string,unknown>[]).map(ad=>{const m=(ad.resultados&&typeof ad.resultados==="object"?ad.resultados:{}) as Record<string,unknown>;return {name:String(ad.nome||"").trim(),format:String(ad.formato||"outro").toLowerCase(),spent:metric(m.investimento),messages:metric(m.conversas),views:metric(m.visualizacoes),sales:metric(m.vendas),revenue:metric(m.faturamento)};}):[]})):undefined}));
   if(!parsed.length||parsed.length>50||parsed.some((c:{name:string})=>!c.name))throw Error("Lista de campanhas inválida (máximo 50).");
   if(parsed.some(c=>c.sets?.some(set=>!set.name||!set.ads.length||set.ads.some(ad=>!ad.name||!["imagem","video","carrossel","outro"].includes(ad.format)))))throw Error("Conjunto ou anúncio inválido.");setCampaignDraft(parsed);setDraft([]);
