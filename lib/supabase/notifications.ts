@@ -7,6 +7,7 @@ import { listWorkItems } from "@/lib/supabase/repositories/work-items.repository
 import { listFinancialCharges, listFinancialPayments } from "@/lib/supabase/repositories/financial.repository";
 import { listChargesForKind } from "@/lib/financial-calc";
 import { VISIONARIO_DEV_SLUG, TIKTOK_SLUG } from "@/lib/space-slugs";
+import { listTasks } from "@/lib/supabase/repositories/personal.repository";
 import { todayKeySaoPaulo } from "@/lib/format";
 
 export type NotificationItem = {
@@ -37,6 +38,13 @@ export async function getNotificationItems(): Promise<NotificationItem[]> {
     requirePersonalSpace(),
     getTodayMeetingsForHoje(),
   ]);
+
+  // Tarefas pessoais com horário vencido hoje entram no mesmo sino dos demais avisos.
+  const nowTime = new Intl.DateTimeFormat("en-GB", {timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date());
+  const personalTasks = await listTasks(personal.space.id);
+  personalTasks.filter(t => t.due_date === todayKey && !!t.scheduled_time && t.scheduled_time.slice(0,5) <= nowTime && !["concluida","concluido","completed","cancelado"].includes(t.status)).forEach(t => {
+    items.push({id:`task-${t.id}-${todayKey}`,title:"Lembrete de tarefa",message:`${t.title} • ${t.scheduled_time!.slice(0,5)}`,href:"/tarefas",urgent:true,createdAt:`${todayKey}T${t.scheduled_time}`});
+  });
 
   meetingsResult.meetings.forEach((m) => {
     items.push({
