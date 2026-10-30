@@ -155,3 +155,15 @@ export async function deleteCltCampaignComparisonAction(companyId:string):Promis
  const {error}=await s.from("clt_campaign_comparisons").delete().eq("user_id",user.id).eq("company_id",companyId);
  if(error)return {error:error.message};refresh();revalidatePath("/trabalho/relatorios");return {success:"Comparativo removido."};
 }
+
+export async function saveCltAdCreativeAction(input:{adSetId:string;name:string;format:string;assetUrl?:string;notes?:string}):Promise<State>{
+ const {s,user}=await ctx();
+ const name=input.name.trim();
+ if(!name||name.length>160||!["imagem","video","carrossel","outro"].includes(input.format))return{error:"Nome ou formato inválido."};
+ const {data:set}=await s.from("clt_ad_sets").select("id,campaign_id").eq("id",input.adSetId).eq("user_id",user.id).single();
+ if(!set)return{error:"Conjunto não encontrado."};
+ const {data:campaign}=await s.from("clt_campaigns").select("id").eq("id",set.campaign_id).eq("user_id",user.id).single();
+ if(!campaign)return{error:"Campanha não encontrada."};
+ const {error}=await s.from("clt_ad_creatives").insert({user_id:user.id,ad_set_id:input.adSetId,name,format:input.format,asset_url:input.assetUrl?.trim()||null,notes:input.notes?.trim()||null});
+ if(error)return{error:error.message};refresh();return{success:"Anúncio cadastrado."};
+}
