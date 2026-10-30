@@ -23,6 +23,7 @@ import { GlobalSearch } from "@/components/shared/global-search";
 import { NotificationsBell } from "@/components/shared/notifications-bell";
 import { useAuthProfile } from "@/components/providers/auth-profile-provider";
 import { logoutAction } from "@/lib/supabase/actions";
+import { removeDeviceSubscription } from "@/lib/push/client";
 import { initials } from "@/lib/format";
 
 export function Header() {
@@ -31,14 +32,18 @@ export function Header() {
   const { profile, email } = useAuthProfile();
   const router = useRouter();
 
-  function handleLogout() {
-    void logoutAction();
+  async function handleLogout() {
+    // Para de enviar lembretes desta conta a este aparelho antes de sair.
+    await removeDeviceSubscription();
+    await logoutAction();
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full min-w-0 shrink-0 items-center gap-1.5 overflow-visible border-b border-border bg-background/95 px-3 backdrop-blur sm:h-14 sm:gap-2 sm:px-4">
+    // PWA no iPhone (status bar translúcida + viewport-fit=cover): o header
+    // reserva a área do relógio/notch via safe-area; no navegador o inset é 0.
+    <header className="sticky top-0 z-30 flex h-[calc(4rem+env(safe-area-inset-top))] w-full min-w-0 shrink-0 items-center gap-1.5 overflow-visible border-b border-border bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:h-[calc(3.5rem+env(safe-area-inset-top))] sm:gap-2 sm:px-4">
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-[min(88vw,340px)] max-w-full overflow-hidden p-0 lg:hidden">
+        <SheetContent side="left" className="w-[min(88vw,340px)] max-w-full overflow-hidden p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] lg:hidden">
           <SheetHeader className="border-b border-sidebar-border px-4 py-4">
             <SheetTitle className="flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">

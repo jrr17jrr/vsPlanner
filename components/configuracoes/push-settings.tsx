@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { registerServiceWorker } from "@/lib/push/client";
 function decodeKey(key: string) {
   const pad = "=".repeat((4 - key.length % 4) % 4);
   const raw = atob((key + pad).replace(/-/g, "+").replace(/_/g, "/"));
@@ -19,7 +20,7 @@ export function PushSettings() {
       if (!key) throw new Error("Falta configurar a chave pública VAPID na Vercel.");
       const permission = await Notification.requestPermission();
       if (permission !== "granted") throw new Error("Permissão não concedida nas configurações do iPhone.");
-      await navigator.serviceWorker.register("/sw.js");
+      await registerServiceWorker();
       const sw = await navigator.serviceWorker.ready;
       const existing = await sw.pushManager.getSubscription();
       const subscription = existing || await sw.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeKey(key) });
