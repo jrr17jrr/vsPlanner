@@ -155,3 +155,25 @@ export async function deleteCltCampaignComparisonAction(companyId:string):Promis
  const {error}=await s.from("clt_campaign_comparisons").delete().eq("user_id",user.id).eq("company_id",companyId);
  if(error)return {error:error.message};refresh();revalidatePath("/trabalho/relatorios");return {success:"Comparativo removido."};
 }
+
+export async function saveCltAdCreativeAction(input:{adSetId:string;name:string;format:string;assetUrl?:string;notes?:string}):Promise<State>{
+ const {s,user}=await ctx();
+ const name=input.name.trim();
+ if(!name||name.length>160||!["imagem","video","carrossel","outro"].includes(input.format))return{error:"Nome ou formato inválido."};
+ const {data:set}=await s.from("clt_ad_sets").select("id,campaign_id").eq("id",input.adSetId).eq("user_id",user.id).single();
+ if(!set)return{error:"Conjunto não encontrado."};
+ const {data:campaign}=await s.from("clt_campaigns").select("id").eq("id",set.campaign_id).eq("user_id",user.id).single();
+ if(!campaign)return{error:"Campanha não encontrada."};
+ const {error}=await s.from("clt_ad_creatives").insert({user_id:user.id,ad_set_id:input.adSetId,name,format:input.format,asset_url:input.assetUrl?.trim()||null,notes:input.notes?.trim()||null});
+ if(error)return{error:error.message};refresh();return{success:"Anúncio cadastrado."};
+}
+
+export async function saveCltAdLevelResultAction(input:{campaignId:string;adSetId:string;creativeId?:string;date:string;spent:number;messages:number;sales:number;revenue:number;views:number}):Promise<State>{
+ const {s,user}=await ctx();
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||[input.spent,input.messages,input.sales,input.revenue,input.views].some(v=>!Number.isFinite(v)||v<0)||[input.messages,input.sales,input.views].some(v=>!Number.isInteger(v)))return{error:"Resultados inválidos."};
+ const {data:set}=await s.from("clt_ad_sets").select("id,campaign_id").eq("id",input.adSetId).eq("campaign_id",input.campaignId).eq("user_id",user.id).maybeSingle();
+ if(!set)return{error:"Conjunto não encontrado."};
+ if(input.creativeId){const {data:ad}=await s.from("clt_ad_creatives").select("id").eq("id",input.creativeId).eq("ad_set_id",input.adSetId).eq("user_id",user.id).maybeSingle();if(!ad)return{error:"Anúncio não encontrado."};}
+ const {error}=await s.from("clt_ad_level_results").upsert({user_id:user.id,campaign_id:input.campaignId,ad_set_id:input.adSetId,creative_id:input.creativeId||null,entry_date:input.date,spent_amount:input.spent,messages:input.messages,sales:input.sales,generated_revenue:input.revenue,views:input.views},{onConflict:"ad_set_id,creative_id,entry_date"});
+ if(error)return{error:error.message};refresh();return{success:"Resultados salvos."};
+}

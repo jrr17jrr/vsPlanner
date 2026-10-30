@@ -819,6 +819,7 @@ export type Database = {
       clt_campaign_result_entries: { Row: CltCampaignResultEntry; Insert: Partial<CltCampaignResultEntry> & {user_id:string;campaign_id:string;entry_date:string}; Update: Partial<Omit<CltCampaignResultEntry,"id">>; Relationships: [] };
       clt_ad_sets: { Row: CltAdSet; Insert: Partial<CltAdSet> & {user_id:string;campaign_id:string;name:string}; Update: Partial<Omit<CltAdSet,"id">>; Relationships: [] };
       clt_ad_creatives: { Row: CltAdCreative; Insert: Partial<CltAdCreative> & {user_id:string;ad_set_id:string;name:string}; Update: Partial<Omit<CltAdCreative,"id">>; Relationships: [] };
+      clt_ad_level_results: { Row: CltAdLevelResult; Insert: Partial<CltAdLevelResult> & {user_id:string;campaign_id:string;ad_set_id:string;entry_date:string}; Update: Partial<Omit<CltAdLevelResult,"id">>; Relationships: [] };
       clt_tasks: { Row: CltTask; Insert: Partial<CltTask> & { user_id: string; title: string }; Update: Partial<Omit<CltTask, "id">>; Relationships: [] };
       clt_task_occurrences: { Row: CltTaskOccurrence; Insert: Partial<CltTaskOccurrence> & { task_id:string; user_id:string; occurrence_date:string }; Update: Partial<Omit<CltTaskOccurrence, "id">>; Relationships: [] };
       clt_company_notes: { Row: CltCompanyNote; Insert: Partial<CltCompanyNote> & { user_id: string; company_id: string; content: string }; Update: Partial<Omit<CltCompanyNote, "id">>; Relationships: [] };
@@ -878,3 +879,5 @@ export type Database = {
     CompositeTypes: Record<string, never>;
   };
 };
+
+export type CltAdLevelResult = {id:string;campaign_id:string;ad_set_id:string;creative_id:string|null;entry_date:string;spent_amount:number;messages:number;sales:number;generated_revenue:number;views:number};
