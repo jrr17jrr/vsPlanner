@@ -76,6 +76,15 @@ export async function saveCltTrafficCampaignAction(input:{id?:string;companyId:s
  const q=input.id?s.from("clt_campaigns").update(values).eq("id",input.id).eq("company_id",input.companyId).eq("user_id",user.id):s.from("clt_campaigns").insert({...values,user_id:user.id,spent_amount:0,messages:0,sales:0,views:0});
  const {data:saved,error}=await q.select("id,daily_budget").single();if(error)return{error:error.message};if(!saved)return{error:"Não foi possível confirmar a atualização da campanha."};refresh();return{success:input.id?"Campanha atualizada.":"Campanha criada."};
 }
+export async function deleteCltTrafficCampaignAction(id:string,companyId:string):Promise<State>{
+ const {s,user}=await ctx();
+ const {data:campaign,error:lookupError}=await s.from("clt_campaigns").select("id").eq("id",id).eq("company_id",companyId).eq("user_id",user.id).maybeSingle();
+ if(lookupError)return{error:lookupError.message};
+ if(!campaign)return{error:"Campanha não encontrada."};
+ const {error}=await s.from("clt_campaigns").delete().eq("id",id).eq("company_id",companyId).eq("user_id",user.id);
+ if(error)return{error:"Não foi possível excluir a campanha: "+error.message};
+ refresh();return{success:"Campanha excluída."};
+}
 export async function saveCltCampaignResultsAction(input:{campaignId:string;date:string;spent:number;messages:number;sales:number;views:number;appointments:number;impressions:number;reach:number;profileVisits:number;linkClicks:number;engagements:number;thruplays:number;leads:number;revenue:number;notes?:string}):Promise<State>{
  const {s,user}=await ctx();const {data:campaign}=await s.from("clt_campaigns").select("id").eq("id",input.campaignId).eq("user_id",user.id).single();if(!campaign)return{error:"Campanha inválida."};
  if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||![input.spent,input.messages,input.sales,input.views,input.appointments,input.impressions,input.reach,input.profileVisits,input.linkClicks,input.engagements,input.thruplays,input.leads,input.revenue].every(v=>Number.isFinite(v)&&v>=0))return{error:"Valores inválidos."};
