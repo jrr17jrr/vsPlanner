@@ -9,7 +9,7 @@ import { CompanyDetailBalance } from "@/components/trabalho/company-detail-balan
 import { CompanyResultsSummary } from "@/components/trabalho/company-results-summary";
 import { TrafficManager } from "@/components/trabalho/traffic-manager";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet } from "@/types/database.types";
+import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative } from "@/types/database.types";
 
 const money = (n:number) => n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 const fmt = (s:string) => s.split("-").reverse().join("/");
@@ -27,6 +27,8 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  supabase.from("clt_ad_sets").select("*").in("campaign_id",data.campaigns.filter(c=>c.company_id===id).map(c=>c.id).length?data.campaigns.filter(c=>c.company_id===id).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]),
  supabase.from("clt_campaign_comparisons").select("old_campaign_ids,new_campaign_ids").eq("company_id",id).maybeSingle()
  ]);
+ const setIds=(setsQuery.data||[]).map(s=>s.id);
+ const creativesQuery=await supabase.from("clt_ad_creatives").select("*").in("ad_set_id",setIds.length?setIds:["00000000-0000-0000-0000-000000000000"]);
  const responsible=data.responsibles.find(r=>r.id===company.responsible_id);
  const tasks=data.tasks.filter(t=>t.company_id===id&&!t.archived_at);
  const campaigns=data.campaigns.filter(c=>c.company_id===id);
@@ -41,7 +43,7 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  {([{label:"Saldo da Meta",value:money(Number(company.current_ad_balance)),icon:Wallet},{label:"Tarefas pendentes",value:String(pending),icon:Clock},{label:"Campanhas cadastradas",value:String(campaigns.length),icon:CalendarDays},{label:"Investimento registrado",value:money(spent),icon:CheckCircle2}]).map(item=><Card key={item.label}><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><item.icon className="h-4 w-4"/>{item.label}</div><p className="mt-2 text-xl font-semibold">{item.value}</p></CardContent></Card>)}</div>
  <CompanyResultsSummary results={(resultsQuery.data||[]) as CltCampaignResultEntry[]}/>
  <CompanyDetailBalance company={company}/>
- <TrafficManager companyId={id} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} comparison={comparisonQuery.data||null}/>
+ <TrafficManager companyId={id} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} comparison={comparisonQuery.data||null}/>
  <CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={data.occurrences}/>
  <Card><CardContent className="space-y-3 p-4"><div className="flex items-center justify-between"><h2 className="font-semibold">Campanhas da empresa</h2><Button asChild variant="outline" size="sm"><Link href="/trabalho/campanhas">Gerenciar campanhas</Link></Button></div>
  <p className="text-xs text-muted-foreground">Totais das campanhas cadastradas: {messages} mensagens · {sales} vendas. O investimento mostrado é a soma dos registros, não necessariamente apenas do mês atual.</p>
