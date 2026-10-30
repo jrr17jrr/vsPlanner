@@ -880,4 +880,4 @@ export type Database = {
   };
 };
 
-export type CltAdLevelResult = {id:string;campaign_id:string;ad_set_id:string;creative_id:string|null;entry_date:string;spent_amount:number;messages:number;sales:number;generated_revenue:number;views:number};
+export type CltAdLevelResult = {id:string;user_id:string;campaign_id:string;ad_set_id:string;creative_id:string|null;entry_date:string;spent_amount:number;messages:number;sales:number;generated_revenue:number;views:number};
