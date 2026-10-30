@@ -817,6 +817,7 @@ export type Database = {
       clt_campaigns: { Row: CltCampaign; Insert: Partial<CltCampaign> & { user_id: string; company_id: string; name: string; starts_on: string; ends_on: string }; Update: Partial<Omit<CltCampaign, "id">>; Relationships: [] };
       clt_monthly_budgets: { Row: CltMonthlyBudget; Insert: Partial<CltMonthlyBudget> & {user_id:string;company_id:string;month_key:string}; Update: Partial<Omit<CltMonthlyBudget,"id">>; Relationships: [] };
       clt_campaign_result_entries: { Row: CltCampaignResultEntry; Insert: Partial<CltCampaignResultEntry> & {user_id:string;campaign_id:string;entry_date:string}; Update: Partial<Omit<CltCampaignResultEntry,"id">>; Relationships: [] };
+      clt_audiences: { Row: CltAudience; Insert: Partial<CltAudience> & {user_id:string;company_id:string;name:string;audience_type:string}; Update: Partial<Omit<CltAudience,"id">>; Relationships: [] };
       clt_ad_sets: { Row: CltAdSet; Insert: Partial<CltAdSet> & {user_id:string;campaign_id:string;name:string}; Update: Partial<Omit<CltAdSet,"id">>; Relationships: [] };
       clt_ad_creatives: { Row: CltAdCreative; Insert: Partial<CltAdCreative> & {user_id:string;ad_set_id:string;name:string}; Update: Partial<Omit<CltAdCreative,"id">>; Relationships: [] };
       clt_ad_level_results: { Row: CltAdLevelResult; Insert: Partial<CltAdLevelResult> & {user_id:string;campaign_id:string;ad_set_id:string;entry_date:string}; Update: Partial<Omit<CltAdLevelResult,"id">>; Relationships: [] };
@@ -880,4 +881,5 @@ export type Database = {
   };
 };
 
-export type CltAdLevelResult = {id:string;user_id:string;campaign_id:string;ad_set_id:string;creative_id:string|null;entry_date:string;spent_amount:number;messages:number;sales:number;generated_revenue:number;views:number};
+export type CltAudience = {id:string;user_id:string;company_id:string;name:string;audience_type:string;settings:Record<string,unknown>;source_audience_id:string|null;included_audience_ids:string[];excluded_audience_ids:string[];created_at:string;updated_at:string};
+export type CltAdLevelResult = {id:string;user_id:string;campaign_id:string;ad_set_id:string;creative_id:string|null;entry_date:string;spent_amount:number;messages:number;sales:number;generated_revenue:number;views:number;impressions:number;reach:number;engagements:number;link_clicks:number;thruplays:number;leads:number;profile_visits:number;appointments:number};
