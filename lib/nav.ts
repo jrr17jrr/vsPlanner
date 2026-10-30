@@ -88,6 +88,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Empresas", href: "/trabalho/empresas", icon: Building2 },
       { label: "Planejamento", href: "/planejamento?area=clt", icon: ClipboardList },
       { label: "Campanhas", href: "/trabalho/campanhas", icon: Megaphone },
+      { label: "Análises", href: "/trabalho/analises", icon: LineChart },
       { label: "Tarefas", href: "/trabalho/tarefas", icon: ListChecks },
       { label: "Rotina", href: "/trabalho/rotina", icon: CalendarClock },
       { label: "Relatórios", href: "/trabalho/relatorios", icon: FileText },
