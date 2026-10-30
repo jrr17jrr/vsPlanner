@@ -8,6 +8,8 @@ import { CompanyDetailTasks } from "@/components/trabalho/company-detail-tasks";
 import { CompanyDetailBalance } from "@/components/trabalho/company-detail-balance";
 import { CompanyResultsSummary } from "@/components/trabalho/company-results-summary";
 import { TrafficManager } from "@/components/trabalho/traffic-manager";
+import { AudienceManager } from "@/components/trabalho/audience-manager";
+import type { AudienceRecord } from "@/lib/supabase/clt-audience-actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
 
@@ -21,11 +23,12 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  const supabase=await createSupabaseServerClient();
  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit"}).formatToParts(new Date());
  const month=(parts.find(p=>p.type==="year")?.value||"2026")+"-"+(parts.find(p=>p.type==="month")?.value||"01");
- const [budgetQuery,resultsQuery,setsQuery,comparisonQuery]=await Promise.all([
+ const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery]=await Promise.all([
  supabase.from("clt_monthly_budgets").select("*").eq("company_id",id).eq("month_key",month+"-01").maybeSingle(),
  supabase.from("clt_campaign_result_entries").select("*").in("campaign_id",data.campaigns.filter(c=>c.company_id===id).map(c=>c.id).length?data.campaigns.filter(c=>c.company_id===id).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]),
  supabase.from("clt_ad_sets").select("*").in("campaign_id",data.campaigns.filter(c=>c.company_id===id).map(c=>c.id).length?data.campaigns.filter(c=>c.company_id===id).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]),
- supabase.from("clt_campaign_comparisons").select("old_campaign_ids,new_campaign_ids").eq("company_id",id).maybeSingle()
+ supabase.from("clt_campaign_comparisons").select("old_campaign_ids,new_campaign_ids").eq("company_id",id).maybeSingle(),
+ supabase.from("clt_audiences").select("*").eq("company_id",id).order("created_at",{ascending:false})
  ]);
  const setIds=(setsQuery.data||[]).map(s=>s.id);
  const creativesQuery=await supabase.from("clt_ad_creatives").select("*").in("ad_set_id",setIds.length?setIds:["00000000-0000-0000-0000-000000000000"]);
@@ -44,6 +47,7 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  {([{label:"Saldo da Meta",value:money(Number(company.current_ad_balance)),icon:Wallet},{label:"Tarefas pendentes",value:String(pending),icon:Clock},{label:"Campanhas cadastradas",value:String(campaigns.length),icon:CalendarDays},{label:"Investimento registrado",value:money(spent),icon:CheckCircle2}]).map(item=><Card key={item.label}><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><item.icon className="h-4 w-4"/>{item.label}</div><p className="mt-2 text-xl font-semibold">{item.value}</p></CardContent></Card>)}</div>
  <CompanyResultsSummary results={(resultsQuery.data||[]) as CltCampaignResultEntry[]}/>
  <CompanyDetailBalance company={company}/>
+ <AudienceManager companyId={id} audiences={(audiencesQuery.data||[]) as AudienceRecord[]}/>
  <TrafficManager companyId={id} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={(levelResultsQuery.data||[]) as CltAdLevelResult[]} comparison={comparisonQuery.data||null}/>
  <CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={data.occurrences}/>
  <Card><CardContent className="space-y-3 p-4"><div className="flex items-center justify-between"><h2 className="font-semibold">Campanhas da empresa</h2><Button asChild variant="outline" size="sm"><Link href="/trabalho/campanhas">Gerenciar campanhas</Link></Button></div>
