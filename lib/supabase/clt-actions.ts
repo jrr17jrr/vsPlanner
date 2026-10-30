@@ -90,9 +90,10 @@ export async function saveCltCampaignResultsAction(input:{campaignId:string;date
  if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||![input.spent,input.messages,input.sales,input.views,input.appointments,input.impressions,input.reach,input.profileVisits,input.linkClicks,input.engagements,input.thruplays,input.leads,input.revenue].every(v=>Number.isFinite(v)&&v>=0))return{error:"Valores inválidos."};
  const {error}=await s.from("clt_campaign_result_entries").upsert({user_id:user.id,campaign_id:input.campaignId,entry_date:input.date,spent_amount:input.spent,messages:input.messages,sales:input.sales,views:input.views,appointments:input.appointments,impressions:input.impressions,reach:input.reach,profile_visits:input.profileVisits,link_clicks:input.linkClicks,engagements:input.engagements,thruplays:input.thruplays,leads:input.leads,generated_revenue:input.revenue,notes:input.notes||null},{onConflict:"campaign_id,entry_date"});if(error)return{error:error.message};refresh();return{success:"Resultados atualizados."};
 }
-export async function saveCltAdSetAction(input:{campaignId:string;name:string;audience?:string;location?:string;budget:number;notes?:string}):Promise<State>{
+export async function saveCltAdSetAction(input:{campaignId:string;name:string;audience?:string;savedAudienceId?:string;location?:string;budget:number;notes?:string}):Promise<State>{
  const {s,user}=await ctx();const {data:campaign}=await s.from("clt_campaigns").select("id").eq("id",input.campaignId).eq("user_id",user.id).single();if(!campaign||!input.name.trim()||!Number.isFinite(input.budget)||input.budget<0)return{error:"Dados inválidos."};
- const {error}=await s.from("clt_ad_sets").insert({user_id:user.id,campaign_id:input.campaignId,name:input.name.trim(),audience:input.audience||null,location:input.location||null,budget_amount:input.budget,notes:input.notes||null});if(error)return{error:error.message};refresh();return{success:"Conjunto cadastrado."};
+ if(input.savedAudienceId){const {data:a}=await s.from("clt_audiences").select("id").eq("id",input.savedAudienceId).eq("audience_type","salvo").eq("user_id",user.id).maybeSingle();if(!a)return{error:"Público salvo inválido."};}
+ const {error}=await s.from("clt_ad_sets").insert({user_id:user.id,campaign_id:input.campaignId,name:input.name.trim(),saved_audience_id:input.savedAudienceId||null,audience:input.audience||null,location:input.location||null,budget_amount:input.budget,notes:input.notes||null});if(error)return{error:error.message};refresh();return{success:"Conjunto cadastrado."};
 }
 
 
@@ -209,12 +210,12 @@ export async function saveCltAdCreativeAction(input:{adSetId:string;name:string;
  if(error)return{error:error.message};refresh();return{success:"Anúncio cadastrado."};
 }
 
-export async function saveCltAdLevelResultAction(input:{campaignId:string;adSetId:string;creativeId?:string;date:string;spent:number;messages:number;sales:number;revenue:number;views:number}):Promise<State>{
+export async function saveCltAdLevelResultAction(input:{campaignId:string;adSetId:string;creativeId?:string;date:string;spent:number;messages:number;sales:number;revenue:number;views:number;impressions?:number;reach?:number;engagements?:number;linkClicks?:number;thruplays?:number;leads?:number;profileVisits?:number;appointments?:number}):Promise<State>{
  const {s,user}=await ctx();
  if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||[input.spent,input.messages,input.sales,input.revenue,input.views].some(v=>!Number.isFinite(v)||v<0)||[input.messages,input.sales,input.views].some(v=>!Number.isInteger(v)))return{error:"Resultados inválidos."};
  const {data:set}=await s.from("clt_ad_sets").select("id,campaign_id").eq("id",input.adSetId).eq("campaign_id",input.campaignId).eq("user_id",user.id).maybeSingle();
  if(!set)return{error:"Conjunto não encontrado."};
  if(input.creativeId){const {data:ad}=await s.from("clt_ad_creatives").select("id").eq("id",input.creativeId).eq("ad_set_id",input.adSetId).eq("user_id",user.id).maybeSingle();if(!ad)return{error:"Anúncio não encontrado."};}
- const {error}=await s.from("clt_ad_level_results").upsert({user_id:user.id,campaign_id:input.campaignId,ad_set_id:input.adSetId,creative_id:input.creativeId||null,entry_date:input.date,spent_amount:input.spent,messages:input.messages,sales:input.sales,generated_revenue:input.revenue,views:input.views},{onConflict:"ad_set_id,creative_id,entry_date"});
+ const {error}=await s.from("clt_ad_level_results").upsert({user_id:user.id,campaign_id:input.campaignId,ad_set_id:input.adSetId,creative_id:input.creativeId||null,entry_date:input.date,spent_amount:input.spent,messages:input.messages,sales:input.sales,generated_revenue:input.revenue,views:input.views,impressions:input.impressions||0,reach:input.reach||0,engagements:input.engagements||0,link_clicks:input.linkClicks||0,thruplays:input.thruplays||0,leads:input.leads||0,profile_visits:input.profileVisits||0,appointments:input.appointments||0},{onConflict:"ad_set_id,creative_id,entry_date"});
  if(error)return{error:error.message};refresh();return{success:"Resultados salvos."};
 }
