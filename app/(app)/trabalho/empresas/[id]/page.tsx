@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Building2, CalendarDays, CheckCircle2, Clock, ExternalLink, Mail, Phone, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +12,8 @@ import { TrafficManager } from "@/components/trabalho/traffic-manager";
 import { AudienceManager } from "@/components/trabalho/audience-manager";
 import type { AudienceRecord } from "@/lib/supabase/clt-audience-actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { withImportedPeriodResults } from "@/lib/supabase/clt-period-results";
+import { ImportedReconciliation, type ReconciliationRow } from "@/components/trabalho/imported-reconciliation";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
 
 const money = (n:number) => n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
@@ -33,6 +36,9 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  const setIds=(setsQuery.data||[]).map(s=>s.id);
  const creativesQuery=await supabase.from("clt_ad_creatives").select("*").in("ad_set_id",setIds.length?setIds:["00000000-0000-0000-0000-000000000000"]);
  const levelResultsQuery=await supabase.from("clt_ad_level_results").select("*").in("campaign_id",data.campaigns.filter(c=>c.company_id===id).map(c=>c.id).length?data.campaigns.filter(c=>c.company_id===id).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]);
+ const companyCampaignIds=data.campaigns.filter(c=>c.company_id===id).map(c=>c.id);
+ const mergedResults=await withImportedPeriodResults(supabase,companyCampaignIds,(resultsQuery.data||[]) as CltCampaignResultEntry[]);
+ const reconciliationQuery=await (supabase as unknown as SupabaseClient).from("clt_campaign_reconciliations").select("campaign_id,period_start,period_end,reported_spend,reported_conversations,unallocated_spend,unallocated_conversations,notes").eq("company_id",id);
  const responsible=data.responsibles.find(r=>r.id===company.responsible_id);
  const tasks=data.tasks.filter(t=>t.company_id===id&&!t.archived_at);
  const campaigns=data.campaigns.filter(c=>c.company_id===id);
@@ -45,7 +51,8 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><Building2 className="h-6 w-6 text-primary"/><h1 className="text-2xl font-semibold">{company.name}</h1></div><p className="mt-1 text-sm text-muted-foreground">Responsável: {responsible?.name??"Não informado"} · Painel individual da empresa</p></div><div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/trabalho/tarefas">Todas as tarefas</Link></Button><Button asChild variant="outline"><Link href="/trabalho/campanhas">Todas as campanhas</Link></Button></div></div>
  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
  {([{label:"Saldo da Meta",value:money(Number(company.current_ad_balance)),icon:Wallet},{label:"Tarefas pendentes",value:String(pending),icon:Clock},{label:"Campanhas cadastradas",value:String(campaigns.length),icon:CalendarDays},{label:"Investimento registrado",value:money(spent),icon:CheckCircle2}]).map(item=><Card key={item.label}><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><item.icon className="h-4 w-4"/>{item.label}</div><p className="mt-2 text-xl font-semibold">{item.value}</p></CardContent></Card>)}</div>
- <CompanyResultsSummary results={(resultsQuery.data||[]) as CltCampaignResultEntry[]}/>
+ <CompanyResultsSummary results={mergedResults.results}/>
+ <ImportedReconciliation rows={(reconciliationQuery.data||[]) as ReconciliationRow[]} campaigns={data.campaigns.filter(c=>c.company_id===id).map(c=>({id:c.id,name:c.name}))} excludedLegacy={mergedResults.excludedLegacy}/>
  <CompanyDetailBalance company={company}/>
  <AudienceManager companyId={id} audiences={(audiencesQuery.data||[]) as AudienceRecord[]}/>
  <TrafficManager companyId={id} audiences={(audiencesQuery.data||[]) as AudienceRecord[]} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={(levelResultsQuery.data||[]) as CltAdLevelResult[]} comparison={comparisonQuery.data||null}/>

@@ -1,6 +1,8 @@
 import {PageHeader} from "@/components/shared/page-header";
 import {createSupabaseServerClient} from "@/lib/supabase/server";
 import {CltReportClient} from "@/components/trabalho/clt-report-client";
+import {withImportedPeriodResults} from "@/lib/supabase/clt-period-results";
+import type {CltCampaignResultEntry} from "@/types/database.types";
 export default async function Page(){
  const s=await createSupabaseServerClient();
  const {data:{user}}=await s.auth.getUser();
@@ -13,5 +15,8 @@ export default async function Page(){
  s.from("clt_campaign_comparisons").select("company_id,old_campaign_ids,new_campaign_ids").eq("user_id",user.id)
  ]);
  const movementError=movements.error?.message||"";
- return <div className="space-y-5"><PageHeader title="Relatórios CLT" description="Selecione empresas e mês, registre movimentações e gere um PDF com resultados reais."/><CltReportClient companies={companies.data||[]} campaigns={campaigns.data||[]} results={results.data||[]} movements={movements.data||[]} movementError={movementError} comparisons={comparisons.data||[]}/></div>;
+ // Resultados importados por anúncio/período entram no mês do FIM do período; lançamentos antigos da mesma campanha dentro do período não são somados de novo.
+ const merged=await withImportedPeriodResults(s,(campaigns.data||[]).map(c=>c.id),(results.data||[]) as CltCampaignResultEntry[]);
+ const note=merged.crossMonthPeriods?" Resultados importados por período aparecem no mês em que o período termina.":"";
+ return <div className="space-y-5"><PageHeader title="Relatórios CLT" description={"Selecione empresas e mês, registre movimentações e gere um PDF com resultados reais."+note}/><CltReportClient companies={companies.data||[]} campaigns={campaigns.data||[]} results={merged.results} movements={movements.data||[]} movementError={movementError} comparisons={comparisons.data||[]}/></div>;
 }
