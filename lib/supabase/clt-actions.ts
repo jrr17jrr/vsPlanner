@@ -129,7 +129,8 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
    const included=(a.incluidos||[]).map(resolve),excluded=(a.excluidos||[]).map(resolve);
    if(kind==="semelhante"&&!source)return {error:"Origem não encontrada: "+a.nome};
    if([...included,...excluded].some(id=>!id))return {error:"Referência de público não encontrada: "+a.nome};
-   const values={name:a.nome.trim(),audience_type:kind,settings:a.configuracoes||{},source_audience_id:kind==="semelhante"?source:null,included_audience_ids:kind==="salvo"?included:[],excluded_audience_ids:kind==="salvo"?excluded:[]};
+   const isId=(id:string|undefined):id is string=>typeof id==="string";
+   const values={name:a.nome.trim(),audience_type:kind,settings:a.configuracoes||{},source_audience_id:kind==="semelhante"?source??null:null,included_audience_ids:kind==="salvo"?included.filter(isId):[],excluded_audience_ids:kind==="salvo"?excluded.filter(isId):[]};
    const q=oldAudience?s.from("clt_audiences").update(values).eq("id",oldAudience.id).eq("user_id",user.id):s.from("clt_audiences").insert({...values,user_id:user.id,company_id:input.companyId});
    const {data:saved,error:audError}=await q.select("id").single();
    if(audError||!saved)return {error:"Erro no público "+a.nome+": "+(audError?.message||"Falha")};

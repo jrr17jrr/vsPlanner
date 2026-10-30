@@ -21,6 +21,8 @@ export function Subtasks({ parentType, parentId, initialOpen = false }: { parent
     try { setItems(await listSubtasks(parentType, parentId)); setLoaded(true); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Erro ao carregar subtarefas."); }
   }
+  // reload() só altera estado depois do await (carregamento sob demanda ao abrir).
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { if (open && !loaded) void reload(); }, [open, loaded, parentId]);
   const roots = items.filter(x => !x.parent_subtask_id);
   const done = items.filter(x => x.is_done).length;
