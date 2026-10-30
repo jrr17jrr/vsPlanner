@@ -27,7 +27,8 @@ export async function importCltAudiencesJsonAction(companyId:string,raw:unknown)
  const lookup=new Map((existing||[]).map(a=>[a.name.toLowerCase(),a]));let count=0;
  for(const type of types){for(const a of normalized.filter(x=>x.audience_type===type)){
  const resolve=(name:string)=>lookup.get(name.toLowerCase())?.id;
- const origin=a.source?resolve(a.source):null;const includes=a.included.map(resolve);const excludes=a.excluded.map(resolve);
+ const origin=a.source?resolve(a.source):null;const includes=a.included.map(resolve).filter((id):id is string=>typeof id==="string");const excludes=a.excluded.map(resolve).filter((id):id is string=>typeof id==="string");
+ if(includes.length!==a.included.length||excludes.length!==a.excluded.length)throw Error("Públicos incluídos/excluídos não encontrados em "+a.name);
  if(type==="semelhante"&&!origin)throw Error("Origem não encontrada: "+a.source);
  if(type==="salvo"&&(!includes.length||includes.some(x=>!x)||excludes.some(x=>!x)))throw Error("Públicos incluídos/excluídos não encontrados em "+a.name);
  const values={name:a.name,audience_type:type,settings:a.settings,source_audience_id:type==="semelhante"?origin:null,included_audience_ids:type==="salvo"?includes:[],excluded_audience_ids:type==="salvo"?excludes:[]};
