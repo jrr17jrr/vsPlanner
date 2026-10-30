@@ -47,12 +47,12 @@ export function TrafficManager({companyId,month,budget,campaigns,results,sets,cr
   sales:rows.reduce((n,r)=>n+Number(r.sales||0),0),
   revenue:rows.reduce((n,r)=>n+Number(r.generated_revenue||0),0),
   views:rows.reduce((n,r)=>n+Number(r.views||0),0),
-  impressions:rows.reduce((n,r)=>n+Number(r.impressions||0),0),
-  reach:rows.reduce((n,r)=>n+Number(r.reach||0),0),
-  engagements:rows.reduce((n,r)=>n+Number(r.engagements||0),0),
-  linkClicks:rows.reduce((n,r)=>n+Number(r.link_clicks||0),0),
-  thruplays:rows.reduce((n,r)=>n+Number(r.thruplays||0),0),
-  leads:rows.reduce((n,r)=>n+Number(r.leads||0),0)
+  impressions:rows.reduce((n,r)=>n+Number("impressions" in r ? r.impressions||0 : 0),0),
+  reach:rows.reduce((n,r)=>n+Number("reach" in r ? r.reach||0 : 0),0),
+  engagements:rows.reduce((n,r)=>n+Number("engagements" in r ? r.engagements||0 : 0),0),
+  linkClicks:rows.reduce((n,r)=>n+Number("link_clicks" in r ? r.link_clicks||0 : 0),0),
+  thruplays:rows.reduce((n,r)=>n+Number("thruplays" in r ? r.thruplays||0 : 0),0),
+  leads:rows.reduce((n,r)=>n+Number("leads" in r ? r.leads||0 : 0),0)
  });
  const metricCards=(t:ReturnType<typeof levelTotals>)=>(
   <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
