@@ -96,7 +96,7 @@ export async function saveCltAdSetAction(input:{campaignId:string;name:string;au
 }
 
 
-export async function importCltCampaignJsonAction(input:{companyId:string;date:string;campaigns:{name:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null;status?:string}[]}):Promise<State>{
+export async function importCltCampaignJsonAction(input:{companyId:string;date:string;campaigns:{name:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null;status?:string;sets?:{name:string;ads:{name:string;format:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null}[]}[]}[]}):Promise<State>{
  const {s,user}=await ctx();
  if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||!Array.isArray(input.campaigns)||!input.campaigns.length||input.campaigns.length>50)return {error:"Arquivo inválido ou com mais de 50 campanhas."};
  const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();
@@ -113,6 +113,47 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
  const fields=[["spent","spent_amount"],["messages","messages"],["views","views"],["sales","sales"],["revenue","generated_revenue"]] as const;
  for(const c of input.campaigns){
   const old=existingByName.get(normalize(c.name));
+  if(c.sets?.length){
+   let campaignId=old?.id;
+   if(!campaignId){
+    const {data:newCampaign,error:campaignError}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:input.companyId,name:c.name.trim(),objective:"mensagens",starts_on:input.date,ends_on:input.date,budget_type:"total",daily_budget:0,planned_amount:0,campaign_status:"finalizada",spent_amount:0,messages:0,sales:0,views:0,description:"Estrutura importada de JSON. Datas reais da campanha não confirmadas."}).select("id").single();
+    if(campaignError||!newCampaign)return {error:campaignError?.message||"Erro ao criar campanha."};
+    campaignId=newCampaign.id;created++;
+   }else updated++;
+   const {data:oldSets,error:setsError}=await s.from("clt_ad_sets").select("id,name").eq("campaign_id",campaignId).eq("user_id",user.id);
+   if(setsError)return {error:setsError.message};
+   for(const setInput of c.sets){
+    if(!setInput.name.trim()||!setInput.ads?.length)return {error:"Conjunto sem nome ou anúncios."};
+    let setId=oldSets?.find(x=>normalize(x.name)===normalize(setInput.name))?.id;
+    if(!setId){
+     const {data:newSet,error:setError}=await s.from("clt_ad_sets").insert({user_id:user.id,campaign_id:campaignId,name:setInput.name.trim(),budget_amount:0}).select("id").single();
+     if(setError||!newSet)return {error:setError?.message||"Erro ao criar conjunto."};
+     setId=newSet.id;
+    }
+    const {data:oldAds,error:adsError}=await s.from("clt_ad_creatives").select("id,name").eq("ad_set_id",setId).eq("user_id",user.id);
+    if(adsError)return {error:adsError.message};
+    for(const adInput of setInput.ads){
+     if(!adInput.name.trim()||!["imagem","video","carrossel","outro"].includes(adInput.format)||![adInput.spent,adInput.messages,adInput.views,adInput.sales,adInput.revenue].every(valid))return {error:"Anúncio inválido."};
+     let adId=oldAds?.find(x=>normalize(x.name)===normalize(adInput.name))?.id;
+     if(!adId){
+      const {data:newAd,error:adError}=await s.from("clt_ad_creatives").insert({user_id:user.id,ad_set_id:setId,name:adInput.name.trim(),format:adInput.format}).select("id").single();
+      if(adError||!newAd)return {error:adError?.message||"Erro ao criar anúncio."};
+      adId=newAd.id;
+     }
+     if([adInput.spent,adInput.messages,adInput.views,adInput.sales,adInput.revenue].every(v=>v===null))continue;
+     // A legacy campaign entry on a different date would be counted twice.
+     const {data:legacy,error:legacyError}=await s.from("clt_campaign_result_entries").select("entry_date,spent_amount,messages,sales,generated_revenue").eq("campaign_id",campaignId).eq("user_id",user.id);
+     if(legacyError)return {error:legacyError.message};
+     if((legacy||[]).some(x=>x.entry_date!==input.date&&(Number(x.spent_amount||0)>0||Number(x.messages||0)>0||Number(x.sales||0)>0||Number(x.generated_revenue||0)>0)))return {error:"Há resultados antigos em outra data. Selecione a data do lançamento existente para evitar duplicação."};
+     const {data:previous,error:previousError}=await s.from("clt_ad_level_results").select("id").eq("ad_set_id",setId).eq("creative_id",adId).eq("entry_date",input.date).eq("user_id",user.id).maybeSingle();
+     if(previousError)return {error:previousError.message};
+     const values={user_id:user.id,campaign_id:campaignId,ad_set_id:setId,creative_id:adId,entry_date:input.date,spent_amount:adInput.spent??0,messages:adInput.messages??0,views:adInput.views??0,sales:adInput.sales??0,generated_revenue:adInput.revenue??0};
+     const {error:resultError}=previous?await s.from("clt_ad_level_results").update(values).eq("id",previous.id).eq("user_id",user.id):await s.from("clt_ad_level_results").insert(values);
+     if(resultError)return {error:resultError.message};
+    }
+   }
+   continue;
+  }
   if(old){
    const changes:Partial<{spent_amount:number;messages:number;views:number;sales:number;generated_revenue:number}>={};
    for(const [source,target] of fields){if(c[source]!==null)changes[target]=c[source] as number;}
