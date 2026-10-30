@@ -97,7 +97,7 @@ export async function saveCltAdSetAction(input:{campaignId:string;name:string;au
 }
 
 
-export async function importCltCampaignJsonAction(input:{companyId:string;date:string;campaigns:{name:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null;status?:string;sets?:{name:string;ads:{name:string;format:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null}[]}[]}[]}):Promise<State>{
+export async function importCltCampaignJsonAction(input:{companyId:string;date:string;campaigns:{name:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null;status?:string;publicos?:{nome:string;tipo:string;configuracoes?:Record<string,unknown>;origem?:string;incluidos?:string[];excluidos?:string[]}[];sets?:{name:string;publico?:string;ads:{name:string;format:string;spent:number|null;messages:number|null;views:number|null;sales:number|null;revenue:number|null}[]}[]}[]}):Promise<State>{
  const {s,user}=await ctx();
  if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||!Array.isArray(input.campaigns)||!input.campaigns.length||input.campaigns.length>50)return {error:"Arquivo inválido ou com mais de 50 campanhas."};
  const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();
@@ -111,6 +111,31 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
  const unique=new Set<string>();
  if(input.campaigns.some(c=>{const n=normalize(c.name);if(unique.has(n))return true;unique.add(n);return false;}))return {error:"O arquivo contém campanhas duplicadas."};
  let created=0,updated=0;
+ // Import audiences first, so ad sets can reference newly created audiences.
+ const {data:existingAudiences,error:audReadError}=await s.from("clt_audiences").select("id,name,audience_type").eq("company_id",input.companyId).eq("user_id",user.id);
+ if(audReadError)return {error:audReadError.message};
+ const audienceByName=new Map((existingAudiences||[]).map(a=>[normalize(a.name),a]));
+ const incoming=input.campaigns.flatMap(c=>c.publicos||[]);
+ if(incoming.length>100)return {error:"Máximo de 100 públicos por arquivo."};
+ for(const a of incoming){
+  if(!a.nome?.trim()||!["personalizado","semelhante","salvo"].includes(a.tipo))return {error:"Público inválido no JSON."};
+ }
+ for(const kind of ["personalizado","semelhante","salvo"]){
+  for(const a of incoming.filter(a=>a.tipo===kind)){
+   const key=normalize(a.nome),oldAudience=audienceByName.get(key);
+   if(oldAudience&&oldAudience.audience_type!==kind)return {error:"Tipo de público divergente: "+a.nome};
+   const resolve=(n:string)=>audienceByName.get(normalize(n))?.id;
+   const source=a.origem?resolve(a.origem):null;
+   const included=(a.incluidos||[]).map(resolve),excluded=(a.excluidos||[]).map(resolve);
+   if(kind==="semelhante"&&!source)return {error:"Origem não encontrada: "+a.nome};
+   if([...included,...excluded].some(id=>!id))return {error:"Referência de público não encontrada: "+a.nome};
+   const values={name:a.nome.trim(),audience_type:kind,settings:a.configuracoes||{},source_audience_id:kind==="semelhante"?source:null,included_audience_ids:kind==="salvo"?included:[],excluded_audience_ids:kind==="salvo"?excluded:[]};
+   const q=oldAudience?s.from("clt_audiences").update(values).eq("id",oldAudience.id).eq("user_id",user.id):s.from("clt_audiences").insert({...values,user_id:user.id,company_id:input.companyId});
+   const {data:saved,error:audError}=await q.select("id").single();
+   if(audError||!saved)return {error:"Erro no público "+a.nome+": "+(audError?.message||"Falha")};
+   audienceByName.set(key,{id:saved.id,name:a.nome,audience_type:kind});
+  }
+ }
  const fields=[["spent","spent_amount"],["messages","messages"],["views","views"],["sales","sales"],["revenue","generated_revenue"]] as const;
  for(const c of input.campaigns){
   const old=existingByName.get(normalize(c.name));
@@ -126,8 +151,13 @@ export async function importCltCampaignJsonAction(input:{companyId:string;date:s
    for(const setInput of c.sets){
     if(!setInput.name.trim()||!setInput.ads?.length)return {error:"Conjunto sem nome ou anúncios."};
     let setId=oldSets?.find(x=>normalize(x.name)===normalize(setInput.name))?.id;
+    const audienceName=setInput.publico?.trim();
+    const audienceRef=audienceName?audienceByName.get(normalize(audienceName)):null;
+    if(audienceName&&!audienceRef)return {error:"Público não encontrado: "+audienceName};
+    if(audienceRef&&audienceRef.audience_type!=="salvo")return {error:"O conjunto precisa de um público salvo: "+audienceName};
+    if(setId&&audienceRef){const {error:linkError}=await s.from("clt_ad_sets").update({saved_audience_id:audienceRef.id}).eq("id",setId).eq("user_id",user.id);if(linkError)return {error:linkError.message};}
     if(!setId){
-     const {data:newSet,error:setError}=await s.from("clt_ad_sets").insert({user_id:user.id,campaign_id:campaignId,name:setInput.name.trim(),budget_amount:0}).select("id").single();
+     const {data:newSet,error:setError}=await s.from("clt_ad_sets").insert({user_id:user.id,campaign_id:campaignId,name:setInput.name.trim(),budget_amount:0,saved_audience_id:audienceRef?.id||null}).select("id").single();
      if(setError||!newSet)return {error:setError?.message||"Erro ao criar conjunto."};
      setId=newSet.id;
     }
