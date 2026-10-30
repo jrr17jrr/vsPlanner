@@ -1,0 +1,285 @@
+{
+  "schema_version": "1.0",
+  "import_type": "campaigns",
+  "company": {
+    "external_key": "ig_predial",
+    "name": "IG Predial"
+  },
+  "metrics_period": {
+    "start": "2026-09-30",
+    "end": "2026-10-29"
+  },
+  "timezone": "America/Sao_Paulo",
+  "upsert_by": "meta_campaign_id / meta_adset_id / meta_ad_id",
+  "audience_lookup_field": "audience_external_key",
+  "campaigns": [
+    {
+      "meta_campaign_id": "120254389360490655",
+      "name": "IG Predial | WhatsApp | Cabo Frio | 15/10/2026",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254389360460655",
+          "name": "Cabo Frio | Público Amplo | WhatsApp",
+          "audience_external_key": "igp_aud_cabo_frio_20261015",
+          "ads": [
+            {
+              "meta_ad_id": "120254389360480655",
+              "name": "Imagem 01 | Cabo Frio",
+              "post_id": "18157890082509859",
+              "metrics": {
+                "spend_brl": 206.22,
+                "whatsapp_conversations": 21,
+                "sales": 37,
+                "revenue_brl": 9360,
+                "impressions": 17981,
+                "reach": 8167
+              },
+              "sale_location": "Cabo Frio"
+            }
+          ],
+          "placements": "Advantage+",
+          "start_at_local": "2026-10-15T10:20:00",
+          "scheduled_end_at_local": "2026-11-01T10:20:00"
+        }
+      ],
+      "daily_budget_brl": 15
+    },
+    {
+      "meta_campaign_id": "120254559453130655",
+      "name": "IG Predial | CONJUNTO | WhatsApp | Vídeo x Foto | 26/10/26 s interesse",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254592685230655",
+          "name": "IG Predial | WhatsApp | foto| Público Amplo",
+          "audience_external_key": "igp_aud_rj_sem_interesses",
+          "ads": [
+            {
+              "meta_ad_id": "120254592685240655",
+              "name": "Foto 01 | Inspeção de Gás | WhatsApp",
+              "post_id": "18128121491488637",
+              "metrics": {
+                "spend_brl": 26.46,
+                "whatsapp_conversations": 3,
+                "sales": null,
+                "revenue_brl": null,
+                "impressions": null,
+                "reach": null
+              },
+              "notes": "Métricas vistas no nível conjunto, atribuição provisória ao único anúncio; confirmar desempenho no nível anúncio."
+            }
+          ],
+          "placements": "Advantage+",
+          "daily_budget_brl": 15,
+          "start_at_local": "2026-10-28T07:07:00",
+          "scheduled_end_at_local": "2026-11-01T07:04:00"
+        },
+        {
+          "meta_adset_id": "120254559453140655",
+          "name": "IG Predial | WhatsApp | Vídeo | Público Amplo",
+          "audience_external_key": "igp_aud_rj_sem_interesses",
+          "ads": [
+            {
+              "meta_ad_id": "120254559453150655",
+              "name": "Vídeo 01 | Inspeção de Gás | WhatsApp",
+              "post_id": null,
+              "metrics": {
+                "spend_brl": 19.47,
+                "whatsapp_conversations": null,
+                "sales": null,
+                "revenue_brl": null,
+                "impressions": null,
+                "reach": null
+              },
+              "notes": "Conversas exibidas como traço, não como zero. Métrica de conjunto atribuída provisoriamente ao único anúncio."
+            }
+          ],
+          "placements": "Advantage+",
+          "daily_budget_brl": 5.13,
+          "start_at_local": "2026-10-26T14:40:00",
+          "reported_status": "desativado"
+        }
+      ],
+      "campaign_reported_totals_for_reconciliation_only": {
+        "spend_brl": 52.75,
+        "whatsapp_conversations": 4,
+        "impressions": 2773,
+        "unallocated_spend_brl": 6.82,
+        "unallocated_conversations": 1
+      },
+      "notes": "NÃO distribuir diferença automaticamente. Soma dos anúncios conhecidos: R$45,93 e 3 conversas informadas. Totais da campanha: R$52,75 e 4 conversas."
+    },
+    {
+      "meta_campaign_id": "120254302493380655",
+      "name": "IG Predial | WhatsApp | Prazo Acabou | 10/10/26",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254302493370655",
+          "name": "SG + Niterói | Semelhante 1% | WhatsApp",
+          "audience_external_key": "igp_aud_rj_teste_interesses",
+          "ads": [
+            {
+              "meta_ad_id": "120254302493360655",
+              "name": "Imagem 01 | O Prazo Acabou",
+              "post_id": "18093176255667760",
+              "metrics": {
+                "spend_brl": 167,
+                "whatsapp_conversations": 18,
+                "sales": 1,
+                "revenue_brl": 250,
+                "impressions": 8947,
+                "reach": 4870
+              },
+              "sale_location": "Niterói – RJ"
+            }
+          ],
+          "placements": "Advantage+",
+          "start_at_local": "2026-10-10T10:04:00",
+          "scheduled_end_at_local": "2026-11-26T10:04:00",
+          "reported_status": "desativado",
+          "notes": "Nome menciona semelhante 1%, mas público salvo informado é Publico geral teste interesses 30/07/26."
+        }
+      ],
+      "daily_budget_brl": 15
+    },
+    {
+      "meta_campaign_id": "120254450015650655",
+      "name": "WhatsApp | Macaé + | 15/10/2026",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254450015640655",
+          "name": "Macaé | Público Amplo | WhatsAppp",
+          "audience_external_key": "igp_aud_macae_20261019",
+          "ads": [
+            {
+              "meta_ad_id": "120254450016000655",
+              "name": "Imagem 01 | Macaé",
+              "post_id": "18126076583313772",
+              "metrics": {
+                "spend_brl": 104.48,
+                "whatsapp_conversations": 11,
+                "sales": null,
+                "revenue_brl": null,
+                "impressions": 10000,
+                "reach": 5495
+              }
+            }
+          ],
+          "placements": "Advantage+",
+          "start_at_local": "2026-10-19T14:27:00",
+          "scheduled_end_at_local": "2026-10-26T14:22:00"
+        }
+      ],
+      "daily_budget_brl": 15
+    },
+    {
+      "meta_campaign_id": "120254449855550655",
+      "name": "WhatsApp | Araruama + 19/10/2026",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254449855570655",
+          "name": "Araruama | Público Amplo | WhatsAppp",
+          "audience_external_key": "igp_aud_araruama_20261019",
+          "ads": [
+            {
+              "meta_ad_id": "120254449855740655",
+              "name": "Imagem 01 | Araruamaa",
+              "post_id": "18345626329249582",
+              "metrics": {
+                "spend_brl": 104.43,
+                "whatsapp_conversations": 7,
+                "sales": null,
+                "revenue_brl": null,
+                "impressions": 11355,
+                "reach": 5810
+              }
+            }
+          ],
+          "placements": "Advantage+",
+          "start_at_local": "2026-10-19T14:20:00",
+          "scheduled_end_at_local": "2026-10-26T14:09:00"
+        }
+      ],
+      "daily_budget_brl": 15
+    },
+    {
+      "meta_campaign_id": "120254389895650655",
+      "name": "WhatsApp | São Pedro da Aldeia + | 15/10/2026",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254389895630655",
+          "name": "São Pedro da Aldeia | Público Amplo | WhatsAppp",
+          "audience_external_key": "igp_aud_spa_20261015",
+          "ads": [
+            {
+              "meta_ad_id": "120254389895640655",
+              "name": "Imagem 01 | São Pedro da Aldeia",
+              "post_id": "18490405426105567",
+              "metrics": {
+                "spend_brl": 104.11,
+                "whatsapp_conversations": 12,
+                "sales": null,
+                "revenue_brl": null,
+                "impressions": null,
+                "reach": null
+              }
+            }
+          ],
+          "placements": "Advantage+",
+          "start_at_local": "2026-10-15T10:49:00",
+          "scheduled_end_at_local": "2026-10-22T10:45:00"
+        }
+      ],
+      "daily_budget_brl": 15
+    },
+    {
+      "meta_campaign_id": "120254389531650655",
+      "name": "WhatsApp | Rio das Ostras + | 15/10/2026",
+      "objective": "engagement_to_whatsapp",
+      "buying_type": "auction",
+      "ad_sets": [
+        {
+          "meta_adset_id": "120254389531670655",
+          "name": "Rio das Ostras | Público Amplo | WhatsApp",
+          "audience_external_key": "igp_aud_rio_ostras_20261015",
+          "ads": [
+            {
+              "meta_ad_id": "120254389531660655",
+              "name": "Imagem 01 | Rio das Ostras",
+              "post_id": "18025046090875759",
+              "metrics": {
+                "spend_brl": 104.18,
+                "whatsapp_conversations": 7,
+                "sales": null,
+                "revenue_brl": null,
+                "impressions": null,
+                "reach": null
+              }
+            }
+          ],
+          "placements": "Advantage+",
+          "start_at_local": "2026-10-15T10:31:00",
+          "scheduled_end_at_local": "2026-10-22T10:25:00"
+        }
+      ],
+      "daily_budget_brl": 15
+    }
+  ],
+  "data_quality_notes": [
+    "O teste Vídeo x Foto possui divergência entre métricas dos conjuntos e total da campanha.",
+    "Os totais de reconciliação NÃO devem ser somados ao resultado dos anúncios.",
+    "Valores null significam não informados, não zero.",
+    "As métricas dos conjuntos com apenas um anúncio foram provisoriamente atribuídas ao anúncio; confirmar se possível."
+  ]
+}
