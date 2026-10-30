@@ -1,0 +1,230 @@
+{
+  "schema_version": "1.0",
+  "import_type": "audiences",
+  "company": {
+    "external_key": "ig_predial",
+    "name": "IG Predial"
+  },
+  "upsert_by": "external_key",
+  "audiences": [
+    {
+      "external_key": "igp_aud_macae_20261019",
+      "name": "Macaé | + | 19/10/26",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "city": "Macaé",
+        "radius_km": 10
+      },
+      "age_range": [
+        20,
+        65
+      ],
+      "interests": [],
+      "estimated_size": [
+        374000,
+        440000
+      ],
+      "created_at_local": "2026-10-19T14:05:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_araruama_20261019",
+      "name": "Araruama | + | 19/10/26",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "city": "Araruama",
+        "radius_km": 10
+      },
+      "age_range": [
+        20,
+        65
+      ],
+      "interests": [],
+      "estimated_size": [
+        246600,
+        290100
+      ],
+      "created_at_local": "2026-10-19T14:04:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_spa_20261015",
+      "name": "São Pedro da Aldeia | +| 15/10/26",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "city": "São Pedro da Aldeia",
+        "radius_km": 10
+      },
+      "age_range": [
+        20,
+        65
+      ],
+      "interests": [],
+      "estimated_size": [
+        419800,
+        493900
+      ],
+      "created_at_local": "2026-10-15T10:03:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_rio_ostras_20261015",
+      "name": "Rio das Ostras | + | 15/10/26",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "city": "Rio das Ostras",
+        "radius_km": 10
+      },
+      "age_range": [
+        20,
+        65
+      ],
+      "interests": [],
+      "estimated_size": [
+        233300,
+        274500
+      ],
+      "created_at_local": "2026-10-15T10:02:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_cabo_frio_20261015",
+      "name": "Cabo Frio | + | 15/10/26",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "city": "Cabo Frio",
+        "radius_km": 10
+      },
+      "age_range": [
+        20,
+        65
+      ],
+      "interests": [],
+      "estimated_size": [
+        258600,
+        304300
+      ],
+      "created_at_local": "2026-10-15T10:01:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_rj_teste_interesses",
+      "name": "Publico geral teste interesses 30/07/26",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "state": "Rio de Janeiro",
+        "country": "BR",
+        "location_optimization": true
+      },
+      "age_range": [
+        18,
+        65
+      ],
+      "interests": [
+        "Condomínio fechado",
+        "Engenharia civil"
+      ],
+      "estimated_size": [
+        84400000,
+        99300000
+      ],
+      "created_at_local": "2026-10-10T09:52:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_rj_sem_interesses",
+      "name": "IG Predial | RJ | Sem interesses Advantage+",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "state": "Rio de Janeiro",
+        "country": "BR",
+        "location_optimization": true
+      },
+      "age_range": [
+        18,
+        65
+      ],
+      "interests": [],
+      "estimated_size": [
+        84400000,
+        99300000
+      ],
+      "created_at_local": "2026-07-30T16:15:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_rj_com_interesses",
+      "name": "IG Predial | RJ | Com interesses Advantage+",
+      "type": "saved",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "targeting_location": {
+        "state": "Rio de Janeiro",
+        "country": "BR",
+        "location_optimization": true
+      },
+      "age_range": [
+        18,
+        65
+      ],
+      "interests": [
+        "Condomínio fechado",
+        "Condomínio",
+        "Engenharia civil"
+      ],
+      "estimated_size": [
+        84400000,
+        99300000
+      ],
+      "created_at_local": "2026-07-30T14:49:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_ig_eng_185d",
+      "name": "IG Predial | Instagram | Engajamento | 185D",
+      "type": "custom",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "source": {
+        "instagram_account": "@ig_predial",
+        "event": "instagram_engagement",
+        "retention_days": 180
+      },
+      "notes": "O nome diz 185D, mas a retenção real configurada é 180 dias. Nome anterior: 365D.",
+      "estimated_size": [
+        1200,
+        1400
+      ],
+      "created_at_local": "2026-10-22T14:00:00",
+      "language": "pt_BR"
+    },
+    {
+      "external_key": "igp_aud_lookalike_1pct_185d",
+      "name": "Semelhante (1%) - IG Predial | Instagram | Engajamento | 185D",
+      "type": "lookalike",
+      "platform": "meta_ads",
+      "company_key": "ig_predial",
+      "source": {
+        "audience_external_key": "igp_aud_ig_eng_185d",
+        "percentage": 1
+      },
+      "notes": "Tamanho não informado.",
+      "created_at_local": "2026-10-30T16:12:00",
+      "language": "pt_BR"
+    }
+  ]
+}
