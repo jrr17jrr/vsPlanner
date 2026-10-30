@@ -80,7 +80,7 @@ export function ConfiguracoesPageClient({
       </Card>
 
       <PushSettings />
-      <NotificationPreferencesPanel initial={profile.notification_preferences ?? {tasks:true,routine:true,meetings:true,finance:true,clt:true}} canAccessClt={profile.system_role==="super_admin"||profile.clt_access!==false} />
+      <NotificationPreferencesPanel initial={profile.notification_preferences ?? { tasks: true, routine: true, meetings: true, finance: true, clt: true }} canAccessClt={profile.system_role==="super_admin"||profile.clt_access!==false} />
 
       <Card className="p-4">
         <p className="mb-3 text-sm font-medium text-foreground">Preferências</p>
