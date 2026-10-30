@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     let sent = 0;
     for (const task of candidates) {
       const event_key = `task-reminder:${task.table}:${task.id}:${date}:${task.scheduled_time?.slice(0,5)}`;
-      const { error: logError } = await admin.from("push_delivery_log").insert({ user_id: task.user_id, event_key });
+      const { error: logError } = await admin.from("push_delivery_log").insert({ user_id: task.user_id, event_key } as never);
       if (logError) {
         if (logError.code === "23505") continue;
         throw logError;
