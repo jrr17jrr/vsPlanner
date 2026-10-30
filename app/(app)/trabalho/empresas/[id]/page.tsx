@@ -48,7 +48,7 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  <CompanyResultsSummary results={(resultsQuery.data||[]) as CltCampaignResultEntry[]}/>
  <CompanyDetailBalance company={company}/>
  <AudienceManager companyId={id} audiences={(audiencesQuery.data||[]) as AudienceRecord[]}/>
- <TrafficManager companyId={id} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={(levelResultsQuery.data||[]) as CltAdLevelResult[]} comparison={comparisonQuery.data||null}/>
+ <TrafficManager companyId={id} audiences={(audiencesQuery.data||[]) as AudienceRecord[]} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={(levelResultsQuery.data||[]) as CltAdLevelResult[]} comparison={comparisonQuery.data||null}/>
  <CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={data.occurrences}/>
  <Card><CardContent className="space-y-3 p-4"><div className="flex items-center justify-between"><h2 className="font-semibold">Campanhas da empresa</h2><Button asChild variant="outline" size="sm"><Link href="/trabalho/campanhas">Gerenciar campanhas</Link></Button></div>
  <p className="text-xs text-muted-foreground">Totais das campanhas cadastradas: {messages} mensagens · {sales} vendas. O investimento mostrado é a soma dos registros, não necessariamente apenas do mês atual.</p>
