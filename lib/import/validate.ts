@@ -33,6 +33,7 @@ export type PreviewAdSet = {
   metaId: string | null; name: string; action: RowAction; existingId: string | null;
   audience: AudienceLink | null;
   dailyBudget: number | null; startAt: string | null; endAt: string | null; status: string | null; placements: string | null; notes: string | null;
+  resultType?: string | null;
   ads: PreviewAd[];
 };
 export type PreviewCampaign = {
@@ -332,7 +333,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
 
       adSets.push({
         metaId: s.metaId, name: s.name, action: setMatch ? "update" : "create", existingId: setMatch?.id ?? null, audience,
-        dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, ads,
+        dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, resultType: s.resultType ?? null, ads,
       });
     });
 

@@ -73,6 +73,8 @@ export type ImportAdSet = {
   status: string | null;
   placements: string | null;
   notes: string | null;
+  /** Tipo de resultado do conjunto (opcional: result_type/optimization_goal no JSON). */
+  resultType?: string | null;
   ads: ImportAd[];
 };
 

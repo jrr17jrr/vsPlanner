@@ -82,6 +82,9 @@ beforeAll(async () => {
   await db.exec(migration("20261030110000_clt_smart_import.sql"));
   // Rodar de novo prova que é idempotente.
   await db.exec(migration("20261030110000_clt_smart_import.sql"));
+  // Tipo de resultado por conjunto (histórico/custo por mensagem) — aditiva e idempotente.
+  await db.exec(migration("20261031110000_clt_ad_set_result_type.sql"));
+  await db.exec(migration("20261031110000_clt_ad_set_result_type.sql"));
 
   await db.exec(`insert into auth.users values ('${U1}'), ('${U2}'); insert into public.profiles values ('${U1}', 'Dono'), ('${U2}', 'Outro');`);
   companyId = (await db.query<{ id: string }>(`insert into clt_companies (user_id, name) values ('${U1}', 'IG Predial') returning id`)).rows[0].id;
@@ -203,5 +206,20 @@ Conversas: 22`;
     // O conjunto estimado não é ligado a nenhum público (o arquivo não informa público).
     const est = (await db.query<{ saved_audience_id: string | null }>("select saved_audience_id from clt_ad_sets where name like $1", ["Conjunto excluído%"])).rows[0];
     expect(est.saved_audience_id).toBeNull();
+  });
+});
+
+describe("clt_ad_sets.result_type (migration 20261031110000)", () => {
+  it("conjuntos importados ficam sem classificação (null) e o dono pode classificar só com valores válidos", async () => {
+    const before = (await db.query<{ n: number }>(`select count(*)::int n from clt_ad_sets where result_type is not null`)).rows[0].n;
+    expect(before).toBe(0);
+    const set = (await db.query<{ id: string }>(`select s.id from clt_ad_sets s join clt_campaigns c on c.id = s.campaign_id where c.company_id = '${companyId}' limit 1`)).rows[0].id;
+    await asUser(U1, () => db.query(`update clt_ad_sets set result_type = 'mensagens' where id = $1`, [set]));
+    expect((await db.query<{ result_type: string }>(`select result_type from clt_ad_sets where id = $1`, [set])).rows[0].result_type).toBe("mensagens");
+    await expect(asUser(U1, () => db.query(`update clt_ad_sets set result_type = 'qualquer' where id = $1`, [set]))).rejects.toThrow();
+    // Outro usuário não altera (RLS): zero linhas afetadas.
+    const other = await asUser(U2, () => db.query(`update clt_ad_sets set result_type = 'vendas' where id = $1`, [set]));
+    expect(other.affectedRows ?? 0).toBe(0);
+    expect((await db.query<{ result_type: string }>(`select result_type from clt_ad_sets where id = $1`, [set])).rows[0].result_type).toBe("mensagens");
   });
 });

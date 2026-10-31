@@ -20,6 +20,8 @@ import { CompanyTabs, type CompanyTabId } from "@/components/trabalho/company/co
 import { OverviewAudiences, OverviewCampaigns, OverviewTasks } from "@/components/trabalho/company/overview-sections";
 import { CompanyFinance, type AccountMovement } from "@/components/trabalho/company/company-finance";
 import { MonthlyVideoPlanSeeder } from "@/components/trabalho/company/monthly-video-plan-seeder";
+import { loadHistoryInput } from "@/lib/supabase/clt-history-data";
+import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
 
 const money = (n:number) => n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
@@ -55,6 +57,8 @@ export default async function CompanyPage({params,searchParams}:{params:Promise<
  const setIds=(setsQuery.data||[]).map(s=>s.id);
  const creativesQuery=await supabase.from("clt_ad_creatives").select("*").in("ad_set_id",setIds.length?setIds:["00000000-0000-0000-0000-000000000000"]);
  const mergedResults=await withImportedPeriodResults(supabase,companyCampaignIds,(resultsQuery.data||[]) as CltCampaignResultEntry[]);
+ // Custo por mensagem da visão geral: só investimento elegível (conjuntos/campanhas de mensagens).
+ const messaging=messagingPoints(buildHistoryFacts(await loadHistoryInput(supabase,campaigns.map(c=>({id:c.id,company_id:c.company_id,name:c.name,objective:c.objective,starts_on:c.starts_on,ends_on:c.ends_on,campaign_status:c.campaign_status??null})))).facts);
  const levelRows=mergeAdLevelResults((levelResultsQuery.data||[]) as CltAdLevelResult[],(periodQuery.error?[]:periodQuery.data||[]) as PeriodMetricFullRow[]).rows;
  const audiences=(audiencesQuery.data||[]) as AudienceRecord[];
  const sets=(setsQuery.data||[]) as CltAdSet[];
@@ -74,7 +78,7 @@ export default async function CompanyPage({params,searchParams}:{params:Promise<
  const overview=<>
  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
  {([{label:"Saldo da Meta",value:money(Number(company.current_ad_balance)),icon:Wallet},{label:"Tarefas pendentes",value:String(pending),icon:Clock},{label:"Campanhas cadastradas",value:String(campaigns.length),icon:CalendarDays},{label:"Investimento registrado",value:money(spent),icon:CheckCircle2}]).map(item=><Card key={item.label}><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><item.icon className="h-4 w-4 text-primary"/>{item.label}</div><p className="mt-2 text-xl font-semibold">{item.value}</p></CardContent></Card>)}</div>
- <CompanyResultsSummary results={mergedResults.results}/>
+ <CompanyResultsSummary results={mergedResults.results} messaging={messaging}/>
  <ImportedReconciliation rows={(reconciliationQuery.data||[]) as ReconciliationRow[]} campaigns={campaigns.map(c=>({id:c.id,name:c.name}))} excludedLegacy={mergedResults.excludedLegacy}/>
  <div className="space-y-3">
  <OverviewCampaigns campaigns={campaigns}/>

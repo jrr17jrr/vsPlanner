@@ -1,3 +1,4 @@
+import { normalizeObjective } from "@/lib/clt/history";
 import { parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 import {
   emptyMetrics,
@@ -171,6 +172,8 @@ function readAdSet(set: Obj, path: string, problems: ParseProblem[]): ImportAdSe
     status: str(pick(set, ["reported_status", "status"])),
     placements: str(set.placements),
     notes: str(pick(set, ["notes", "observacoes"])),
+    // Opcional: objetivo/otimização do conjunto (arquivos antigos seguem sem ele).
+    resultType: normalizeObjective(str(pick(set, ["result_type", "tipo_resultado", "optimization_goal", "otimizacao", "objective", "objetivo"]))),
     ads: ads.filter(isObj).map((ad, k) => readAd(ad, `${path}.ads[${k}]`, problems)),
   };
 }

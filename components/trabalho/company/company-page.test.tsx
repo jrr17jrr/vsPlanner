@@ -8,6 +8,7 @@ import { CompanyResultsSummary } from "@/components/trabalho/company-results-sum
 import { mergePeriodResults, periodResultsToEntries, type PeriodMetricRow } from "@/lib/clt/period-results";
 import type { AudienceRecord } from "@/lib/supabase/clt-audience-actions";
 import type { CltCampaign, CltTask } from "@/types/database.types";
+import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 
 /**
  * Renderiza a página da empresa no servidor (sem banco) e confere a
@@ -77,7 +78,7 @@ describe("seções recolhíveis", () => {
 describe("resultados da empresa — referência IG Predial 30/09 a 29/10/2026", () => {
   // Linhas por anúncio lidas do arquivo real (9 anúncios, incluindo a estimativa do conjunto excluído).
   type Ad = { metrics?: Record<string, number | null> };
-  const file = JSON.parse(readFileSync("dados-importacao/ig-predial/ig_predial_campanhas_atualizado_conjunto_excluido.json", "utf8")) as { campaigns: { ad_sets: { ads?: Ad[] }[] }[] };
+  const file = JSON.parse(readFileSync("dados-importacao/ig-predial/ig_predial_campanhas_atualizado_conjunto_excluido.json", "utf8")) as { campaigns: { objective: string; ad_sets: { ads?: Ad[] }[] }[] };
   const rows: PeriodMetricRow[] = file.campaigns.flatMap((c, i) => c.ad_sets.flatMap(s => (s.ads ?? []).map(ad => ({
     campaign_id: "c" + i, period_start: "2026-09-30", period_end: "2026-10-29",
     spend: ad.metrics?.spend_brl ?? null, conversations: ad.metrics?.whatsapp_conversations ?? null, sales: ad.metrics?.sales ?? null,
@@ -90,7 +91,14 @@ describe("resultados da empresa — referência IG Predial 30/09 a 29/10/2026", 
     const legacy = [{ campaign_id: "c0", entry_date: "2026-10-20" }];
     const merged = mergePeriodResults(legacy, rows);
     expect(merged.excludedLegacy).toBe(1);
-    const html = text(renderToStaticMarkup(<CompanyResultsSummary results={periodResultsToEntries(merged.imported)} />));
+    // Objetivo real do arquivo (engagement_to_whatsapp) → todo o investimento é elegível para mensagens.
+    const history = buildHistoryFacts({
+      campaigns: file.campaigns.map((c, i) => ({ id: "c" + i, company_id: "ig", name: "c" + i, objective: c.objective, starts_on: "2026-09-30", ends_on: "2026-10-29" })),
+      adSets: rows.map((r, i) => ({ id: "s" + i, campaign_id: r.campaign_id, name: "s" + i })),
+      campaignEntries: [], adLevelEntries: [],
+      periodMetrics: rows.map((r, i) => ({ ...r, ad_set_id: "s" + i, creative_id: "a" + i })),
+    });
+    const html = text(renderToStaticMarkup(<CompanyResultsSummary results={periodResultsToEntries(merged.imported)} messaging={messagingPoints(history.facts)} />));
     expect(html).toMatch(/Gasto em anúncios R\$ 843,17/);
     expect(html).toMatch(/Faturamento bruto R\$ 9\.610,00/);
     expect(html).toMatch(/Mensagens 80 /);

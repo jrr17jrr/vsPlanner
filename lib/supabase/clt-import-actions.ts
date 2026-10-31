@@ -122,11 +122,27 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
     const { data, error } = await db.rpc("clt_import_bundle", { p_company_id: preview.companyId, p_payload: buildImportPayload(preview) });
     if (error) return { error: `Importação cancelada, nada foi gravado: ${describeError(error)}` };
 
+    // Tipo de resultado por conjunto (opcional no JSON): só preenche quem veio no arquivo, sem tocar em métricas.
+    const typed = preview.campaigns.flatMap(c => c.adSets.filter(s => s.resultType).map(s => ({ campaign: c, set: s })));
+    let typeWarning = "";
+    if (typed.length) {
+      const { data: rows } = await db.from("clt_ad_sets").select("id,name,meta_adset_id,campaign_id,clt_campaigns!inner(company_id,name,meta_campaign_id)").eq("clt_campaigns.company_id", preview.companyId);
+      for (const { campaign, set } of typed) {
+        const match = (rows ?? []).find((r: { name: string; meta_adset_id: string | null; clt_campaigns: unknown }) => {
+          const cmp = (Array.isArray(r.clt_campaigns) ? r.clt_campaigns[0] : r.clt_campaigns) as { name: string; meta_campaign_id: string | null };
+          const sameCampaign = campaign.metaId ? cmp.meta_campaign_id === campaign.metaId : cmp.name === campaign.name;
+          return sameCampaign && (set.metaId ? r.meta_adset_id === set.metaId : r.name === set.name);
+        }) as { id: string } | undefined;
+        if (!match) continue;
+        const { error: typeError } = await db.from("clt_ad_sets").update({ result_type: set.resultType }).eq("id", match.id);
+        if (typeError) { typeWarning = " O tipo de resultado dos conjuntos não foi gravado (atualização do banco pendente: clt_ad_sets.result_type)."; break; }
+      }
+    }
     ["/trabalho", "/trabalho/empresas", "/trabalho/campanhas", "/trabalho/relatorios", "/trabalho/analises", "/trabalho/importar"].forEach(p => revalidatePath(p));
     revalidatePath("/trabalho/empresas/[id]", "page");
     const s = (data ?? {}) as Record<string, number | string>;
     return {
-      success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas.`,
+      success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas.${typeWarning}`,
       summary: s,
     };
   } catch (e) {
