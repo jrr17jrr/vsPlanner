@@ -1,3 +1,5 @@
+import type { CltCampaignResultEntry } from "@/types/database.types";
+
 /**
  * Consolida as métricas importadas por período (`clt_ad_period_metrics`,
  * nível anúncio) com os lançamentos antigos (`clt_campaign_result_entries`,
@@ -65,4 +67,28 @@ export function mergePeriodResults<T extends LegacyResultRow>(legacy: T[], perio
     excludedLegacy: legacy.length - kept.length,
     crossMonthPeriods: periods.filter(p => p.period_start.slice(0, 7) !== p.period_end.slice(0, 7)).length,
   };
+}
+
+/** Períodos importados no formato de `clt_campaign_result_entries` (o que dashboards, análises e o PDF já usam). */
+export function periodResultsToEntries(imported: PeriodResult[]): CltCampaignResultEntry[] {
+  return imported.map(p => ({
+    id: `import:${p.campaign_id}:${p.period_start}:${p.period_end}`,
+    user_id: "",
+    campaign_id: p.campaign_id,
+    entry_date: p.entry_date,
+    spent_amount: p.spent_amount,
+    messages: p.messages,
+    sales: p.sales,
+    views: 0,
+    appointments: 0,
+    impressions: p.impressions,
+    reach: 0,
+    profile_visits: 0,
+    link_clicks: 0,
+    engagements: 0,
+    thruplays: 0,
+    leads: 0,
+    generated_revenue: p.generated_revenue,
+    notes: `Importado por anúncio — período ${p.period_start} a ${p.period_end} (soma dos valores informados).`,
+  }));
 }

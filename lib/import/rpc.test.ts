@@ -8,6 +8,7 @@ import { buildImportPayload } from "./plan";
 import { buildSnapshot, type SnapshotRows } from "./snapshot";
 import { mergeAdLevelResults, withImportedCampaignTotals, type PeriodMetricFullRow } from "@/lib/clt/ad-metrics";
 import { describeAudienceSettings } from "@/lib/clt/audience-summary";
+import { mergePeriodResults, periodResultsToEntries, type PeriodMetricRow } from "@/lib/clt/period-results";
 
 /**
  * Integração: roda as migrations REAIS do repositório num Postgres
@@ -187,5 +188,20 @@ Conversas: 22`;
     await expect(asUser(U2, () => db.query("select public.clt_import_bundle($1, $2::jsonb)", [otherCompanyId, JSON.stringify(payload)]))).rejects.toThrow(/outra empresa/);
     const seen = await asUser(U2, async () => (await db.query<{ n: number }>("select count(*)::int n from clt_ad_period_metrics")).rows[0].n);
     expect(seen).toBe(0); // RLS: U2 não enxerga métricas de U1
+  });
+
+  it("arquivo atualizado (conjunto excluído estimado): 80 mensagens, 38 vendas, R$ 9.610,00, R$ 843,17, 48.283 impressões, sem duplicar", async () => {
+    const before = await count("clt_ad_period_metrics");
+    const r = await importContent(U1, companyId, fixture("ig_predial_campanhas_atualizado_conjunto_excluido.json"));
+    expect(r).toMatchObject({ campaigns_created: 0, ad_sets_created: 1, ads_created: 1 });
+    expect(await count("clt_ad_period_metrics")).toBe(before + 1);
+    const rows = await asUser(U1, async () => (await db.query<PeriodMetricRow>("select campaign_id, period_start::text, period_end::text, spend::text, conversations, sales, revenue::text, impressions from clt_ad_period_metrics where company_id = $1", [companyId])).rows);
+    const entries = periodResultsToEntries(mergePeriodResults([], rows).imported);
+    const sum = (k: "spent_amount" | "messages" | "sales" | "generated_revenue" | "impressions") => Math.round(entries.reduce((a, e) => a + Number(e[k]), 0) * 100) / 100;
+    expect({ spend: sum("spent_amount"), messages: sum("messages"), sales: sum("sales"), revenue: sum("generated_revenue"), impressions: sum("impressions") })
+      .toEqual({ spend: 843.17, messages: 80, sales: 38, revenue: 9610, impressions: 48283 });
+    // O conjunto estimado não é ligado a nenhum público (o arquivo não informa público).
+    const est = (await db.query<{ saved_audience_id: string | null }>("select saved_audience_id from clt_ad_sets where name like $1", ["Conjunto excluído%"])).rows[0];
+    expect(est.saved_audience_id).toBeNull();
   });
 });

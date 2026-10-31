@@ -40,3 +40,17 @@ export async function importCltAudiencesJsonAction(companyId:string,raw:unknown)
  revalidatePath("/trabalho/empresas/[id]","page");return {success:count+" públicos importados/atualizados."};
  }catch(e){return {error:e instanceof Error?e.message:"Erro ao importar."};}
 }
+// Exclusão só de públicos sem vínculo: nunca desfaz o vínculo de conjuntos (saved_audience_id) nem de outros públicos.
+export async function deleteCltAudienceAction(companyId:string,audienceId:string):Promise<{error?:string;success?:string}>{
+ try{const {s,user}=await access(companyId);
+  const {data:aud,error:e1}=await s.from("clt_audiences").select("id,name").eq("id",audienceId).eq("company_id",companyId).eq("user_id",user.id).maybeSingle();if(e1)throw e1;if(!aud)return {error:"Público não encontrado."};
+  const [sets,others]=await Promise.all([s.from("clt_ad_sets").select("name").eq("saved_audience_id",audienceId).eq("user_id",user.id),s.from("clt_audiences").select("name,source_audience_id,included_audience_ids,excluded_audience_ids").eq("company_id",companyId).eq("user_id",user.id).neq("id",audienceId)]);
+  if(sets.error)throw sets.error;if(others.error)throw others.error;
+  const dependents=(others.data||[]).filter(o=>o.source_audience_id===audienceId||(o.included_audience_ids||[]).includes(audienceId)||(o.excluded_audience_ids||[]).includes(audienceId));
+  if(sets.data?.length)return {error:`Não excluído: "${aud.name}" está vinculado a ${sets.data.length} conjunto(s) (${sets.data.map(x=>x.name).slice(0,3).join(", ")}${sets.data.length>3?"…":""}).`};
+  if(dependents.length)return {error:`Não excluído: "${aud.name}" é usado por ${dependents.map(x=>x.name).slice(0,3).join(", ")}.`};
+  const {data:deleted,error}=await s.from("clt_audiences").delete().eq("id",audienceId).eq("company_id",companyId).eq("user_id",user.id).select("id");if(error)throw error;
+  if(!deleted?.length)return {error:"Não foi possível excluir (sem permissão para excluir públicos neste banco)."};
+  revalidatePath("/trabalho/empresas/[id]","page");return {success:`Público "${aud.name}" excluído.`};
+ }catch(e){return {error:e instanceof Error?e.message:"Erro ao excluir."};}
+}

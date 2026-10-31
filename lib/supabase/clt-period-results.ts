@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { mergePeriodResults, type PeriodMetricRow } from "@/lib/clt/period-results";
+import { mergePeriodResults, periodResultsToEntries, type PeriodMetricRow } from "@/lib/clt/period-results";
 import type { CltCampaignResultEntry } from "@/types/database.types";
 
 /**
@@ -27,25 +27,6 @@ export async function withImportedPeriodResults(
     return { results: legacy, legacyKept: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
   }
   const merged = mergePeriodResults(legacy, (data ?? []) as PeriodMetricRow[]);
-  const imported: CltCampaignResultEntry[] = merged.imported.map(p => ({
-    id: `import:${p.campaign_id}:${p.period_start}:${p.period_end}`,
-    user_id: "",
-    campaign_id: p.campaign_id,
-    entry_date: p.entry_date,
-    spent_amount: p.spent_amount,
-    messages: p.messages,
-    sales: p.sales,
-    views: 0,
-    appointments: 0,
-    impressions: p.impressions,
-    reach: 0,
-    profile_visits: 0,
-    link_clicks: 0,
-    engagements: 0,
-    thruplays: 0,
-    leads: 0,
-    generated_revenue: p.generated_revenue,
-    notes: `Importado por anúncio — período ${p.period_start} a ${p.period_end} (soma dos valores informados).`,
-  }));
+  const imported = periodResultsToEntries(merged.imported);
   return { results: [...merged.legacy, ...imported], legacyKept: merged.legacy, excludedLegacy: merged.excludedLegacy, crossMonthPeriods: merged.crossMonthPeriods };
 }
