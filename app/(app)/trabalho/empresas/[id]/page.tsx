@@ -16,7 +16,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { withImportedPeriodResults } from "@/lib/supabase/clt-period-results";
 import { ImportedReconciliation, type ReconciliationRow } from "@/components/trabalho/imported-reconciliation";
 import { mergeAdLevelResults, type PeriodMetricFullRow } from "@/lib/clt/ad-metrics";
-import { CompanyTabs, isCompanyTab } from "@/components/trabalho/company/company-tabs";
+import { CompanyTabs, type CompanyTabId } from "@/components/trabalho/company/company-tabs";
 import { OverviewAudiences, OverviewCampaigns, OverviewTasks } from "@/components/trabalho/company/overview-sections";
 import { CompanyFinance, type AccountMovement } from "@/components/trabalho/company/company-finance";
 import { MonthlyVideoPlanSeeder } from "@/components/trabalho/company/monthly-video-plan-seeder";
@@ -27,7 +27,8 @@ const missingTable = (code?: string) => ["42P01","PGRST205"].includes(String(cod
 export default async function CompanyPage({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{aba?:string|string[]}>}){
  const {id}=await params;
  const {aba}=await searchParams;
- const initialTab=isCompanyTab(aba)?aba:"visao-geral";
+ const validTabs: readonly CompanyTabId[] = ["visao-geral", "campanhas", "publicos", "tarefas", "financeiro"];
+ const initialTab: CompanyTabId = typeof aba === "string" && validTabs.includes(aba as CompanyTabId) ? aba as CompanyTabId : "visao-geral";
  const data=await getCltDashboardData();
  const company=data.companies.find(c=>c.id===id);
  if(!company)notFound();
