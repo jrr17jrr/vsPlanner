@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isMissingDescriptionColumn, MISSING_DESCRIPTION_WARNING, normalizeSubtaskDescription } from "@/lib/subtask-description";
 
 export type SubtaskParent = "pessoal" | "clt" | "visionario";
-export type Subtask = { id: string; parent_type: SubtaskParent; parent_id: string; user_id: string; title: string; due_date: string | null; is_done: boolean; position: number; parent_subtask_id: string | null };
+/** `description` só existe após a migration 20261031100000 (antes, vem undefined). */
+export type Subtask = { id: string; parent_type: SubtaskParent; parent_id: string; user_id: string; title: string; due_date: string | null; is_done: boolean; position: number; parent_subtask_id: string | null; description?: string | null };
 
 async function context(parentType: SubtaskParent, parentId: string) {
   const db = (await createSupabaseServerClient()) as unknown as SupabaseClient;
@@ -29,25 +31,42 @@ export async function listSubtasks(parentType: SubtaskParent, parentId: string):
   return (data ?? []) as Subtask[];
 }
 
-export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: { id?: string; title: string; dueDate?: string | null; parentSubtaskId?: string | null }) {
+export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: { id?: string; title: string; dueDate?: string | null; parentSubtaskId?: string | null; description?: string | null }): Promise<{ error?: string; success?: boolean; warning?: string }> {
   const { db, user } = await context(parentType, parentId);
   const title = input.title.trim();
   if (!title || title.length > 300) return { error: "Informe um título de até 300 caracteres." };
   if (input.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) return { error: "Data inválida." };
+  const description = normalizeSubtaskDescription(input.description);
+  if (description.error) return { error: description.error };
+  let warning: string | undefined;
   if (input.parentSubtaskId) {
     const { data: parent } = await db.from("task_subtasks").select("id,parent_subtask_id").eq("id",input.parentSubtaskId).eq("parent_type",parentType).eq("parent_id",parentId).eq("user_id",user.id).maybeSingle();
     if (!parent || parent.parent_subtask_id) return { error: "Só é permitido um nível de checklist dentro das etapas." };
   }
   if (input.id) {
-    const { error } = await db.from("task_subtasks").update({ title, due_date: input.dueDate || null, updated_at: new Date().toISOString() }).eq("id", input.id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
+    const id = input.id;
+    const base = { title, due_date: input.dueDate || null, updated_at: new Date().toISOString() };
+    const update = (values: Record<string, unknown>) => db.from("task_subtasks").update(values).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
+    let { error } = await update(description.value !== undefined ? { ...base, description: description.value } : base);
+    // Banco ainda sem a coluna (migration pendente): salva o resto e avisa.
+    if (error && description.value !== undefined && isMissingDescriptionColumn(error)) {
+      ({ error } = await update(base));
+      if (!error && description.value) warning = MISSING_DESCRIPTION_WARNING;
+    }
     if (error) return { error: error.message };
   } else {
     const { data } = await db.from("task_subtasks").select("position").eq("parent_type", parentType).eq("parent_id", parentId).order("position", { ascending: false }).limit(1);
-    const { error } = await db.from("task_subtasks").insert({ parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, parent_subtask_id: input.parentSubtaskId || null, position: (data?.[0]?.position ?? -1) + 1 });
+    const row: Record<string, unknown> = { parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, parent_subtask_id: input.parentSubtaskId || null, position: (data?.[0]?.position ?? -1) + 1 };
+    // Sem descrição a coluna nem é enviada (funciona antes e depois da migration).
+    let { error } = await db.from("task_subtasks").insert(description.value ? { ...row, description: description.value } : row);
+    if (error && description.value && isMissingDescriptionColumn(error)) {
+      ({ error } = await db.from("task_subtasks").insert(row));
+      if (!error) warning = MISSING_DESCRIPTION_WARNING;
+    }
     if (error) return { error: error.message };
   }
   refresh();
-  return { success: true };
+  return { success: true, warning };
 }
 
 export async function setSubtaskDone(parentType: SubtaskParent, parentId: string, id: string, done: boolean) {

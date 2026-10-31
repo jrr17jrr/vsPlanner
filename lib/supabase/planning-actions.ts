@@ -2,17 +2,27 @@
 import type {SupabaseClient} from "@supabase/supabase-js";
 import {revalidatePath} from "next/cache";
 import {createSupabaseServerClient} from "@/lib/supabase/server";
+import {isMissingDescriptionColumn,pickImportedDescription} from "@/lib/subtask-description";
 export type PlanningArea="clt"|"pessoal"|"rotina"|"visionario";
-export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;endsOn?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number;subtasks?:Array<string|{title:string;dueDate?:string;subtasks?:Array<string|{title:string;dueDate?:string}>}>;priority?:"normal"|"importante"};
+export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;endsOn?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number;description?:string;descricao?:string;subtasks?:Array<string|{title:string;dueDate?:string;description?:string;descricao?:string;subtasks?:Array<string|{title:string;dueDate?:string;description?:string;descricao?:string}>}>;priority?:"normal"|"importante"};
+type NestedSubtask={title:string;dueDate?:string;description?:string;subtasks:Array<{title:string;dueDate?:string;description?:string}>};
+/** Insere com descrição; se o banco ainda não tiver a coluna (migration pendente), grava sem ela. */
+async function insertSubtaskRows(db:SupabaseClient,rows:Record<string,unknown>[],select:boolean){
+ const strip=()=>rows.map(r=>{const c={...r};delete c.description;return c;});
+ const run=(r:Record<string,unknown>[])=>select?db.from("task_subtasks").insert(r).select("id").single():db.from("task_subtasks").insert(r);
+ let res=await run(rows.some(r=>r.description)?rows:strip());
+ if(res.error&&isMissingDescriptionColumn(res.error))res=await run(strip());
+ return res as {data:{id:string}|null;error:{message:string}|null};
+}
 async function context(){const s=await createSupabaseServerClient();const {data:{user}}=await s.auth.getUser();if(!user)throw new Error("Faça login.");return{s,user};}
 function refresh(){revalidatePath("/planejamento");revalidatePath("/trabalho/campanhas");revalidatePath("/trabalho");}
-async function insertNestedSubtasks(db:SupabaseClient,userId:string,parentType:"pessoal"|"clt",parentId:string,subtasks:Array<{title:string;dueDate?:string;subtasks:Array<{title:string;dueDate?:string}>}>):Promise<string|null>{
+async function insertNestedSubtasks(db:SupabaseClient,userId:string,parentType:"pessoal"|"clt",parentId:string,subtasks:NestedSubtask[]):Promise<string|null>{
  for(let i=0;i<subtasks.length;i++){
   const stage=subtasks[i];
-  const {data:root,error}=await db.from("task_subtasks").insert({parent_type:parentType,parent_id:parentId,user_id:userId,title:stage.title.trim(),due_date:stage.dueDate||null,position:i}).select("id").single();
+  const {data:root,error}=await insertSubtaskRows(db,[{parent_type:parentType,parent_id:parentId,user_id:userId,title:stage.title.trim(),due_date:stage.dueDate||null,position:i,description:stage.description||null}],true);
   if(error||!root)return "Tarefa criada, mas houve erro nas etapas: "+(error?.message||"Falha ao criar etapa");
   if(stage.subtasks.length){
-   const {error:childError}=await db.from("task_subtasks").insert(stage.subtasks.map((child,j)=>({parent_type:parentType,parent_id:parentId,user_id:userId,parent_subtask_id:root.id,title:child.title.trim(),due_date:child.dueDate||null,position:j})));
+   const {error:childError}=await insertSubtaskRows(db,stage.subtasks.map((child,j)=>({parent_type:parentType,parent_id:parentId,user_id:userId,parent_subtask_id:root.id,title:child.title.trim(),due_date:child.dueDate||null,position:j,description:child.description||null})),false);
    if(childError)return "Etapa criada, mas falhou ao salvar checklist: "+childError.message;
   }
  }
@@ -40,12 +50,12 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  const weekdays=item.weekdays||[];
  if(!Array.isArray(weekdays)||weekdays.some(d=>!Number.isInteger(d)||d<0||d>6))return {error:"Dias da semana inválidos."};
  if(item.subtasks!==undefined&&(!Array.isArray(item.subtasks)||item.subtasks.length>50))return {error:"Subtarefas inválidas (máximo 50)."};
- const subtasks=(item.subtasks||[]).map(raw=>typeof raw==="string"?{title:raw,subtasks:[] as {title:string;dueDate?:string}[]}:{
-   title:raw.title,dueDate:raw.dueDate,subtasks:(raw.subtasks||[]).map(child=>typeof child==="string"?{title:child}:{title:child.title,dueDate:child.dueDate})
+ const subtasks:NestedSubtask[]=(item.subtasks||[]).map(raw=>typeof raw==="string"?{title:raw,subtasks:[] as NestedSubtask["subtasks"]}:{
+   title:raw.title,dueDate:raw.dueDate,description:pickImportedDescription(raw),subtasks:(raw.subtasks||[]).map(child=>typeof child==="string"?{title:child}:{title:child.title,dueDate:child.dueDate,description:pickImportedDescription(child)})
  });
  if(subtasks.some(t=>typeof t.title!=="string"||!t.title.trim()||t.title.length>300||t.subtasks.length>50||t.subtasks.some(c=>typeof c.title!=="string"||!c.title.trim()||c.title.length>300)))return {error:"Título de subtarefa inválido."};
  if(item.priority && !["normal","importante"].includes(item.priority))return {error:"Prioridade inválida."};
- prepared.push({...item,title:item.title.trim(),subtasks,dailyBudget:daily,plannedAmount:planned,weekdays,priority:item.priority||"normal"});
+ prepared.push({...item,title:item.title.trim(),description:pickImportedDescription(item),subtasks,dailyBudget:daily,plannedAmount:planned,weekdays,priority:item.priority||"normal"});
  }
 
  const {data:spaces,error:se}=await s.from("spaces").select("id,type").eq("owner_id",user.id).eq("type","personal").limit(1);
@@ -70,7 +80,7 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  if(checkError)return {error:checkError.message+" ("+created+" itens já criados)"};
  if(existing?.length){skipped++;continue;}
  const weekly=item.weekdays.length>0;
- const {data:createdTask,error}=await s.from("clt_tasks").insert({user_id:user.id,company_id:companyId,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:item.priority,notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null}).select("id").single();
+ const {data:createdTask,error}=await s.from("clt_tasks").insert({user_id:user.id,company_id:companyId,title:item.title,description:item.description||null,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:item.priority,notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null}).select("id").single();
  if(error||!createdTask)return {error:(error?.message||"Falha ao criar tarefa")+" ("+created+" itens já criados)"};
  if(item.subtasks.length){const result=await insertNestedSubtasks(s as unknown as SupabaseClient,user.id,"clt",createdTask.id,item.subtasks);if(result)return {error:result};}
  }
@@ -78,7 +88,7 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  const {data:existing}=await s.from("tasks").select("id").eq("user_id",user.id).eq("space_id",personalSpace!).eq("title",item.title).limit(1);
  if(existing?.length){skipped++;continue;}
  const weekly=item.weekdays.length>0;
- const {data:createdTask,error}=await s.from("tasks").insert({user_id:user.id,space_id:personalSpace!,title:item.title,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:item.priority,notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null}).select("id").single();
+ const {data:createdTask,error}=await s.from("tasks").insert({user_id:user.id,space_id:personalSpace!,title:item.title,description:item.description||null,kind:item.plannedDate?"dia":"prazo",due_date:weekly?null:item.plannedDate||null,scheduled_time:item.scheduledTime||null,priority:item.priority,notes,recurrence:weekly?"weekly":"none",weekdays:weekly?item.weekdays:[],recurrence_start:weekly?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,recurrence_until:null}).select("id").single();
  if(error||!createdTask)return {error:(error?.message||"Erro ao criar tarefa")+" ("+created+" itens já criados)"};
  if(item.subtasks.length){const result=await insertNestedSubtasks(s as unknown as SupabaseClient,user.id,"pessoal",createdTask.id,item.subtasks);if(result)return {error:result};}
  }else if(item.area==="rotina"){

@@ -85,6 +85,7 @@ export function TarefasPageClient({
       <div key={task.id}><ChecklistItem
         key={task.id}
         title={task.title}
+        description={task.description}
         done={toggle.isTaskDone(task)}
         time={task.scheduled_time?.slice(0, 5)}
         onToggle={() => toggle.toggleTask(task)}
@@ -214,6 +215,7 @@ export function TarefasPageClient({
               <ChecklistItem
                 key={task.id}
                 title={task.title}
+                description={task.description}
                 done={toggle.isTaskDone(task)}
                 time={task.scheduled_time?.slice(0, 5)}
                 onToggle={() => toggle.toggleTask(task)}

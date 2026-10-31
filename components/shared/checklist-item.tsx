@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { MoveDatePopover } from "@/components/shared/move-date-popover";
 import { cn } from "@/lib/utils";
+import { ExpandableDescription } from "@/components/shared/expandable-description";
 
 /** Item de checklist genérico — usado por Hoje, Trabalho/CLT e outras listas de tarefas simples. */
 export function ChecklistItem({
@@ -19,6 +20,7 @@ export function ChecklistItem({
   done,
   time,
   badges,
+  description,
   onToggle,
   onEdit,
   onDelete,
@@ -29,6 +31,8 @@ export function ChecklistItem({
   done: boolean;
   time?: string;
   badges?: React.ReactNode;
+  /** Descrição opcional, recolhida por padrão — expandir não altera o status. */
+  description?: string | null;
   onToggle: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -50,6 +54,7 @@ export function ChecklistItem({
       <div className="min-w-0 flex-1">
         <p className={cn("truncate text-sm font-medium text-foreground", done && "line-through")}>{title}</p>
         {badges && <div className="mt-0.5 flex flex-wrap items-center gap-1.5">{badges}</div>}
+        <ExpandableDescription text={description} className="mt-0.5" />
       </div>
 
       {onMove && (

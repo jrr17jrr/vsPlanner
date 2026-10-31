@@ -254,12 +254,10 @@ function TaskForm({
           )}
         </div>
 
-        {task?.description && (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-description">Descrição</Label>
-            <Textarea id="task-description" value={description} onChange={(e) => setDescription(e.target.value)} disabled={pending} rows={2} />
-          </div>
-        )}
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="task-description">Descrição (opcional)</Label>
+          <Textarea id="task-description" value={description} onChange={(e) => setDescription(e.target.value)} disabled={pending} rows={3} maxLength={10000} placeholder="Detalhes da tarefa — aparece recolhida na lista" />
+        </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="task-notes">Observações</Label>

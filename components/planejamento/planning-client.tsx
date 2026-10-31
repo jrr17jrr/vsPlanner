@@ -4,6 +4,7 @@ import {importCltAudiencesJsonAction} from "@/lib/supabase/clt-audience-actions"
 import {importCltCampaignJsonAction} from "@/lib/supabase/clt-actions";
 import {toast} from "sonner";
 import {parseBrNumber} from "@/lib/import/values";
+import {pickImportedDescription} from "@/lib/subtask-description";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Checkbox} from "@/components/ui/checkbox";
@@ -53,7 +54,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(area==="clt"&&name&&!company)throw new Error("Empresa não encontrada: "+name+". Cadastre-a antes de importar.");
  const amount=Number(x.plannedAmount||0),daily=Number(x.dailyBudget||0);
  if(!Number.isFinite(amount)||amount<0||!Number.isFinite(daily)||daily<0)throw new Error("Orçamento inválido no item "+(i+1));
- return {area,title:x.title.trim(),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),endsOn:String(x.endsOn||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,subtasks:Array.isArray(x.subtasks)?x.subtasks.map((t:unknown)=>typeof t==="string"?t:typeof t==="object"&&t!==null?t as {title:string;dueDate?:string;subtasks?:Array<string|{title:string;dueDate?:string}>}:String(t)):[],priority:x.priority==="importante"?"importante":"normal",selected:true};
+ return {area,title:x.title.trim(),description:pickImportedDescription(x),companyId:area==="clt"?company?.id:null,companyName:name,notes:String(x.notes||""),plannedDate:String(x.plannedDate||""),endsOn:String(x.endsOn||""),scheduledTime:String(x.scheduledTime||""),weekdays:Array.isArray(x.weekdays)?x.weekdays.map(Number):[],objective:String(x.objective||""),dailyBudget:daily,plannedAmount:amount,subtasks:Array.isArray(x.subtasks)?x.subtasks.map((t:unknown)=>typeof t==="string"?t:typeof t==="object"&&t!==null?t as {title:string;dueDate?:string;subtasks?:Array<string|{title:string;dueDate?:string}>}:String(t)):[],priority:x.priority==="importante"?"importante":"normal",selected:true};
  });
  setCampaignDraft([]);setFileSummary("Planejamento: "+parsed.length+" itens identificados. Confira antes de importar.");setDraft(parsed);toast.success("Arquivo lido. Confira a prévia antes de salvar.");
  }catch(e){toast.error(e instanceof Error?e.message:"Arquivo inválido.");setDraft([]);setCampaignDraft([]);setFileSummary("");}

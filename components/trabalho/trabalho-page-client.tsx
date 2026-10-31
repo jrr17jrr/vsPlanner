@@ -65,6 +65,7 @@ export function TrabalhoPageClient({ tasks }: { tasks: PersonalWorkTask[] }) {
             <ChecklistItem
               key={t.id}
               title={t.title}
+              description={t.description}
               done={t.status === "concluida"}
               time={t.scheduled_time?.slice(0, 5)}
               onToggle={() => toggle(t)}

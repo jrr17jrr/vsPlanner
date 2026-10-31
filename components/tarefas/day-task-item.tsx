@@ -1,5 +1,6 @@
 "use client";
 import { Subtasks } from "@/components/shared/subtasks";
+import { ExpandableDescription } from "@/components/shared/expandable-description";
 
 import { Check, MapPin, MoreVertical, Pencil, Repeat, Square, Trash2, CircleStop } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ export function DayTaskItem({
 
       <div className="min-w-0 flex-1">
         <p className={cn("break-words text-sm font-medium text-foreground", done && "line-through")}>{entry.title}</p>
+        <ExpandableDescription text={entry.task.description} className="mt-0.5" />
         <Subtasks parentType="pessoal" parentId={entry.task.id}/>
         {entry.location && (
           <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">

@@ -195,6 +195,7 @@ export function HojePageClient({
               <ChecklistItem
                 key={task.id}
                 title={task.title}
+                description={task.description}
                 done={taskToggle.isTaskDone(task)}
                 onToggle={() => taskToggle.toggleTask(task)}
                 onEdit={() => taskDialogs.openEdit(task)}
@@ -238,6 +239,7 @@ export function HojePageClient({
             <ChecklistItem
               key={w.id}
               title={w.title}
+              description={w.description}
               done={w.status === "concluido"}
               onToggle={() => toggleWorkItemDone(w)}
               badges={
@@ -263,6 +265,7 @@ export function HojePageClient({
             <ChecklistItem
               key={t.id}
               title={t.title}
+              description={t.description}
               done={t.status === "concluida"}
               time={t.scheduled_time?.slice(0, 5)}
               onToggle={() => toggleWorkTask(t)}
