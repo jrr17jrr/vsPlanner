@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useId, useMemo, useState, useTransition, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, FileJson, Info, PenLine, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -114,8 +114,17 @@ function CampaignCard({ c }: { c: PreviewCampaign }) {
   );
 }
 
-export function SmartImporter({ companies }: { companies: Company[] }) {
-  const [companyId, setCompanyId] = useState("");
+type LegacyHandler = { detect: (content: string) => boolean; render: (content: string) => ReactNode };
+
+/**
+ * `fixedCompany`: usado dentro da página da empresa (sem seletor).
+ * `legacy`: arquivos exatamente no formato antigo seguem no fluxo antigo,
+ * que não depende da migration nova.
+ */
+export function SmartImporter({ companies = [], fixedCompany, title, legacy, onImported }: { companies?: Company[]; fixedCompany?: Company; title?: string; legacy?: LegacyHandler; onImported?: () => void }) {
+  const [companyId, setCompanyId] = useState(fixedCompany?.id ?? "");
+  const [schemaHint, setSchemaHint] = useState("");
+  const uid = useId();
   const [mode, setMode] = useState<Mode>("json");
   const [content, setContent] = useState("");
   const [fileName, setFileName] = useState("");
@@ -128,7 +137,9 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
   const [busy, start] = useTransition();
 
   const period = periodStart && periodEnd ? { start: periodStart, end: periodEnd } : null;
-  const invalidate = () => { setPreview(null); setConfirmed(new Set()); setResult(""); setError(""); };
+  const invalidate = () => { setPreview(null); setConfirmed(new Set()); setResult(""); setError(""); setSchemaHint(""); };
+  const isLegacy = useMemo(() => { if (!legacy || !content.trim()) return false; try { return legacy.detect(content); } catch { return false; } }, [legacy, content]);
+  const step = (n: number) => (fixedCompany ? n - 1 : n);
 
   const grouped = useMemo(() => {
     const issues = preview?.issues ?? [];
@@ -152,6 +163,7 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
       const r = await previewSmartImportAction({ companyId, content, period });
       if (r.error || !r.preview) { setPreview(null); setError(r.error ?? "Falha ao validar."); return; }
       setPreview(r.preview);
+      setSchemaHint(r.schemaReady === false ? r.migrationHint ?? "Migration pendente." : "");
       setConfirmed(new Set());
       if (r.preview.period && !period) { setPeriodStart(r.preview.period.start); setPeriodEnd(r.preview.period.end); }
     });
@@ -165,6 +177,7 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
       setResult(r.success ?? "Importação concluída.");
       toast.success("Importação concluída.");
       setPreview(null);
+      onImported?.();
     });
   }
 
@@ -172,16 +185,17 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
     <div className="space-y-4">
       <Card>
         <CardContent className="space-y-4 p-4">
+          {title && <h3 className="font-semibold">{title}</h3>}
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="imp-company">1. Empresa</Label>
-              <select id="imp-company" className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={companyId} onChange={e => { setCompanyId(e.target.value); invalidate(); }}>
+            {fixedCompany ? <p className="text-sm sm:col-span-2">Empresa: <span className="font-medium">{fixedCompany.name}</span></p> : <div className="space-y-1.5">
+              <Label htmlFor={uid + "company"}>1. Empresa</Label>
+              <select id={uid + "company"} className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={companyId} onChange={e => { setCompanyId(e.target.value); invalidate(); }}>
                 <option value="">Selecione a empresa</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-            </div>
-            <div className="space-y-1.5">
-              <span className="text-sm font-medium">2. Formato</span>
+            </div>}
+            <div className={"space-y-1.5" + (fixedCompany ? " sm:col-span-2" : "")}>
+              <span className="text-sm font-medium">{step(2)}. Formato</span>
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Formato da importação">
                 <Button type="button" variant={mode === "json" ? "default" : "outline"} className="h-11" role="radio" aria-checked={mode === "json"} onClick={() => { setMode("json"); invalidate(); }}><FileJson className="h-4 w-4" />Arquivo JSON</Button>
                 <Button type="button" variant={mode === "text" ? "default" : "outline"} className="h-11" role="radio" aria-checked={mode === "text"} onClick={() => { setMode("text"); invalidate(); }}><PenLine className="h-4 w-4" />Escrever ou colar texto</Button>
@@ -190,10 +204,10 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="imp-content">3. {mode === "json" ? "Envie o arquivo (o conteúdo aparece abaixo para correções)" : "Escreva ou cole o texto (ou um JSON)"}</Label>
+            <Label htmlFor={uid + "content"}>{step(3)}. {mode === "json" ? "Envie o arquivo (o conteúdo aparece abaixo para correções)" : "Escreva ou cole o texto (ou um JSON)"}</Label>
             {mode === "json" && <Input type="file" accept=".json,application/json" className="h-11" onChange={e => readFile(e.target.files?.[0])} />}
             {mode === "json" && fileName && <p className="text-xs text-muted-foreground">Arquivo: {fileName} — selecionar um arquivo NÃO importa nada.</p>}
-            <Textarea id="imp-content" value={content} onChange={e => { setContent(e.target.value); if (preview) invalidate(); }} rows={mode === "text" ? 14 : 8} spellCheck={false} placeholder={mode === "text" ? TEXT_EXAMPLE : "O conteúdo do JSON aparece aqui."} className="font-mono text-xs" />
+            <Textarea id={uid + "content"} value={content} onChange={e => { setContent(e.target.value); if (preview) invalidate(); }} rows={mode === "text" ? 14 : 8} spellCheck={false} placeholder={mode === "text" ? TEXT_EXAMPLE : "O conteúdo do JSON aparece aqui."} className="font-mono text-xs" />
             {mode === "text" && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer py-2">Campos reconhecidos</summary>
@@ -203,14 +217,16 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
             )}
           </div>
 
+          {isLegacy && legacy ? legacy.render(content) : <>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5"><Label htmlFor="imp-ps">Período das métricas — início</Label><Input id="imp-ps" type="date" className="h-11" value={periodStart} onChange={e => { setPeriodStart(e.target.value); invalidate(); }} /></div>
-            <div className="space-y-1.5"><Label htmlFor="imp-pe">Período das métricas — fim</Label><Input id="imp-pe" type="date" className="h-11" value={periodEnd} onChange={e => { setPeriodEnd(e.target.value); invalidate(); }} /></div>
+            <div className="space-y-1.5"><Label htmlFor={uid + "ps"}>Período das métricas — início</Label><Input id={uid + "ps"} type="date" className="h-11" value={periodStart} onChange={e => { setPeriodStart(e.target.value); invalidate(); }} /></div>
+            <div className="space-y-1.5"><Label htmlFor={uid + "pe"}>Período das métricas — fim</Label><Input id={uid + "pe"} type="date" className="h-11" value={periodEnd} onChange={e => { setPeriodEnd(e.target.value); invalidate(); }} /></div>
           </div>
-          <p className="text-xs text-muted-foreground">Os resultados ficam registrados por anúncio para esse período. Reimportar o mesmo período atualiza os mesmos registros, sem duplicar.</p>
+          <p className="text-xs text-muted-foreground">Opcional para arquivos só de públicos. Os resultados ficam registrados por anúncio para esse período. Reimportar o mesmo período atualiza os mesmos registros, sem duplicar.</p>
 
           {error && <p className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive" role="alert">{error}</p>}
-          <Button type="button" className="h-11 w-full sm:w-auto" disabled={busy || !companyId || !content.trim()} onClick={validate}>{busy && !preview ? "Validando…" : "4. Validar dados"}</Button>
+          <Button type="button" className="h-11 w-full sm:w-auto" disabled={busy || !companyId || !content.trim()} onClick={validate}>{busy && !preview ? "Validando…" : `${step(4)}. Validar dados`}</Button>
+          </>}
         </CardContent>
       </Card>
 
@@ -222,9 +238,11 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
         <Card>
           <CardContent className="space-y-4 p-4">
             <div>
-              <h2 className="font-semibold">5. Prévia — {preview.companyName}</h2>
+              <h2 className="font-semibold">{step(5)}. Prévia — {preview.companyName}</h2>
               <p className="text-xs text-muted-foreground">Formato: {preview.sourceFormat === "text" ? "texto" : "JSON"} · Período: {preview.period ? `${fmtDate(preview.period.start)} a ${fmtDate(preview.period.end)}` : "não informado"}</p>
             </div>
+
+            {schemaHint && <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-300" role="status">Prévia somente leitura: o banco ainda não tem a estrutura do importador novo, então a gravação está bloqueada. {schemaHint} Até lá, itens já cadastrados são reconhecidos só pelo nome exato.</p>}
 
             <div className="grid grid-cols-2 gap-2 text-sm lg:grid-cols-4">
               {([
@@ -280,8 +298,8 @@ export function SmartImporter({ companies }: { companies: Company[] }) {
 
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" className="h-11" onClick={invalidate} disabled={busy}>Cancelar</Button>
-              <Button type="button" className="h-11" disabled={busy || !preview.canImport || pendingConfirmations > 0} onClick={confirmImport}>
-                {busy ? "Importando…" : !preview.canImport ? "Corrija os erros para importar" : pendingConfirmations ? `Confirme ${pendingConfirmations} alerta(s)` : "6. Confirmar importação"}
+              <Button type="button" className="h-11" disabled={busy || !!schemaHint || !preview.canImport || pendingConfirmations > 0} onClick={confirmImport}>
+                {busy ? "Importando…" : schemaHint ? "Aplique a migration para importar" : !preview.canImport ? "Corrija os erros para importar" : pendingConfirmations ? `Confirme ${pendingConfirmations} alerta(s)` : `${step(6)}. Confirmar importação`}
               </Button>
             </div>
           </CardContent>

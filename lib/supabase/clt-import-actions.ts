@@ -41,31 +41,43 @@ async function context(companyId: string) {
   return { db, user, company: company as { id: string; name: string } };
 }
 
-async function loadSnapshot(db: SupabaseClient, company: { id: string; name: string }) {
-  const { data: campaigns, error: ce } = await db.from("clt_campaigns").select("id,name,meta_campaign_id").eq("company_id", company.id);
-  if (ce) throw ce;
-  const campaignIds = (campaigns ?? []).map(c => c.id as string);
+/**
+ * `schemaReady=false`: a migration do importador ainda não foi aplicada.
+ * A prévia continua funcionando (lendo só as colunas antigas, vínculo por
+ * nome exato), mas a gravação fica bloqueada até aplicar a migration.
+ */
+async function loadSnapshot(db: SupabaseClient, company: { id: string; name: string }, schemaReady = true): Promise<{ snapshot: ReturnType<typeof buildSnapshot>; schemaReady: boolean }> {
+  const cols = (full: string, legacy: string) => (schemaReady ? full : legacy);
+  const { data: campaigns, error: ce } = await db.from("clt_campaigns").select(cols("id,name,meta_campaign_id", "id,name")).eq("company_id", company.id);
+  if (ce) { if (schemaReady && isMissingSchema(ce.code)) return loadSnapshot(db, company, false); throw ce; }
+  const campaignRows = (campaigns ?? []) as unknown as Array<{ id: string; name: string; meta_campaign_id?: string | null }>;
+  const campaignIds = campaignRows.map(c => c.id);
   const none = ["00000000-0000-0000-0000-000000000000"];
   const [audiences, adSets, legacy, legacyAd, periodMetrics] = await Promise.all([
-    db.from("clt_audiences").select("id,name,audience_type,external_key").eq("company_id", company.id),
-    db.from("clt_ad_sets").select("id,campaign_id,name,meta_adset_id").in("campaign_id", campaignIds.length ? campaignIds : none),
+    db.from("clt_audiences").select(cols("id,name,audience_type,external_key", "id,name,audience_type")).eq("company_id", company.id),
+    db.from("clt_ad_sets").select(cols("id,campaign_id,name,meta_adset_id", "id,campaign_id,name")).in("campaign_id", campaignIds.length ? campaignIds : none),
     db.from("clt_campaign_result_entries").select("campaign_id").in("campaign_id", campaignIds.length ? campaignIds : none),
     db.from("clt_ad_level_results").select("campaign_id").in("campaign_id", campaignIds.length ? campaignIds : none),
-    db.from("clt_ad_period_metrics").select("creative_id,period_start,period_end").eq("company_id", company.id),
+    schemaReady ? db.from("clt_ad_period_metrics").select("creative_id,period_start,period_end").eq("company_id", company.id) : Promise.resolve({ data: [], error: null }),
   ]);
-  for (const r of [audiences, adSets, legacy, legacyAd, periodMetrics]) if (r.error) throw r.error;
-  const setIds = (adSets.data ?? []).map(s => s.id as string);
-  const ads = await db.from("clt_ad_creatives").select("id,ad_set_id,name,meta_ad_id").in("ad_set_id", setIds.length ? setIds : none);
-  if (ads.error) throw ads.error;
-  return buildSnapshot({
+  for (const r of [audiences, adSets, legacy, legacyAd, periodMetrics]) if (r.error) {
+    if (schemaReady && isMissingSchema(r.error.code)) return loadSnapshot(db, company, false);
+    throw r.error;
+  }
+  const setIds = ((adSets.data ?? []) as unknown as Array<{ id: string }>).map(s => s.id);
+  const ads = await db.from("clt_ad_creatives").select(cols("id,ad_set_id,name,meta_ad_id", "id,ad_set_id,name")).in("ad_set_id", setIds.length ? setIds : none);
+  if (ads.error) { if (schemaReady && isMissingSchema(ads.error.code)) return loadSnapshot(db, company, false); throw ads.error; }
+  type Rows = Parameters<typeof buildSnapshot>[0];
+  const snapshot = buildSnapshot({
     company,
-    audiences: audiences.data ?? [],
-    campaigns: campaigns ?? [],
-    adSets: adSets.data ?? [],
-    ads: ads.data ?? [],
-    legacyResults: [...(legacy.data ?? []), ...(legacyAd.data ?? [])],
-    periodMetrics: periodMetrics.data ?? [],
+    audiences: (audiences.data ?? []) as unknown as Rows["audiences"],
+    campaigns: campaignRows,
+    adSets: (adSets.data ?? []) as unknown as Rows["adSets"],
+    ads: (ads.data ?? []) as unknown as Rows["ads"],
+    legacyResults: [...(legacy.data ?? []), ...(legacyAd.data ?? [])] as Rows["legacyResults"],
+    periodMetrics: (periodMetrics.data ?? []) as Rows["periodMetrics"],
   });
+  return { snapshot, schemaReady };
 }
 
 function describeError(e: unknown): string {
@@ -81,16 +93,16 @@ async function buildPreview(input: Input) {
   const parsed = parseImportInput(input.content);
   if (!parsed.ok) return { error: parsed.error } as const;
   const { db, user, company } = await context(input.companyId);
-  const snapshot = await loadSnapshot(db, company);
+  const { snapshot, schemaReady } = await loadSnapshot(db, company);
   const preview = validateImport(parsed.bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) });
-  return { preview, detected: parsed.detected, db, user } as const;
+  return { preview, detected: parsed.detected, schemaReady, db, user } as const;
 }
 
-export async function previewSmartImportAction(input: Input): Promise<{ error?: string; preview?: ImportPreview; detected?: "json" | "text" }> {
+export async function previewSmartImportAction(input: Input): Promise<{ error?: string; preview?: ImportPreview; detected?: "json" | "text"; schemaReady?: boolean; migrationHint?: string }> {
   try {
     const r = await buildPreview(input);
     if ("error" in r) return { error: r.error };
-    return { preview: r.preview, detected: r.detected };
+    return { preview: r.preview, detected: r.detected, schemaReady: r.schemaReady, migrationHint: r.schemaReady ? undefined : MIGRATION_HINT };
   } catch (e) {
     return { error: describeError(e) };
   }
@@ -101,6 +113,7 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
     const r = await buildPreview(input);
     if ("error" in r) return { error: r.error };
     const { preview, db } = r;
+    if (!r.schemaReady) return { error: `Nada foi gravado. ${MIGRATION_HINT}` };
     if (!preview.canImport) return { error: "Há erros na validação. Corrija e valide de novo — nada foi gravado." };
     const confirmed = new Set(Array.isArray(input.confirmed) ? input.confirmed : []);
     const pending = preview.confirmationIds.filter(id => !confirmed.has(id));
