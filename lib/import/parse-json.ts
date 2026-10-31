@@ -146,12 +146,14 @@ function readAd(ad: Obj, path: string, problems: ParseProblem[]): ImportAd {
   const name = str(pick(ad, ["name", "nome"])) ?? "";
   const metricSource = pick(ad, ["metrics", "metricas", "resultados"]);
   const extra: Obj = {};
-  for (const [k, v] of Object.entries(ad)) if (!["meta_ad_id", "name", "nome", "post_id", "notes", "observacoes", "metrics", "metricas", "resultados", "format", "formato"].includes(k)) extra[k] = v;
+  for (const [k, v] of Object.entries(ad)) if (!["meta_ad_id", "name", "nome", "post_id", "creative_label", "identificacao_criativo", "ad_copy", "texto_anuncio", "legenda_publicacao", "notes", "observacoes", "metrics", "metricas", "resultados", "format", "formato"].includes(k)) extra[k] = v;
   return {
     metaId: str(ad.meta_ad_id),
     name,
     format: inferAdFormat(str(pick(ad, ["format", "formato"])), name),
     postId: str(ad.post_id),
+    creativeLabel: str(pick(ad, ["creative_label", "identificacao_criativo"])),
+    adCopy: str(pick(ad, ["ad_copy", "texto_anuncio", "legenda_publicacao"])),
     notes: str(pick(ad, ["notes", "observacoes"])),
     metrics: readMetrics(isObj(metricSource) ? metricSource : null, `${path}.metrics`, problems),
     extra,
