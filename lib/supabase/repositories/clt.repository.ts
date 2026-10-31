@@ -1,6 +1,7 @@
 import type {SupabaseClient} from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CltCampaign, CltCompany, CltResponsible, CltTask } from "@/types/database.types";
+import { withImportedCampaignTotals } from "@/lib/clt/ad-metrics";
 
 export type CltDashboardData = {
   companies: CltCompany[];
@@ -41,5 +42,9 @@ export async function getCltDashboardData(): Promise<CltDashboardData> {
       ? {...c,campaign_status:"finalizada" as const}
       : c
   );
-  return { companies: companies.data ?? [], responsibles: responsibles.data ?? [], campaigns: currentCampaigns, tasks: tasks.data ?? [], weeklyReviews: (weeklyReviews.data ?? []) as CltDashboardData["weeklyReviews"], occurrences: occurrences.data ?? [] };
+  // Métricas importadas por anúncio (clt_ad_period_metrics) entram nos totais da campanha. Sem a migration, segue só com os campos antigos.
+  const imported = await (supabase as unknown as SupabaseClient).from("clt_ad_period_metrics").select("campaign_id,spend,conversations,sales");
+  if (imported.error && !["42P01", "PGRST205"].includes(String(imported.error.code))) console.error("clt_ad_period_metrics", imported.error);
+  const campaignsWithImported = withImportedCampaignTotals(currentCampaigns, imported.error ? [] : imported.data ?? []);
+  return { companies: companies.data ?? [], responsibles: responsibles.data ?? [], campaigns: campaignsWithImported, tasks: tasks.data ?? [], weeklyReviews: (weeklyReviews.data ?? []) as CltDashboardData["weeklyReviews"], occurrences: occurrences.data ?? [] };
 }

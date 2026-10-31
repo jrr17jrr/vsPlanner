@@ -14,8 +14,8 @@ export async function withImportedPeriodResults(
   supabase: unknown,
   campaignIds: string[],
   legacy: CltCampaignResultEntry[],
-): Promise<{ results: CltCampaignResultEntry[]; excludedLegacy: number; crossMonthPeriods: number }> {
-  if (!campaignIds.length) return { results: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
+): Promise<{ results: CltCampaignResultEntry[]; legacyKept: CltCampaignResultEntry[]; excludedLegacy: number; crossMonthPeriods: number }> {
+  if (!campaignIds.length) return { results: legacy, legacyKept: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
   const db = supabase as SupabaseClient;
   const { data, error } = await db
     .from("clt_ad_period_metrics")
@@ -24,7 +24,7 @@ export async function withImportedPeriodResults(
   if (error) {
     // 42P01/PGRST205: tabela ainda não existe (migration pendente) — segue sem importados.
     if (!["42P01", "PGRST205", "PGRST204", "42703"].includes(String(error.code))) console.error("clt_ad_period_metrics", error);
-    return { results: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
+    return { results: legacy, legacyKept: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
   }
   const merged = mergePeriodResults(legacy, (data ?? []) as PeriodMetricRow[]);
   const imported: CltCampaignResultEntry[] = merged.imported.map(p => ({
@@ -47,5 +47,5 @@ export async function withImportedPeriodResults(
     generated_revenue: p.generated_revenue,
     notes: `Importado por anúncio — período ${p.period_start} a ${p.period_end} (soma dos valores informados).`,
   }));
-  return { results: [...merged.legacy, ...imported], excludedLegacy: merged.excludedLegacy, crossMonthPeriods: merged.crossMonthPeriods };
+  return { results: [...merged.legacy, ...imported], legacyKept: merged.legacy, excludedLegacy: merged.excludedLegacy, crossMonthPeriods: merged.crossMonthPeriods };
 }

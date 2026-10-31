@@ -14,6 +14,7 @@ import type { AudienceRecord } from "@/lib/supabase/clt-audience-actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { withImportedPeriodResults } from "@/lib/supabase/clt-period-results";
 import { ImportedReconciliation, type ReconciliationRow } from "@/components/trabalho/imported-reconciliation";
+import { mergeAdLevelResults, type PeriodMetricFullRow } from "@/lib/clt/ad-metrics";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
 
 const money = (n:number) => n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
@@ -38,6 +39,10 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  const levelResultsQuery=await supabase.from("clt_ad_level_results").select("*").in("campaign_id",data.campaigns.filter(c=>c.company_id===id).map(c=>c.id).length?data.campaigns.filter(c=>c.company_id===id).map(c=>c.id):["00000000-0000-0000-0000-000000000000"]);
  const companyCampaignIds=data.campaigns.filter(c=>c.company_id===id).map(c=>c.id);
  const mergedResults=await withImportedPeriodResults(supabase,companyCampaignIds,(resultsQuery.data||[]) as CltCampaignResultEntry[]);
+ // Métricas importadas por anúncio/período: alimentam campanha, conjunto e anúncio (o importado prevalece sobre lançamentos antigos do mesmo período).
+ const periodQuery=await (supabase as unknown as SupabaseClient).from("clt_ad_period_metrics").select("id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads").eq("company_id",id);
+ if(periodQuery.error&&!["42P01","PGRST205"].includes(String(periodQuery.error.code)))throw periodQuery.error;
+ const levelRows=mergeAdLevelResults((levelResultsQuery.data||[]) as CltAdLevelResult[],(periodQuery.error?[]:periodQuery.data||[]) as PeriodMetricFullRow[]).rows;
  const reconciliationQuery=await (supabase as unknown as SupabaseClient).from("clt_campaign_reconciliations").select("campaign_id,period_start,period_end,reported_spend,reported_conversations,unallocated_spend,unallocated_conversations,notes").eq("company_id",id);
  const responsible=data.responsibles.find(r=>r.id===company.responsible_id);
  const tasks=data.tasks.filter(t=>t.company_id===id&&!t.archived_at);
@@ -55,7 +60,7 @@ export default async function CompanyPage({params}:{params:Promise<{id:string}>}
  <ImportedReconciliation rows={(reconciliationQuery.data||[]) as ReconciliationRow[]} campaigns={data.campaigns.filter(c=>c.company_id===id).map(c=>({id:c.id,name:c.name}))} excludedLegacy={mergedResults.excludedLegacy}/>
  <CompanyDetailBalance company={company}/>
  <AudienceManager companyId={id} companyName={company.name} audiences={(audiencesQuery.data||[]) as AudienceRecord[]}/>
- <TrafficManager companyId={id} companyName={company.name} audiences={(audiencesQuery.data||[]) as AudienceRecord[]} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={(resultsQuery.data||[]) as CltCampaignResultEntry[]} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={(levelResultsQuery.data||[]) as CltAdLevelResult[]} comparison={comparisonQuery.data||null}/>
+ <TrafficManager companyId={id} companyName={company.name} audiences={(audiencesQuery.data||[]) as AudienceRecord[]} month={month} budget={(budgetQuery.data ?? undefined) as CltMonthlyBudget|undefined} campaigns={campaigns} results={mergedResults.legacyKept} sets={(setsQuery.data||[]) as CltAdSet[]} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null}/>
  <CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={data.occurrences}/>
  <Card><CardContent className="space-y-3 p-4"><div className="flex items-center justify-between"><h2 className="font-semibold">Campanhas da empresa</h2><Button asChild variant="outline" size="sm"><Link href="/trabalho/campanhas">Gerenciar campanhas</Link></Button></div>
  <p className="text-xs text-muted-foreground">Totais das campanhas cadastradas: {messages} mensagens · {sales} vendas. O investimento mostrado é a soma dos registros, não necessariamente apenas do mês atual.</p>

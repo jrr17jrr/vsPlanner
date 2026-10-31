@@ -6,6 +6,8 @@ import { parseImportInput } from "./parse";
 import { validateImport } from "./validate";
 import { buildImportPayload } from "./plan";
 import { buildSnapshot, type SnapshotRows } from "./snapshot";
+import { mergeAdLevelResults, withImportedCampaignTotals, type PeriodMetricFullRow } from "@/lib/clt/ad-metrics";
+import { describeAudienceSettings } from "@/lib/clt/audience-summary";
 
 /**
  * Integração: roda as migrations REAIS do repositório num Postgres
@@ -103,6 +105,36 @@ describe("clt_import_bundle (Postgres + RLS)", () => {
     expect(totals).toEqual({ spend: "836.35", conv: 79, sales: 38, revenue: "9610.00", null_conv: 1 });
     const rec = (await db.query<{ unallocated_spend: string; unallocated_conversations: number }>("select unallocated_spend::text, unallocated_conversations from clt_campaign_reconciliations")).rows[0];
     expect(rec).toEqual({ unallocated_spend: "6.82", unallocated_conversations: 1 });
+  });
+
+  it("telas: campanha, conjunto e anúncio leem as métricas importadas e o público vinculado", async () => {
+    const rows = await asUser(U1, async () => ({
+      campaigns: (await db.query<{ id: string; name: string; spent_amount: string; messages: number; sales: number }>("select id, name, spent_amount, messages, sales from clt_campaigns where company_id = $1", [companyId])).rows,
+      sets: (await db.query<{ id: string; campaign_id: string; name: string; saved_audience_id: string | null }>("select s.id, s.campaign_id, s.name, s.saved_audience_id from clt_ad_sets s join clt_campaigns c on c.id = s.campaign_id where c.company_id = $1", [companyId])).rows,
+      audiences: (await db.query<{ id: string; name: string; settings: Record<string, unknown> }>("select id, name, settings from clt_audiences where company_id = $1", [companyId])).rows,
+      period: (await db.query<PeriodMetricFullRow>("select id, campaign_id, ad_set_id, creative_id, period_start::text, period_end::text, spend::text, conversations, sales, revenue::text, impressions, reach, link_clicks, leads from clt_ad_period_metrics where company_id = $1", [companyId])).rows,
+    }));
+    // Os campos antigos da campanha continuam 0 no banco (a importação não os altera)...
+    expect(rows.campaigns.every(c => Number(c.spent_amount) === 0)).toBe(true);
+    // ...e a tela soma os anúncios importados.
+    const totals = withImportedCampaignTotals(rows.campaigns, rows.period);
+    const byCity = (city: string) => totals.find(c => c.name.includes(city))!;
+    expect(byCity("Cabo Frio")).toMatchObject({ spent_amount: 206.22, messages: 21, sales: 37 });
+    expect(byCity("Araruama").spent_amount).toBe(104.43);
+    expect(byCity("Macaé").spent_amount).toBe(104.48);
+    expect(byCity("Rio das Ostras").spent_amount).toBe(104.18);
+
+    const level = mergeAdLevelResults([], rows.period).rows;
+    const cabo = level.filter(r => r.campaign_id === byCity("Cabo Frio").id);
+    expect(cabo).toHaveLength(1);
+    expect(cabo[0]).toMatchObject({ entry_date: "2026-10-29", spent_amount: 206.22, messages: 21, sales: 37, generated_revenue: 9360, impressions: 17981 });
+
+    const caboSet = rows.sets.find(s => s.campaign_id === byCity("Cabo Frio").id)!;
+    const aud = rows.audiences.find(a => a.id === caboSet.saved_audience_id)!;
+    expect(aud.name).toContain("Cabo Frio");
+    const info = Object.fromEntries(describeAudienceSettings(aud.settings));
+    expect(info["Localização"]).toMatch(/^Cabo Frio \+\d+ km$/);
+    expect(info["Idade"]).toBe("20 a 65+ anos");
   });
 
   it("reimportar os dois arquivos não duplica nada", async () => {
