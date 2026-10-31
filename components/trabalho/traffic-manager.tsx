@@ -29,7 +29,7 @@ const number=(f:FormData,k:string)=>{
 };
 const fields=[["spent","Gasto real (R$)"],["messages","Conversas"],["views","Visualizações"],["impressions","Impressões"],["reach","Alcance"],["profileVisits","Visitas ao perfil"],["linkClicks","Cliques no link"],["engagements","Interações"],["thruplays","ThruPlays"],["leads","Leads"],["appointments","Agendamentos"],["sales","Vendas"],["revenue","Faturamento (R$)"]] as const;
 export function TrafficManager({companyId,companyName,month,budget,campaigns,results,sets,creatives,levelResults,comparison,audiences=[]}:{companyId:string;companyName:string;month:string;budget?:CltMonthlyBudget;campaigns:CltCampaign[];results:CltCampaignResultEntry[];sets:CltAdSet[];creatives:CltAdCreative[];levelResults:AdLevelRow[];comparison?:{old_campaign_ids:string[];new_campaign_ids:string[]}|null;audiences?:AudienceRecord[]}){
- const router=useRouter(),[pending,start]=useTransition(),[editing,setEditing]=useState<CltCampaign|null>(null),[open,setOpen]=useState<"budget"|"campaign"|"results"|"set"|"ad"|"levelResults"|"details"|"import"|"comparison"|null>(null),[selected,setSelected]=useState("");
+ const router=useRouter(),[pending,start]=useTransition(),[editing,setEditing]=useState<CltCampaign|null>(null),[open,setOpen]=useState<"budget"|"campaign"|"results"|"set"|"ad"|"levelResults"|"details"|"creativeDetails"|"import"|"comparison"|null>(null),[selected,setSelected]=useState("");
  const [oldCompare,setOldCompare]=useState<string[]>(comparison?.old_campaign_ids||[]),[newCompare,setNewCompare]=useState<string[]>(comparison?.new_campaign_ids||[]);
  const [resultDate,setResultDate]=useState(month+"-01");
  const [navLevel,setNavLevel]=useState<"campaign"|"set"|"ad">("campaign");
