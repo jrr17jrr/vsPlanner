@@ -9,5 +9,5 @@ export async function addCltAdAccountMovementAction(input:{companyId:string;date
  const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();
  if(!company)return {error:"Empresa não encontrada."};
  const {error}=await (s as unknown as SupabaseClient).from("clt_ad_account_movements").insert({user_id:user.id,company_id:input.companyId,movement_date:input.date,kind:input.kind,amount:input.amount,notes:input.notes||null});
- if(error)return {error:error.message};revalidatePath("/trabalho/relatorios");return {success:"Movimentação registrada."};
+ if(error)return {error:error.message};revalidatePath("/trabalho/relatorios");revalidatePath("/visionario/mkt","layout");return {success:"Movimentação registrada."};
 }

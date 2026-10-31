@@ -2,9 +2,38 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 type State={error?:string;success?:string};
+type Db=import("@supabase/supabase-js").SupabaseClient;
+/** Módulos (clt/mkt) das empresas informadas; null se a coluna ainda não existe (tudo é CLT). */
+async function companyModules(s:unknown,userId:string,ids:string[]):Promise<Set<string>|null>{if(!ids.length)return new Set();const r=await (s as Db).from("clt_companies").select("id,module").eq("user_id",userId).in("id",ids);if(r.error)return null;return new Set((r.data||[]).map((x:{module:string})=>x.module));}
 async function ctx(){const s=await createSupabaseServerClient();const {data,error}=await s.auth.getUser();if(error||!data.user)throw new Error("Sessão inválida.");return{s,user:data.user};}
-function refresh(){["/trabalho","/trabalho/empresas","/trabalho/campanhas","/trabalho/tarefas"].forEach((path) => revalidatePath(path));revalidatePath("/trabalho/empresas/[id]","page")}
-export async function saveCltCompanyAction(input:{id?:string;name:string;responsibleId?:string;email?:string;instagram?:string;responsiblePhone?:string;companyPhone?:string;website?:string;notes?:string;currentAdBalance:number}):Promise<State>{const{s,user}=await ctx();if(!input.name.trim())return{error:"Nome é obrigatório."};const values={name:input.name.trim(),responsible_id:input.responsibleId||null,email:input.email?.trim()||null,instagram:input.instagram?.trim()||null,responsible_phone:input.responsiblePhone?.trim()||null,company_phone:input.companyPhone?.trim()||null,website:input.website?.trim()||null,notes:input.notes?.trim()||null,current_ad_balance:Math.max(0,input.currentAdBalance||0)};const q=input.id?s.from("clt_companies").update(values).eq("id",input.id).eq("user_id",user.id):s.from("clt_companies").insert({...values,user_id:user.id});const{error}=await q;if(error)return{error:error.message};refresh();return{success:input.id?"Empresa atualizada.":"Empresa cadastrada."}}
+function refresh(){["/trabalho","/trabalho/empresas","/trabalho/campanhas","/trabalho/tarefas"].forEach((path) => revalidatePath(path));revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout")}
+export async function saveCltCompanyAction(input:{id?:string;name:string;responsibleId?:string;email?:string;instagram?:string;responsiblePhone?:string;companyPhone?:string;website?:string;notes?:string;currentAdBalance:number;module?:"clt"|"mkt";companyKind?:"propria"|"cliente";clientId?:string|null;clientName?:string|null}):Promise<State>{
+ const{s,user}=await ctx();if(!input.name.trim())return{error:"Nome é obrigatório."};
+ const values:Record<string,unknown>={name:input.name.trim(),responsible_id:input.responsibleId||null,email:input.email?.trim()||null,instagram:input.instagram?.trim()||null,responsible_phone:input.responsiblePhone?.trim()||null,company_phone:input.companyPhone?.trim()||null,website:input.website?.trim()||null,notes:input.notes?.trim()||null,current_ad_balance:Math.max(0,input.currentAdBalance||0)};
+ const mkt=input.module==="mkt";
+ if(mkt){
+  // MKT: tipo da empresa e cliente (empresa própria nunca recebe cliente inventado).
+  if(input.companyKind!=="propria"&&input.companyKind!=="cliente")return{error:"Informe o tipo da empresa."};
+  let clientId:string|null=null,clientName=(input.clientName||"").trim()||null;
+  if(input.companyKind==="cliente"){
+   if(input.clientId){const{data:client}=await s.from("clients").select("id,name").eq("id",input.clientId).maybeSingle();if(!client)return{error:"Cliente não encontrado na Visionário Dev."};clientId=client.id;clientName=client.name;}
+   if(!clientName)return{error:"Informe ou selecione o cliente."};
+   if(clientName.length>200)return{error:"Nome do cliente muito longo."};
+  }else clientName=null;
+  Object.assign(values,{company_kind:input.companyKind,client_id:clientId,client_name:clientName,responsible_id:null});
+ }
+ let error;
+ if(input.id){
+  // Nunca muda o módulo de uma empresa existente; confere que ela é do módulo da tela.
+  const mods=await companyModules(s,user.id,[input.id]);
+  if(mods&&!mods.has(mkt?"mkt":"clt"))return{error:"Empresa não encontrada neste módulo."};
+  ({error}=await s.from("clt_companies").update(values as never).eq("id",input.id).eq("user_id",user.id));
+ }else{
+  // CLT não envia a coluna module (default 'clt'): funciona antes e depois da migration.
+  ({error}=await s.from("clt_companies").insert({...values,user_id:user.id,...(mkt?{module:"mkt"}:{})} as never));
+ }
+ if(error){if(mkt&&["42703","PGRST204"].includes(String(error.code)))return{error:"O módulo MKT ainda não está ativo no banco (migração 20261031120000_mkt_module.sql pendente)."};if(String(error.code)==="23505")return{error:"Já existe uma empresa com esse nome neste módulo."};return{error:error.message};}
+ refresh();return{success:input.id?"Empresa atualizada.":"Empresa cadastrada."}}
 
 export async function adjustCltCompanyBalancesAction(input: { companyIds: string[]; operation: "add" | "remove" | "set"; amount: number }): Promise<State> {
   const { s, user } = await ctx();
@@ -14,6 +43,8 @@ export async function adjustCltCompanyBalancesAction(input: { companyIds: string
   if (input.operation !== "set" && input.amount === 0) return { error: "Informe um valor maior que zero." };
   const { data: companies, error } = await s.from("clt_companies").select("id,name,current_ad_balance").eq("user_id", user.id).eq("is_active", true).in("id", ids);
   if (error) return { error: error.message };
+  const modules = await companyModules(s, user.id, ids);
+  if (modules && modules.size > 1) return { error: "Selecione empresas de um único módulo (CLT ou MKT)." };
   if (!companies || companies.length !== ids.length) return { error: "Empresa não encontrada." };
   const amountCents = Math.round(input.amount * 100);
   const updates = companies.map(c => {
@@ -34,9 +65,12 @@ export async function adjustCltCompanyBalancesAction(input: { companyIds: string
 }
 
 export async function saveCltCampaignAction(input:{companyId:string;name:string;objective?:string;description?:string;startsOn:string;endsOn:string;spentAmount:number;messages:number;sales:number;views:number;generatedRevenue?:number}):Promise<State>{const{s,user}=await ctx();if(!input.companyId||!input.name.trim()||!input.startsOn||!input.endsOn)return{error:"Preencha empresa, campanha, início e encerramento."};const{error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:input.companyId,name:input.name.trim(),objective:input.objective?.trim()||null,description:input.description?.trim()||null,starts_on:input.startsOn,ends_on:input.endsOn,spent_amount:Math.max(0,input.spentAmount||0),messages:Math.max(0,input.messages||0),sales:Math.max(0,input.sales||0),views:Math.max(0,input.views||0),generated_revenue:input.generatedRevenue||null});if(error)return{error:error.message};refresh();return{success:"Campanha cadastrada."}}
-export async function saveCltTaskAction(input:{id?:string;companyId?:string;title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{const{s,user}=await ctx();if(!input.title.trim())return{error:"Título é obrigatório."};if(input.recurrence==="weekly"&&!input.weekdays.length)return{error:"Escolha pelo menos um dia da semana."};if(input.recurrence==="none"&&input.kind==="dia"&&!input.dueDate)return{error:"Informe o dia da tarefa."};const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});const values={company_id:input.companyId||null,title:input.title.trim(),description:input.description?.trim()||null,kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};const q=input.id?s.from("clt_tasks").update(values).eq("id",input.id).eq("user_id",user.id):s.from("clt_tasks").insert({...values,user_id:user.id});const{error}=await q;if(error)return{error:error.message};refresh();revalidatePath("/trabalho/rotina");return{success:input.id?"Tarefa atualizada.":"Tarefa cadastrada."}}
+export async function saveCltTaskAction(input:{id?:string;companyId?:string;module?:"clt"|"mkt";title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{const{s,user}=await ctx();if(!input.title.trim())return{error:"Título é obrigatório."};if(input.recurrence==="weekly"&&!input.weekdays.length)return{error:"Escolha pelo menos um dia da semana."};if(input.recurrence==="none"&&input.kind==="dia"&&!input.dueDate)return{error:"Informe o dia da tarefa."};const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});const values={company_id:input.companyId||null,title:input.title.trim(),description:input.description?.trim()||null,kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};const mod=input.module==="mkt"?"mkt":"clt";if(input.companyId){const mods=await companyModules(s,user.id,[input.companyId]);if(mods&&!mods.has(mod))return{error:"Empresa não encontrada neste módulo."};}
+ // Tarefa geral (sem empresa) do MKT guarda o módulo; com empresa, o banco usa o módulo da empresa. CLT não envia a coluna.
+ const withModule=mod==="mkt"?{...values,module:"mkt"}:values;
+ const q=input.id?s.from("clt_tasks").update(withModule as never).eq("id",input.id).eq("user_id",user.id):s.from("clt_tasks").insert({...withModule,user_id:user.id} as never);const{error}=await q;if(error){if(mod==="mkt"&&["42703","PGRST204"].includes(String(error.code)))return{error:"O módulo MKT ainda não está ativo no banco (migração pendente)."};return{error:error.message};}refresh();revalidatePath("/trabalho/rotina");return{success:input.id?"Tarefa atualizada.":"Tarefa cadastrada."}}
 
-export async function saveCltTasksBatchAction(input:{companyIds:string[];title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{
+export async function saveCltTasksBatchAction(input:{companyIds:string[];module?:"clt"|"mkt";title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{
   const {s,user}=await ctx();
   const ids=[...new Set(input.companyIds)];
   if(!ids.length)return{error:"Selecione pelo menos uma empresa."};
@@ -46,6 +80,8 @@ export async function saveCltTasksBatchAction(input:{companyIds:string[];title:s
   const {data:valid,error:checkError}=await s.from("clt_companies").select("id").eq("user_id",user.id).in("id",ids);
   if(checkError)return{error:checkError.message};
   if(!valid||valid.length!==ids.length)return{error:"Uma ou mais empresas não estão disponíveis."};
+  const mods=await companyModules(s,user.id,ids);
+  if(mods&&(mods.size>1||!mods.has(input.module==="mkt"?"mkt":"clt")))return{error:"Selecione empresas deste módulo."};
   const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});
   const base={user_id:user.id,title:input.title.trim(),description:input.description?.trim()||null,kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};
   const {error}=await s.from("clt_tasks").insert(ids.map(company_id=>({...base,company_id})));

@@ -15,8 +15,11 @@ type Company={id:string;name:string;current_ad_balance:number};
 type Item={id:string;area:PlanningArea;company_id:string|null;title:string;notes:string|null;planned_date:string|null;objective:string|null;planned_amount:number;actual_amount:number;views:number;messages:number;completed:boolean;campaign_id:string|null};
 type Draft=PlanningInput & {selected:boolean;companyName?:string};
 const money=(v:number)=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);
-const areas:{value:PlanningArea;label:string}[]=[{value:"clt",label:"Trabalho / CLT"},{value:"pessoal",label:"Tarefas pessoais"},{value:"rotina",label:"Rotina"},{value:"visionario",label:"Visionário Dev"}];
-export function PlanningClient({initial,companies,loadError}:{initial:Item[];companies:Company[];loadError?:string}){
+const allAreas:{value:PlanningArea;label:string}[]=[{value:"clt",label:"Trabalho / CLT"},{value:"pessoal",label:"Tarefas pessoais"},{value:"rotina",label:"Rotina"},{value:"visionario",label:"Visionário Dev"}];
+/** module="mkt": planejamento do MKT (só empresas MKT; itens de campanha/tarefa dessas empresas). */
+export function PlanningClient({initial,companies,loadError,module="clt"}:{initial:Item[];companies:Company[];loadError?:string;module?:"clt"|"mkt"}){
+ const mkt=module==="mkt";
+ const areas:{value:PlanningArea;label:string}[]=mkt?[{value:"clt",label:"MKT"}]:allAreas;
  const [items,setItems]=useState(initial),[draft,setDraft]=useState<Draft[]>([]),[filter,setFilter]=useState("all"),[busy,start]=useTransition();
  const [campaignDraft,setCampaignDraft]=useState<ImportedCampaign[]>([]);
  const [audienceDraft,setAudienceDraft]=useState<Record<string,unknown>[]>([]);
@@ -47,7 +50,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  if(!Array.isArray(raw))throw Error("Formato não reconhecido. Aceitamos planejamento com items ou relatório com campanhas. Nenhum dado foi salvo.");
  if(!Array.isArray(raw)||raw.length>150)throw new Error("Arquivo inválido: use um JSON com items (máximo 150).");
  const parsed:Draft[]=raw.map((x:Record<string,unknown>,i:number)=>{
- const area=String(x.area||"clt") as PlanningArea;
+ const rawArea=String(x.area||"clt");const area=(mkt&&rawArea==="mkt"?"clt":rawArea) as PlanningArea;
  if(!areas.some(a=>a.value===area)||typeof x.title!=="string"||!x.title.trim())throw new Error("Item "+(i+1)+" sem título ou área válida.");
  const name=String(x.companyName||x.company||"").trim();
  const company=companies.find(c=>c.name.toLowerCase()===name.toLowerCase())||companies.find(c=>c.id===x.companyId);
@@ -64,7 +67,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  const save=()=>start(async()=>{
  const chosen=draft.filter(d=>d.selected).map(({selected,companyName,...rest})=>rest);
  if(!chosen.length){toast.error("Selecione pelo menos um item.");return;}
- const r=await importPlanningItemsAction(chosen);
+ const r=await importPlanningItemsAction(chosen,module);
  if(r.error){toast.error(r.error);return;}
  toast.success(r.success);setDraft([]);window.location.reload();
  });
@@ -77,7 +80,7 @@ export function PlanningClient({initial,companies,loadError}:{initial:Item[];com
  const filtered=items.filter(i=>filter==="all"||i.area===filter||i.company_id===filter);
  const planned=filtered.reduce((s,i)=>s+Number(i.planned_amount||0),0),actual=filtered.reduce((s,i)=>s+Number(i.actual_amount||0),0);
  return <div className="space-y-6">
- <div><h1 className="text-2xl font-semibold">Planejamento</h1><p className="text-sm text-muted-foreground">Importe campanhas e tarefas diretamente nos módulos corretos. Revise antes de confirmar.</p></div>
+ <div><h1 className="text-2xl font-semibold">{mkt?"Planejamento MKT":"Planejamento"}</h1><p className="text-sm text-muted-foreground">Importe campanhas e tarefas diretamente nos módulos corretos. Revise antes de confirmar.</p></div>
  {loadError&&<p className="rounded-lg border border-amber-500 p-3 text-sm">A tabela de planejamento ainda precisa da migração SQL no Supabase: {loadError}</p>}
  <section className="space-y-3 rounded-xl border p-4">
  <h2 className="font-semibold">Importar JSON · Planejamentos e resultados</h2>

@@ -9,7 +9,7 @@ export async function saveCltWeeklyDayAction(companyId:string,weekday:number){
  const {data:company}=await s.from("clt_companies").select("id").eq("id",companyId).single();
  if(!company)return {error:"Empresa não encontrada."};
  const {error}=await (s as unknown as SupabaseClient).from("clt_weekly_reviews").upsert({user_id:user.id,company_id:companyId,weekday:weekday===-1?null:weekday,updated_at:new Date().toISOString()},{onConflict:"user_id,company_id"});
- if(error)return {error:error.message};revalidatePath("/trabalho");return {success:"Dia salvo."};
+ if(error)return {error:error.message};revalidatePath("/trabalho");revalidatePath("/visionario/mkt","layout");return {success:"Dia salvo."};
 }
 export async function markCltWeeklyReviewAction(companyId:string,reviewed:boolean){
  const s=await createSupabaseServerClient();const {data:{user}}=await s.auth.getUser();
@@ -19,5 +19,5 @@ export async function markCltWeeklyReviewAction(companyId:string,reviewed:boolea
  const db=s as unknown as SupabaseClient;
  const {data:existing}=await db.from("clt_weekly_reviews").select("weekday").eq("user_id",user.id).eq("company_id",companyId).maybeSingle();
  const {error}=await db.from("clt_weekly_reviews").upsert({user_id:user.id,company_id:companyId,weekday:existing?.weekday??null,last_reviewed_on:reviewed?new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"}):null,updated_at:new Date().toISOString()},{onConflict:"user_id,company_id"});
- if(error)return {error:error.message};revalidatePath("/trabalho");return {success:reviewed?"Acompanhamento concluído.":"Acompanhamento reaberto."};
+ if(error)return {error:error.message};revalidatePath("/trabalho");revalidatePath("/visionario/mkt","layout");return {success:reviewed?"Acompanhamento concluído.":"Acompanhamento reaberto."};
 }

@@ -22,6 +22,7 @@ async function context(parentType: SubtaskParent, parentId: string) {
 
 function refresh() {
   for (const path of ["/tarefas", "/meu-dia", "/trabalho/tarefas", "/trabalho/meu-dia", "/visionario/trabalhos", "/visionario"]) revalidatePath(path);
+  revalidatePath("/visionario/mkt", "layout");
 }
 
 export async function listSubtasks(parentType: SubtaskParent, parentId: string): Promise<Subtask[]> {

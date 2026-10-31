@@ -28,6 +28,8 @@ export type ReminderTask = {
   status: string | null;
   archived_at?: string | null;
   recurrence?: string | null;
+  /** clt_tasks: módulo (clt/mkt) — define a tela aberta pelo lembrete. */
+  module?: string | null;
   weekdays?: number[] | null;
   recurrence_start?: string | null;
   recurrence_until?: string | null;
@@ -123,7 +125,7 @@ export function selectDueReminders(input: {
       date,
       time: hhmm,
       eventKey: `task-reminder:${task.table}:${task.id}:${date}:${hhmm}`,
-      url: task.table === "clt_tasks" ? "/trabalho" : "/hoje",
+      url: task.table === "clt_tasks" ? (task.module === "mkt" ? "/visionario/mkt/tarefas" : "/trabalho") : "/hoje",
     });
   }
   return out;

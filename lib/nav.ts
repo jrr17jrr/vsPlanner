@@ -38,6 +38,10 @@ export interface NavItem {
    * pessoal, Sistema) só dependem de estar autenticado.
    */
   module?: ModulePermissionModule;
+  /** Ativo só na rota exata (ex.: "Visão Geral" de um submenu). */
+  exact?: boolean;
+  /** Submenu expansível (accordion). O href do pai é o prefixo das rotas filhas. */
+  children?: NavItem[];
 }
 
 export interface NavGroup {
@@ -72,6 +76,22 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Visão Geral", href: "/visionario", icon: LayoutDashboard, module: "visao_geral" },
       { label: "Clientes", href: "/visionario/clientes", icon: Users, module: "clientes" },
+      {
+        label: "MKT",
+        href: "/visionario/mkt",
+        icon: Megaphone,
+        children: [
+          { label: "Visão Geral", href: "/visionario/mkt", icon: LayoutDashboard, exact: true },
+          { label: "Empresas", href: "/visionario/mkt/empresas", icon: Building2 },
+          { label: "Planejamento", href: "/visionario/mkt/planejamento", icon: ClipboardList },
+          { label: "Campanhas", href: "/visionario/mkt/campanhas", icon: Megaphone },
+          { label: "Importar", href: "/visionario/mkt/importar", icon: Upload },
+          { label: "Análises", href: "/visionario/mkt/analises", icon: LineChart },
+          { label: "Tarefas", href: "/visionario/mkt/tarefas", icon: ListChecks },
+          { label: "Rotina", href: "/visionario/mkt/rotina", icon: CalendarClock },
+          { label: "Relatórios", href: "/visionario/mkt/relatorios", icon: FileText },
+        ],
+      },
       { label: "Serviços", href: "/visionario/servicos", icon: Layers, module: "servicos" },
       { label: "Trabalhos", href: "/visionario/trabalhos", icon: Briefcase, module: "trabalhos" },
       { label: "Reuniões", href: "/visionario/reunioes", icon: Handshake, module: "reunioes" },

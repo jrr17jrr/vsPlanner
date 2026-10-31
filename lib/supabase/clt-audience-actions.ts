@@ -15,7 +15,7 @@ export async function saveCltAudienceAction(companyId:string,input:AudienceInput
  if(input.id&&(included.includes(input.id)||input.source_audience_id===input.id))throw Error("Um público não pode incluir a si próprio.");
  const values={name,audience_type:input.audience_type,settings:input.settings||{},source_audience_id:input.audience_type==="semelhante"?input.source_audience_id:null,included_audience_ids:input.audience_type==="salvo"?included:[],excluded_audience_ids:input.audience_type==="salvo"?excluded:[]};
  const query=input.id?s.from("clt_audiences").update(values).eq("id",input.id).eq("company_id",companyId).eq("user_id",user.id):s.from("clt_audiences").insert({...values,company_id:companyId,user_id:user.id});
- const {error}=await query;if(error)throw error;revalidatePath("/trabalho/empresas/[id]","page");return {success:"Público salvo."};
+ const {error}=await query;if(error)throw error;revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout");return {success:"Público salvo."};
  }catch(e){return {error:e instanceof Error?e.message:"Não foi possível salvar."};}
 }
 export async function importCltAudiencesJsonAction(companyId:string,raw:unknown){
@@ -37,7 +37,7 @@ export async function importCltAudiencesJsonAction(companyId:string,raw:unknown)
  const q=prior?s.from("clt_audiences").update(values).eq("id",prior.id).eq("user_id",user.id).select("id").single():s.from("clt_audiences").insert({...values,user_id:user.id,company_id:companyId}).select("id").single();
  const {data:saved,error}=await q;if(error)throw Error(a.name+": "+error.message);lookup.set(a.name.toLowerCase(),{id:saved.id,name:a.name,audience_type:type});count++;
  }}
- revalidatePath("/trabalho/empresas/[id]","page");return {success:count+" públicos importados/atualizados."};
+ revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout");return {success:count+" públicos importados/atualizados."};
  }catch(e){return {error:e instanceof Error?e.message:"Erro ao importar."};}
 }
 // Exclusão só de públicos sem vínculo: nunca desfaz o vínculo de conjuntos (saved_audience_id) nem de outros públicos.
@@ -51,6 +51,6 @@ export async function deleteCltAudienceAction(companyId:string,audienceId:string
   if(dependents.length)return {error:`Não excluído: "${aud.name}" é usado por ${dependents.map(x=>x.name).slice(0,3).join(", ")}.`};
   const {data:deleted,error}=await s.from("clt_audiences").delete().eq("id",audienceId).eq("company_id",companyId).eq("user_id",user.id).select("id");if(error)throw error;
   if(!deleted?.length)return {error:"Não foi possível excluir (sem permissão para excluir públicos neste banco)."};
-  revalidatePath("/trabalho/empresas/[id]","page");return {success:`Público "${aud.name}" excluído.`};
+  revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout");return {success:`Público "${aud.name}" excluído.`};
  }catch(e){return {error:e instanceof Error?e.message:"Erro ao excluir."};}
 }

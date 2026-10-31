@@ -68,7 +68,9 @@ export function GlobalSearch() {
       if (g.requires === "visionario" && !canAccessVisionario) return [];
       if (g.requires === "tiktok" && !canAccessTiktok) return [];
       const permissions = g.requires === "visionario" ? visionarioModulePermissions : g.requires === "tiktok" ? tiktokModulePermissions : undefined;
-      return permissions ? g.items.filter((item) => !item.module || permissions[item.module]) : g.items;
+      const items = permissions ? g.items.filter((item) => !item.module || permissions[item.module]) : g.items;
+      // Submenus (ex.: Visionário Dev → MKT): as páginas filhas também são pesquisáveis, com o nome do pai.
+      return items.flatMap((item) => item.children?.length ? item.children.map((c) => ({ ...c, label: `${item.label} · ${c.label}` })) : [item]);
     })];
     if (profile.system_role === "super_admin") accessible.push(NAV_DEV_PANEL);
     return accessible

@@ -2,6 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getModuleScope } from "@/lib/supabase/clt-scope";
+import { isCltModule, type CltModule } from "@/lib/clt/module";
 
 export type VideoStatus = "roteiro"|"gravacao"|"edicao"|"finalizado";
 export type VideoData = { id:string;title:string;script:string|null;reference_url:string|null;production_notes:string|null;production_status:VideoStatus;is_done:boolean };
@@ -34,7 +36,12 @@ export async function saveVideoDetails(parentId:string,subtaskId:string,input:{s
   const unique=[...new Set(targetCompanyIds)].filter(id=>id!==parent.company_id).slice(0,100);
   const {data:companies,error:companyError}=await db.from("clt_companies").select("id").eq("user_id",user.id).in("id",unique);
   if(companyError)return {error:companyError.message};
-  const ids=(companies??[]).map(c=>c.id);
+  // Só replica para empresas do MESMO módulo (CLT ou MKT) da tarefa de origem.
+  const parentScope=parent.company_id?await db.from("clt_companies").select("module").eq("id",parent.company_id).maybeSingle():null;
+  const parentModule=parentScope&&!parentScope.error?(parentScope.data as {module?:string}|null)?.module:undefined;
+  const sameModule=parentModule?await db.from("clt_companies").select("id").eq("user_id",user.id).eq("module",parentModule).in("id",unique):null;
+  const allowed=sameModule&&!sameModule.error?new Set((sameModule.data??[]).map((c:{id:string})=>c.id)):null;
+  const ids=(companies??[]).map(c=>c.id).filter(id=>!allowed||allowed.has(id));
   if(ids.length){
    const {data:tasks,error:taskError}=await db.from("clt_tasks").select("id,company_id").eq("user_id",user.id).eq("title",parent.title).in("company_id",ids);
    if(taskError)return {error:taskError.message};
@@ -49,11 +56,13 @@ export async function saveVideoDetails(parentId:string,subtaskId:string,input:{s
  return {success:true};
 }
 
-export async function createMonthlyVideoPlans(month:string) {
+export async function createMonthlyVideoPlans(month:string,module:CltModule="clt") {
  const {db,user}=await auth();
  if(!/^[0-9]{4}-[0-9]{2}$/.test(month))return {error:"Mês inválido."};
- const {data:companies,error:companyError}=await db.from("clt_companies").select("id,name").eq("user_id",user.id).eq("is_active",true);
- if(companyError)return {error:companyError.message};
+ if(!isCltModule(module))return {error:"Módulo inválido."};
+ // Só as empresas ativas do módulo da tela (CLT ou MKT).
+ const scope=await getModuleScope(db,user.id,module);
+ const companies=scope.companies.filter(c=>c.is_active).map(c=>({id:c.id,name:c.name}));
  const included=(companies??[]).filter(c=>!["piv","verificar"].includes(c.name.trim().toLowerCase()));
  const title="Produção de Vídeos | Mensal";
  const labels=["Vídeo 01 — WhatsApp Principal","Vídeo 02 — Engajamento","Vídeo 03 — WhatsApp Teste"];
@@ -75,6 +84,6 @@ export async function createMonthlyVideoPlans(month:string) {
    if(error)return {error:error.message};
   }
  }
- revalidatePath("/trabalho/empresas");revalidatePath("/trabalho/empresas/[id]","page");
+ revalidatePath("/trabalho/empresas");revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout");
  return {success:true,created,companies:included.length};
 }

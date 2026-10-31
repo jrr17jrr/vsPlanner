@@ -140,6 +140,7 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
     }
     ["/trabalho", "/trabalho/empresas", "/trabalho/campanhas", "/trabalho/relatorios", "/trabalho/analises", "/trabalho/importar"].forEach(p => revalidatePath(p));
     revalidatePath("/trabalho/empresas/[id]", "page");
+    revalidatePath("/visionario/mkt", "layout");
     const s = (data ?? {}) as Record<string, number | string>;
     return {
       success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas.${typeWarning}`,

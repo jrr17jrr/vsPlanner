@@ -21,7 +21,7 @@ const fmt = (d: string) => String(d).slice(0, 10).split("-").reverse().join("/")
  * anúncios importados. Só exibe — a diferença NUNCA é distribuída nem
  * somada aos resultados.
  */
-export function ImportedReconciliation({ rows, campaigns, excludedLegacy }: { rows: ReconciliationRow[]; campaigns: { id: string; name: string }[]; excludedLegacy: number }) {
+export function ImportedReconciliation({ rows, campaigns, excludedLegacy, basePath = "/trabalho" }: { rows: ReconciliationRow[]; campaigns: { id: string; name: string }[]; excludedLegacy: number; basePath?: string }) {
   const divergent = rows.filter(r => Number(r.unallocated_spend ?? 0) !== 0 || Number(r.unallocated_conversations ?? 0) !== 0);
   if (!divergent.length && !excludedLegacy) return null;
   const name = (id: string) => campaigns.find(c => c.id === id)?.name ?? "Campanha";
@@ -30,7 +30,7 @@ export function ImportedReconciliation({ rows, campaigns, excludedLegacy }: { ro
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 text-amber-400" />Reconciliação dos resultados importados</h2>
-          <Link href="/trabalho/importar" className="text-sm text-primary hover:underline">Importador</Link>
+          <Link href={basePath+"/importar"} className="text-sm text-primary hover:underline">Importador</Link>
         </div>
         {divergent.map(r => (
           <div key={`${r.campaign_id}-${r.period_start}`} className="rounded-lg border border-amber-500/30 p-3 text-sm">

@@ -1,7 +1,5 @@
-import { CltDashboard } from "@/components/trabalho/clt-dashboard";
-import { getCltDashboardData } from "@/lib/supabase/repositories/clt.repository";
+import { CltDashboardPage } from "@/components/trabalho/pages/simple-pages";
 
 export default async function TrabalhoPage() {
-  const data = await getCltDashboardData();
-  return <CltDashboard data={data} />;
+  return <CltDashboardPage module="clt" />;
 }

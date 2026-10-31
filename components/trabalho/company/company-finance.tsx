@@ -13,7 +13,8 @@ const dateBR = (s: string) => s.slice(0, 10).split("-").reverse().join("/");
  * Financeiro da conta de anúncios. Faturamento gerado pelas campanhas NÃO
  * aparece aqui: saldo da Meta e retorno das vendas são coisas diferentes.
  */
-export function CompanyFinance({ company, month, budget, totalSpent, monthSpent, movements, movementsAvailable }: {
+export function CompanyFinance({ company, month, budget, totalSpent, monthSpent, movements, movementsAvailable, basePath = "/trabalho" }: {
+  basePath?: string;
   company: CltCompany;
   month: string;
   budget?: CltMonthlyBudget;
@@ -54,7 +55,7 @@ export function CompanyFinance({ company, month, budget, totalSpent, monthSpent,
       <Card><CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold">Histórico de movimentações</h2>
-          <Link href="/trabalho/relatorios" className="text-sm text-primary hover:underline">Registrar em Relatórios</Link>
+          <Link href={basePath+"/relatorios"} className="text-sm text-primary hover:underline">Registrar em Relatórios</Link>
         </div>
         {!movementsAvailable ? (
           <p className="text-sm text-muted-foreground">O histórico de depósitos e créditos ainda não está disponível neste banco.</p>

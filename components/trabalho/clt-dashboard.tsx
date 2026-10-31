@@ -1,4 +1,5 @@
 "use client";
+import { useCltModule } from "@/components/trabalho/module-context";
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
@@ -23,6 +24,7 @@ function daysUntil(date: string) {
 }
 
 export function CltDashboard({ data }: { data: CltDashboardData }) {
+  const M = useCltModule();
   const [month, setMonth] = useState(() => new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1)));
   const router=useRouter();
   const [saving,startSaving]=useTransition();
@@ -60,7 +62,7 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
 
   return <div className="flex flex-col gap-5">
     <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-      <div><h1 className="text-2xl font-bold">Trabalho / CLT</h1><p className="text-sm text-muted-foreground">Prioridades, tarefas rápidas e acompanhamento das empresas.</p></div>
+      <div><h1 className="text-2xl font-bold">{M.label}</h1><p className="text-sm text-muted-foreground">Prioridades, tarefas rápidas e acompanhamento das empresas.</p></div>
       <div className="grid gap-2 sm:grid-cols-3">
         <div className="flex items-center rounded-md border"><Button variant="ghost" size="icon" onClick={()=>shift(-1)}><ChevronLeft className="h-4 w-4"/></Button><span className="min-w-36 text-center text-sm capitalize">{monthFmt.format(month)}</span><Button variant="ghost" size="icon" onClick={()=>shift(1)}><ChevronRight className="h-4 w-4"/></Button></div>
         <Select value={responsible} onValueChange={v=>{setResponsible(v);setCompany("all")}}><SelectTrigger><SelectValue placeholder="Responsável"/></SelectTrigger><SelectContent><SelectItem value="all">Todos os responsáveis</SelectItem>{data.responsibles.map(r=><SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent></Select>
@@ -71,7 +73,7 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
     <div className="grid gap-4 lg:grid-cols-2">
       <Card className="border-primary/30"><CardHeader><CardTitle className="flex items-center justify-between gap-2"><span>Empresa do dia</span><span className="text-xs font-normal text-muted-foreground">{todayCompanies.length} programada(s)</span></CardTitle></CardHeader><CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">Faça a análise completa da empresa programada. Confira rapidamente as campanhas das demais todos os dias.</p>
-        {todayCompanies.length===0?<p className="text-sm text-muted-foreground">Nenhuma empresa programada para hoje. Ajuste os dias na agenda ao lado.</p>:todayCompanies.map(co=>{const review=data.weeklyReviews.find(r=>r.company_id===co.id);const checked=review?.last_reviewed_on===today;const pending=tasks.filter(t=>t.company_id===co.id).length;return <div key={co.id} className="rounded-xl border p-3"><div className="flex items-center justify-between gap-2"><div><p className="font-semibold">{co.name}</p><p className="text-xs text-muted-foreground">{pending} tarefa(s) pendente(s) · Saldo: {money.format(co.current_ad_balance)}</p></div><Button size="sm" variant={checked?"outline":"default"} disabled={saving} onClick={()=>persist(()=>markCltWeeklyReviewAction(co.id,!checked))}>{checked?"Reabrir":"Concluir revisão"}</Button></div><div className="mt-3 flex flex-wrap gap-2"><Button asChild size="sm" variant="outline"><Link href={"/trabalho/empresas/"+co.id}>Ver empresa</Link></Button><Button asChild size="sm" variant="outline"><Link href="/trabalho/campanhas">Campanhas</Link></Button><Button asChild size="sm" variant="outline"><Link href="/trabalho/tarefas">Tarefas</Link></Button></div></div>})}
+        {todayCompanies.length===0?<p className="text-sm text-muted-foreground">Nenhuma empresa programada para hoje. Ajuste os dias na agenda ao lado.</p>:todayCompanies.map(co=>{const review=data.weeklyReviews.find(r=>r.company_id===co.id);const checked=review?.last_reviewed_on===today;const pending=tasks.filter(t=>t.company_id===co.id).length;return <div key={co.id} className="rounded-xl border p-3"><div className="flex items-center justify-between gap-2"><div><p className="font-semibold">{co.name}</p><p className="text-xs text-muted-foreground">{pending} tarefa(s) pendente(s) · Saldo: {money.format(co.current_ad_balance)}</p></div><Button size="sm" variant={checked?"outline":"default"} disabled={saving} onClick={()=>persist(()=>markCltWeeklyReviewAction(co.id,!checked))}>{checked?"Reabrir":"Concluir revisão"}</Button></div><div className="mt-3 flex flex-wrap gap-2"><Button asChild size="sm" variant="outline"><Link href={M.basePath+"/empresas/"+co.id}>Ver empresa</Link></Button><Button asChild size="sm" variant="outline"><Link href={M.basePath+"/campanhas"}>Campanhas</Link></Button><Button asChild size="sm" variant="outline"><Link href={M.basePath+"/tarefas"}>Tarefas</Link></Button></div></div>})}
       </CardContent></Card>
       <Card><CardHeader><CardTitle className="flex items-center justify-between gap-2"><span>Minha agenda semanal</span><span className="text-xs font-normal text-muted-foreground">{reviewedToday}/{companies.length} revisadas hoje</span></CardTitle></CardHeader><CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">Escolha o dia fixo de cada empresa. É possível colocar várias no mesmo dia. As escolhas ficam salvas na sua conta.</p>
@@ -83,23 +85,23 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
 
     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
       {[
-        ["/trabalho/tarefas","Central de tarefas","Tarefas rápidas e por empresa",CheckSquare],
-        ["/trabalho/empresas","Empresas","Dados e saldos de cada empresa",Building2],
-        ["/trabalho/campanhas","Campanhas","Anúncios e investimentos",Megaphone],
-        ["/trabalho/relatorios","Relatórios","Resultados e histórico",Eye],
+        [M.basePath+"/tarefas","Central de tarefas","Tarefas rápidas e por empresa",CheckSquare],
+        [M.basePath+"/empresas","Empresas","Dados e saldos de cada empresa",Building2],
+        [M.basePath+"/campanhas","Campanhas","Anúncios e investimentos",Megaphone],
+        [M.basePath+"/relatorios","Relatórios","Resultados e histórico",Eye],
       ].map(([href,label,description,Icon])=><Link key={String(href)} href={String(href)} className="flex items-center justify-between rounded-xl border bg-card p-4 transition-colors hover:bg-accent"><div><p className="font-semibold">{String(label)}</p><p className="mt-1 text-xs text-muted-foreground">{String(description)}</p></div><ArrowRight className="h-4 w-4 text-muted-foreground"/></Link>)}
     </div>
 
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card><CardHeader><CardTitle className="flex items-center gap-2"><ListTodo className="h-4 w-4"/>Tarefas rápidas do CLT</CardTitle></CardHeader><CardContent className="space-y-2">
+      <Card><CardHeader><CardTitle className="flex items-center gap-2"><ListTodo className="h-4 w-4"/>Tarefas rápidas do {M.generalLabel}</CardTitle></CardHeader><CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">Tarefas gerais, sem empresa vinculada. Ex.: corrigir erro do sistema.</p>
         {quickTasks.length===0?<p className="text-sm text-muted-foreground">Nenhuma tarefa rápida pendente.</p>:quickTasks.slice(0,5).map(t=><div key={t.id} className="rounded-lg border p-3 text-sm"><b>{t.title}</b>{t.due_date&&<span className="ml-2 text-xs text-muted-foreground">{t.due_date.split("-").reverse().join("/")}</span>}</div>)}
-        <Button asChild variant="outline" size="sm"><Link href="/trabalho/tarefas">Ver todas as tarefas</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link href={M.basePath+"/tarefas"}>Ver todas as tarefas</Link></Button>
       </CardContent></Card>
       <Card><CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4"/>Tarefas das empresas</CardTitle></CardHeader><CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">Cada empresa tem suas próprias tarefas e conclusão independente.</p>
         {companyTasks.length===0?<p className="text-sm text-muted-foreground">Nenhuma tarefa de empresa pendente.</p>:companyTasks.slice(0,6).map(t=><div key={t.id} className="rounded-lg border p-3 text-sm"><b>{companyName(t.company_id!)}</b> — {t.title}</div>)}
-        <Button asChild variant="outline" size="sm"><Link href="/trabalho/tarefas">Gerenciar tarefas</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link href={M.basePath+"/tarefas"}>Gerenciar tarefas</Link></Button>
       </CardContent></Card>
     </div>
 
@@ -108,11 +110,11 @@ export function CltDashboard({ data }: { data: CltDashboardData }) {
         {attentionCampaigns.length===0&&attentionTasks.length===0&&lowBalance.length===0?<p className="text-sm text-muted-foreground">Nada urgente no momento.</p>:null}
         {lowBalance.map(co=><div key={co.id} className="rounded-lg border p-3 text-sm"><b>{co.name}</b> — saldo de anúncios: {money.format(co.current_ad_balance)}</div>)}
         {attentionCampaigns.map(c=><div key={c.id} className="rounded-lg border p-3 text-sm"><b>{companyName(c.company_id)}</b> — {c.name} {daysUntil(c.ends_on)===0?"encerra hoje":`encerra em ${daysUntil(c.ends_on)} dia(s)`}</div>)}
-        {attentionTasks.map(t=><div key={t.id} className="rounded-lg border p-3 text-sm"><b>{t.company_id?companyName(t.company_id):"CLT geral"}</b> — {t.title} {t.due_date!<today?"está atrasada":"é importante hoje"}</div>)}
+        {attentionTasks.map(t=><div key={t.id} className="rounded-lg border p-3 text-sm"><b>{t.company_id?companyName(t.company_id):M.generalLabel+" geral"}</b> — {t.title} {t.due_date!<today?"está atrasada":"é importante hoje"}</div>)}
       </CardContent></Card>
       <Card><CardHeader><CardTitle>Saldos das empresas</CardTitle></CardHeader><CardContent className="space-y-2">
         {companies.map(co=><div key={co.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"><span className="font-medium">{co.name}</span><span className={Number(co.current_ad_balance)<=100?"font-semibold text-amber-500":"font-semibold"}>{money.format(co.current_ad_balance)}</span></div>)}
-        <Button asChild variant="outline" size="sm"><Link href="/trabalho/empresas">Gerenciar saldos</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link href={M.basePath+"/empresas"}>Gerenciar saldos</Link></Button>
       </CardContent></Card>
     </div>
 

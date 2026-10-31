@@ -3,6 +3,7 @@ import type {SupabaseClient} from "@supabase/supabase-js";
 import {revalidatePath} from "next/cache";
 import {createSupabaseServerClient} from "@/lib/supabase/server";
 import {isMissingDescriptionColumn,pickImportedDescription} from "@/lib/subtask-description";
+import {getModuleScope} from "@/lib/supabase/clt-scope";
 export type PlanningArea="clt"|"pessoal"|"rotina"|"visionario";
 export type PlanningInput={area:PlanningArea;companyId?:string|null;title:string;notes?:string;plannedDate?:string;endsOn?:string;scheduledTime?:string;weekdays?:number[];objective?:string;dailyBudget?:number;plannedAmount?:number;description?:string;descricao?:string;subtasks?:Array<string|{title:string;dueDate?:string;description?:string;descricao?:string;subtasks?:Array<string|{title:string;dueDate?:string;description?:string;descricao?:string}>}>;priority?:"normal"|"importante"};
 type NestedSubtask={title:string;dueDate?:string;description?:string;subtasks:Array<{title:string;dueDate?:string;description?:string}>};
@@ -15,7 +16,7 @@ async function insertSubtaskRows(db:SupabaseClient,rows:Record<string,unknown>[]
  return res as {data:{id:string}|null;error:{message:string}|null};
 }
 async function context(){const s=await createSupabaseServerClient();const {data:{user}}=await s.auth.getUser();if(!user)throw new Error("Faça login.");return{s,user};}
-function refresh(){revalidatePath("/planejamento");revalidatePath("/trabalho/campanhas");revalidatePath("/trabalho");}
+function refresh(){revalidatePath("/planejamento");revalidatePath("/trabalho/campanhas");revalidatePath("/trabalho");revalidatePath("/visionario/mkt","layout");}
 async function insertNestedSubtasks(db:SupabaseClient,userId:string,parentType:"pessoal"|"clt",parentId:string,subtasks:NestedSubtask[]):Promise<string|null>{
  for(let i=0;i<subtasks.length;i++){
   const stage=subtasks[i];
@@ -28,17 +29,20 @@ async function insertNestedSubtasks(db:SupabaseClient,userId:string,parentType:"
  }
  return null;
 }
-export async function importPlanningItemsAction(items:PlanningInput[]){
+export async function importPlanningItemsAction(items:PlanningInput[],module:"clt"|"mkt"="clt"){
  try{
  const {s,user}=await context();
  if(!Array.isArray(items)||items.length<1||items.length>150)return {error:"Selecione de 1 a 150 itens."};
- const {data:companies,error:ce}=await s.from("clt_companies").select("id").eq("user_id",user.id);
- if(ce)return {error:ce.message};
- const allowed=new Set((companies||[]).map(c=>c.id));
+ // Só empresas do módulo da tela (Planejamento geral = CLT; Visionário Dev → MKT = MKT).
+ if(module!=="clt"&&module!=="mkt")return {error:"Módulo inválido."};
+ const scope=await getModuleScope(s,user.id,module);
+ if(module==="mkt"&&!scope.ready)return {error:"O módulo MKT ainda não está ativo no banco (migração pendente)."};
+ const allowed=new Set(scope.companyIds);
+ if(module==="mkt"&&items.some(i=>i.area!=="clt"))return {error:"No planejamento do MKT, importe apenas itens de MKT (campanhas e tarefas das empresas MKT)."};
  const prepared=[];
  for(const item of items){
  if(!["clt","pessoal","rotina","visionario"].includes(item.area)||typeof item.title!=="string"||!item.title.trim()||item.title.length>240)return {error:"Um item possui título ou área inválida."};
- if(item.companyId&&!allowed.has(item.companyId))return {error:"Empresa não encontrada na sua conta."};
+ if(item.companyId&&!allowed.has(item.companyId))return {error:"Empresa não encontrada neste módulo."};
  if(item.area==="clt"&&!item.companyId)return {error:"Informe a empresa CLT de cada item."};
  if(item.area!=="clt"&&item.companyId)return {error:"Empresa só pode ser vinculada ao CLT."};
  if(item.plannedDate&&!/^\d{4}-\d{2}-\d{2}$/.test(item.plannedDate))return {error:"Data inválida."};
@@ -100,7 +104,7 @@ export async function importPlanningItemsAction(items:PlanningInput[]){
  }
  created++;
  }
- ["/planejamento","/trabalho","/trabalho/campanhas","/trabalho/tarefas","/tarefas","/rotina","/hoje"].forEach(p=>revalidatePath(p));
+ ["/planejamento","/trabalho","/trabalho/campanhas","/trabalho/tarefas","/tarefas","/rotina","/hoje"].forEach(p=>revalidatePath(p));revalidatePath("/visionario/mkt","layout");
  return {success:created+" itens criados nos módulos corretos. "+skipped+" ignorados (duplicados ou incompletos)."};
  }catch(e){return {error:e instanceof Error?e.message:"Erro ao importar."};}
 }

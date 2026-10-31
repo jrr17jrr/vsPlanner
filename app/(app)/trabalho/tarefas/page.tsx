@@ -1,3 +1,3 @@
-import{PageHeader}from"@/components/shared/page-header";import{CltTasksPageClient}from"@/components/trabalho/clt-tasks-page-client";import{getCltDashboardData}from"@/lib/supabase/repositories/clt.repository";
+import { CltTasksPage } from "@/components/trabalho/pages/simple-pages";
 export const dynamic="force-dynamic";
-export default async function Page(){const d=await getCltDashboardData();return <div className="space-y-4"><PageHeader title="Tarefas do CLT" description="Tarefas do dia, prazos e repetições exclusivas do Trabalho / CLT."/><CltTasksPageClient tasks={d.tasks} companies={d.companies} occurrences={d.occurrences}/></div>}
+export default async function Page(){return <CltTasksPage module="clt"/>}
