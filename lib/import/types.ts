@@ -55,6 +55,8 @@ export type ImportAd = {
   name: string;
   format: "imagem" | "video" | "carrossel" | "outro";
   postId: string | null;
+  creativeLabel: string | null;
+  adCopy: string | null;
   notes: string | null;
   metrics: Metrics;
   extra: Record<string, unknown>;

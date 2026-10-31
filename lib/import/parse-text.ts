@@ -80,7 +80,7 @@ function newAdSet(name: string, inferred = false): ImportAdSet {
   return { metaId: null, name, nameInferred: inferred || undefined, audienceKey: null, audienceName: null, dailyBudget: null, startAt: null, endAt: null, status: null, placements: null, notes: null, ads: [] };
 }
 function newAd(name: string): ImportAd {
-  return { metaId: null, name, format: inferAdFormat(null, name), postId: null, notes: null, metrics: emptyMetrics(), extra: {} };
+  return { metaId: null, name, format: inferAdFormat(null, name), postId: null, creativeLabel: null, adCopy: null, notes: null, metrics: emptyMetrics(), extra: {} };
 }
 
 export function parseStructuredText(text: string): ImportBundle {

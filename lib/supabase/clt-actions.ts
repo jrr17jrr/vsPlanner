@@ -241,6 +241,20 @@ export async function saveCltAdCreativeAction(input:{adSetId:string;name:string;
  if(error)return{error:error.message};refresh();return{success:"Anúncio cadastrado."};
 }
 
+export async function saveCltCreativeDetailsAction(input:{creativeId:string;creativeLabel:string;adCopy:string}):Promise<State>{
+ const {s,user}=await ctx();
+ const label=input.creativeLabel.trim(),copy=input.adCopy.trim();
+ if(label.length>180||copy.length>10000)return{error:"Identificação ou texto do anúncio muito longo."};
+ const {data:ad,error:lookupError}=await s.from("clt_ad_creatives").select("id,ad_set_id").eq("id",input.creativeId).eq("user_id",user.id).maybeSingle();
+ if(lookupError||!ad)return{error:"Anúncio não encontrado."};
+ const {data:set}=await s.from("clt_ad_sets").select("campaign_id").eq("id",ad.ad_set_id).eq("user_id",user.id).maybeSingle();
+ if(!set)return{error:"Conjunto não encontrado."};
+ const {data:campaign}=await s.from("clt_campaigns").select("id").eq("id",set.campaign_id).eq("user_id",user.id).maybeSingle();
+ if(!campaign)return{error:"Campanha não encontrada."};
+ const {error}=await s.from("clt_ad_creatives").update({creative_label:label||null,ad_copy:copy||null}).eq("id",ad.id).eq("user_id",user.id);
+ if(error)return{error:error.message};refresh();return{success:"Identificação e texto do anúncio salvos."};
+}
+
 export async function saveCltAdLevelResultAction(input:{campaignId:string;adSetId:string;creativeId?:string;date:string;spent:number;messages:number;sales:number;revenue:number;views:number;impressions?:number;reach?:number;engagements?:number;linkClicks?:number;thruplays?:number;leads?:number;profileVisits?:number;appointments?:number}):Promise<State>{
  const {s,user}=await ctx();
  if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||[input.spent,input.messages,input.sales,input.revenue,input.views].some(v=>!Number.isFinite(v)||v<0)||[input.messages,input.sales,input.views].some(v=>!Number.isInteger(v)))return{error:"Resultados inválidos."};
