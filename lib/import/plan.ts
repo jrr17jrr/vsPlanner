@@ -60,6 +60,8 @@ export function buildImportPayload(preview: ImportPreview) {
           name: ad.name,
           format: ad.format,
           post_id: ad.postId,
+          creative_label: ad.creativeLabel,
+          ad_copy: ad.adCopy,
           notes: ad.notes,
           metrics: ad.hasMetrics ? Object.fromEntries(METRIC_KEYS.map(k => [k, ad.metrics[k]])) : null,
         })),
