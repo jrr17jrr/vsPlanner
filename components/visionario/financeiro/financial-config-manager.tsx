@@ -247,6 +247,44 @@ function EditAccountDialog({ scope, account, onClose }: { scope: FinancialScope;
   );
 }
 
+/** Nome da categoria com renomear no lugar — lançamentos apontam para o id, então renomear não mexe no histórico. */
+function CategoryName({ scope, category, canEdit }: { scope: FinancialScope; category: FinancialCategory; canEdit: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(category.name);
+  const [pending, setPending] = useState(false);
+  if (!editing) {
+    return (
+      <span className="flex min-w-0 items-center gap-1">
+        <span className={`truncate text-sm ${category.is_active ? "text-foreground" : "text-muted-foreground line-through"}`}>{category.name}</span>
+        {canEdit && (
+          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label={`Renomear ${category.name}`} onClick={() => { setName(category.name); setEditing(true); }}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </span>
+    );
+  }
+  return (
+    <form
+      className="flex min-w-0 flex-1 items-center gap-1"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!name.trim()) return toast.error("Dê um nome.");
+        setPending(true);
+        const r = await updateFinancialCategoryAction(scope, category.id, name, category.is_active);
+        setPending(false);
+        if (r.error) return toast.error(r.error);
+        toast.success("Categoria renomeada.");
+        setEditing(false);
+      }}
+    >
+      <Input className="h-9 min-w-0 flex-1" value={name} onChange={(e) => setName(e.target.value)} aria-label="Novo nome da categoria" autoFocus disabled={pending} />
+      <Button type="submit" size="sm" className="h-9" disabled={pending}>Salvar</Button>
+      <Button type="button" size="sm" variant="ghost" className="h-9" onClick={() => setEditing(false)} disabled={pending}>Cancelar</Button>
+    </form>
+  );
+}
+
 function CategoriesTab({
   scope,
   categories,
@@ -305,7 +343,7 @@ function CategoriesTab({
                 .filter((c) => c.kind === k)
                 .map((c) => (
                   <div key={c.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className={`text-sm ${c.is_active ? "text-foreground" : "text-muted-foreground line-through"}`}>{c.name}</span>
+                    <CategoryName scope={scope} category={c} canEdit={permissions.canEdit} />
                     <div className="flex items-center gap-2">
                       {permissions.canEdit && (
                         <Switch

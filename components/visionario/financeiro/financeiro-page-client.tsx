@@ -35,6 +35,7 @@ import { NovaMovimentacaoDialog } from "@/components/visionario/financeiro/nova-
 import { ChargesList } from "@/components/visionario/financeiro/charges-list";
 import { MovementsList } from "@/components/visionario/financeiro/movements-list";
 import { FinancialConfigManager } from "@/components/visionario/financeiro/financial-config-manager";
+import { CategorySpendingPanel } from "@/components/financeiro/category-spending-panel";
 import {
   accountBalance,
   calculateMRR,
@@ -135,7 +136,7 @@ export function FinanceiroPageClient({
   services: Service[];
   permissions: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }) {
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [tab, setTab] = useState<Tab>(initialTab === "categorias" && scope !== "pessoal" ? "visao" : initialTab);
   const router = useRouter();
   const [debtBusy, setDebtBusy] = useState(false);
   const [payDebt, setPayDebt] = useState(false);
@@ -224,6 +225,7 @@ export function FinanceiroPageClient({
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="visao">Visão geral</TabsTrigger>
+          {scope === "pessoal" && <TabsTrigger value="categorias">Gastos por categoria</TabsTrigger>}
           <TabsTrigger value="movimentacoes">Movimentações</TabsTrigger>
           <TabsTrigger value="a_receber">A receber</TabsTrigger>
           <TabsTrigger value="a_pagar">A pagar</TabsTrigger>
@@ -379,6 +381,18 @@ export function FinanceiroPageClient({
             </ChartCard>
           </div>
         </>
+      )}
+
+      {tab === "categorias" && scope === "pessoal" && (
+        <CategorySpendingPanel
+          charges={charges}
+          payments={payments}
+          categories={categories}
+          origins={origins}
+          referenceTypes={referenceTypes}
+          canEdit={permissions.canEdit}
+          canCreate={permissions.canCreate}
+        />
       )}
 
       {tab === "movimentacoes" && (
