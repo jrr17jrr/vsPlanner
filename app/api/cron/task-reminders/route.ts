@@ -11,6 +11,8 @@ import {
   type ReminderTable,
   type ReminderTask,
 } from "@/lib/push/reminders";
+import { selectScheduledReminders, type ReminderActivityRow, type ReminderSubtaskRow, type ReminderTaskRow } from "@/lib/push/schedule-reminders";
+import { resolveNotificationPrefs, type NotificationPrefs } from "@/lib/notification-prefs";
 import webpush from "web-push";
 
 export const runtime = "nodejs";
@@ -27,12 +29,95 @@ export const dynamic = "force-dynamic";
  * aplicada, falhas ficam registradas (`status = failed`, `last_error`) e são
  * re-tentadas até MAX_DELIVERY_ATTEMPTS dentro da janela de recuperação.
  * Sem ela, mantém o comportamento antigo (apaga a trava para tentar de novo).
+ *
+ * Tarefas pessoais, subtarefas e Rotina usam lib/push/schedule-reminders.ts
+ * (execução + antecedência, prazo amanhã/hoje, atraso). Trabalho/CLT
+ * (personal_work_tasks, clt_tasks) seguem com selectDueReminders.
  */
 
 type Subscription = { user_id: string; endpoint: string; subscription: webpush.PushSubscription };
 type LogRow = { status?: string | null; attempts?: number | null };
 
-const TABLES: ReminderTable[] = ["tasks", "personal_work_tasks", "clt_tasks"];
+/** Tabelas no fluxo antigo (só "no horário"). `tasks` passou para o motor novo. */
+const TABLES: ReminderTable[] = ["personal_work_tasks", "clt_tasks"];
+
+type Outgoing = { userId: string; eventKey: string; url: string; title: string; body: string };
+
+function shiftDate(date: string, days: number) {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** Tarefas pessoais, subtarefas e atividades com lembrete — estado ATUAL (concluídas ficam de fora). */
+async function loadScheduleSources(db: SupabaseClient, today: string) {
+  const from = shiftDate(today, -8);
+  const to = shiftDate(today, 1);
+
+  let tasksRes = await db.from("tasks").select("*").is("archived_at", null).neq("status", "concluida")
+    .or(`recurrence.eq.weekly,and(due_date.gte.${from},due_date.lte.${to}),and(deadline_date.gte.${from},deadline_date.lte.${to})`);
+  if (tasksRes.error && isMissingColumn(tasksRes.error.code)) {
+    tasksRes = await db.from("tasks").select("*").is("archived_at", null).neq("status", "concluida")
+      .or(`recurrence.eq.weekly,and(due_date.gte.${from},due_date.lte.${to})`);
+  }
+  if (tasksRes.error) throw tasksRes.error;
+  const tasks = (tasksRes.data ?? []) as ReminderTaskRow[];
+
+  const occRes = await db.from("task_occurrences").select("task_id,occurrence_date,status,scheduled_time,title").gte("occurrence_date", today).lte("occurrence_date", to);
+  if (occRes.error) throw occRes.error;
+
+  let subRes = await db.from("task_subtasks").select("*").eq("is_done", false)
+    .or(`and(scheduled_date.gte.${today},scheduled_date.lte.${to}),and(due_date.gte.${from},due_date.lte.${to})`);
+  if (subRes.error && isMissingColumn(subRes.error.code)) {
+    subRes = await db.from("task_subtasks").select("*").eq("is_done", false).gte("due_date", from).lte("due_date", to);
+  }
+  if (subRes.error) throw subRes.error;
+  const rawSubs = (subRes.data ?? []) as Array<ReminderSubtaskRow>;
+
+  // Título e estado da tarefa-pai (subtarefa de tarefa concluída não notifica).
+  const parents = new Map<string, { title: string; closed: boolean }>();
+  const PARENT: Record<string, { table: string; closed: (r: Record<string, unknown>) => boolean }> = {
+    pessoal: { table: "tasks", closed: (r) => r.status === "concluida" || !!r.archived_at },
+    clt: { table: "clt_tasks", closed: (r) => r.status === "concluida" || !!r.archived_at },
+    visionario: { table: "work_items", closed: (r) => r.status === "concluido" || r.status === "cancelado" },
+  };
+  for (const [type, cfg] of Object.entries(PARENT)) {
+    const ids = [...new Set(rawSubs.filter((s) => s.parent_type === type).map((s) => s.parent_id))];
+    if (!ids.length) continue;
+    const res = await db.from(cfg.table).select("*").in("id", ids);
+    if (res.error) throw res.error;
+    for (const r of (res.data ?? []) as Array<Record<string, unknown>>) parents.set(`${type}:${r.id}`, { title: String(r.title ?? ""), closed: cfg.closed(r) });
+  }
+  const subtasks: ReminderSubtaskRow[] = rawSubs.map((s) => {
+    const parent = parents.get(`${s.parent_type}:${s.parent_id}`);
+    return { ...s, parentTitle: parent?.title ?? null, parentClosed: !parent || parent.closed };
+  });
+
+  // Rotina: só atividades com lembrete configurado (coluna nova; sem migration = sem lembrete de rotina).
+  let activities: ReminderActivityRow[] = [];
+  let completions: Array<{ activity_id: string; occurrence_date: string }> = [];
+  const actRes = await db.from("activities").select("*").eq("is_active", true).not("reminder_offsets", "eq", "{}");
+  if (actRes.error && !isMissingColumn(actRes.error.code)) throw actRes.error;
+  if (!actRes.error) {
+    activities = (actRes.data ?? []) as ReminderActivityRow[];
+    const linkedIds = [...new Set(activities.map((a) => a.task_id).filter(Boolean))] as string[];
+    if (linkedIds.length) {
+      const linked = await db.from("tasks").select("id,title,status,recurrence,archived_at").in("id", linkedIds);
+      if (linked.error) throw linked.error;
+      const byId = new Map((linked.data ?? []).map((t) => [t.id as string, t]));
+      activities = activities.map((a) => {
+        const t = a.task_id ? byId.get(a.task_id) : undefined;
+        return { ...a, linkedTask: a.task_id ? { title: String(t?.title ?? a.title), closed: !t || !!t.archived_at || (t.recurrence !== "weekly" && t.status === "concluida") } : null };
+      });
+    }
+    if (activities.length) {
+      const comp = await db.from("activity_completions").select("activity_id,occurrence_date").in("activity_id", activities.map((a) => a.id)).gte("occurrence_date", today).lte("occurrence_date", to);
+      if (comp.error) throw comp.error;
+      completions = comp.data ?? [];
+    }
+  }
+
+  return { tasks, occurrences: occRes.data ?? [], subtasks, activities, completions };
+}
 const OCCURRENCE_TABLES: Partial<Record<ReminderTable, string>> = { tasks: "task_occurrences", clt_tasks: "clt_task_occurrences" };
 // 42703 = coluna inexistente no Postgres; PGRST204 = coluna fora do cache do PostgREST.
 const isMissingColumn = (code?: string) => code === "42703" || code === "PGRST204";
@@ -66,7 +151,7 @@ async function loadCandidates(db: SupabaseClient, date: string) {
 }
 
 /** Tenta obter a trava de envio. Retorna o modo do log ou `null` para pular. */
-async function acquire(db: SupabaseClient, reminder: DueReminder): Promise<"tracked" | "legacy" | null> {
+async function acquire(db: SupabaseClient, reminder: Outgoing): Promise<"tracked" | "legacy" | null> {
   const tracked = await db.from("push_delivery_log").insert({ user_id: reminder.userId, event_key: reminder.eventKey, status: "sending", attempts: 1 });
   if (!tracked.error) return "tracked";
   if (isMissingColumn(tracked.error.code)) {
@@ -91,7 +176,7 @@ async function acquire(db: SupabaseClient, reminder: DueReminder): Promise<"trac
   return retry.data?.length ? "tracked" : null;
 }
 
-async function finish(db: SupabaseClient, mode: "tracked" | "legacy", reminder: DueReminder, result: { status: "sent" | "failed" | "no_subscription"; error?: string; sent: number }) {
+async function finish(db: SupabaseClient, mode: "tracked" | "legacy", reminder: Outgoing, result: { status: "sent" | "failed" | "no_subscription"; error?: string; sent: number }) {
   const match = db.from("push_delivery_log");
   if (mode === "legacy") {
     if (result.status === "failed") await match.delete().eq("user_id", reminder.userId).eq("event_key", reminder.eventKey);
@@ -118,18 +203,37 @@ export async function GET(request: Request) {
     webpush.setVapidDetails("mailto:admin@visionariodev.com.br", pub, priv);
     const now = new Date();
     const { date, time } = localDateTimeParts(now);
-    const { tasks, occurrences } = await loadCandidates(db, date);
+    const [{ tasks, occurrences }, sources] = await Promise.all([loadCandidates(db, date), loadScheduleSources(db, date)]);
 
-    const userIds = [...new Set(tasks.map((t) => t.user_id))];
+    const userIds = [...new Set([
+      ...tasks.map((t) => t.user_id), ...sources.tasks.map((t) => t.user_id),
+      ...sources.subtasks.map((s) => s.user_id), ...sources.activities.map((a) => a.user_id),
+    ])];
     const preferences = new Map<string, ReminderPreferences>();
+    const resolved = new Map<string, NotificationPrefs>();
     if (userIds.length) {
       const { data, error } = await db.from("profiles").select("id,notification_preferences").in("id", userIds);
       if (error) throw error;
-      for (const p of data ?? []) preferences.set(p.id as string, p.notification_preferences as ReminderPreferences);
+      for (const p of data ?? []) {
+        const prefs = resolveNotificationPrefs(p.notification_preferences);
+        resolved.set(p.id as string, prefs);
+        // Interruptor geral também desliga o fluxo antigo.
+        preferences.set(p.id as string, prefs.enabled ? (p.notification_preferences as ReminderPreferences) : { tasks: false, clt: false });
+      }
     }
 
-    const due = selectDueReminders({ now, tasks, occurrences, preferences });
-    const summary = { ok: true, date, time, candidates: tasks.length, due: due.length, sent: 0, failed: 0, skipped: 0, noSubscription: 0 };
+    const legacy: Outgoing[] = selectDueReminders({ now, tasks, occurrences, preferences }).map((r: DueReminder) => ({
+      userId: r.userId, eventKey: r.eventKey, url: r.url, title: "VS Planner • Lembrete de tarefa", body: `${r.time} · ${r.title}`,
+    }));
+    const scheduled: Outgoing[] = selectScheduledReminders({
+      now, ...sources, prefs: (userId) => resolved.get(userId) ?? resolveNotificationPrefs(null),
+    }).map((r) => ({ userId: r.userId, eventKey: r.eventKey, url: r.url, title: r.title, body: r.body }));
+    const due = [...legacy, ...scheduled];
+    const summary = {
+      ok: true, date, time,
+      candidates: tasks.length + sources.tasks.length + sources.subtasks.length + sources.activities.length,
+      due: due.length, sent: 0, failed: 0, skipped: 0, noSubscription: 0,
+    };
 
     for (const reminder of due) {
       const mode = await acquire(db, reminder);
@@ -150,8 +254,8 @@ export async function GET(request: Request) {
       for (const sub of subs) {
         try {
           await webpush.sendNotification(sub.subscription, JSON.stringify({
-            title: "VS Planner • Lembrete de tarefa",
-            body: `${reminder.time} · ${reminder.title}`,
+            title: reminder.title,
+            body: reminder.body,
             url: reminder.url,
             tag: reminder.eventKey,
           }), { TTL: 60 * 60, urgency: "high" });
