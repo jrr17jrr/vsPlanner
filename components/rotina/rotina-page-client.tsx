@@ -11,17 +11,27 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ChecklistItem } from "@/components/shared/checklist-item";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ActivityFormDialog } from "@/components/rotina/activity-form-dialog";
+import { LinkedRoutineItem } from "@/components/rotina/linked-routine-item";
+import type { Subtask } from "@/lib/task-schedule";
 import { toggleActivityCompletionAction, deleteActivityAction } from "@/lib/supabase/personal-actions";
 import { getRealOccurrences, getRealOccurrencesForDay, type RealActivityOccurrence } from "@/lib/routine-real";
 import { toDateKey, weekdayLabel, formatDateShort } from "@/lib/format";
-import type { Activity, ActivityCompletion } from "@/types/database.types";
+import type { Activity, ActivityCompletion, Task } from "@/types/database.types";
 
 export function RotinaPageClient({
   activities,
   completions: initialCompletions,
+  tasks,
+  subtasks,
+  todayKey,
 }: {
   activities: Activity[];
   completions: ActivityCompletion[];
+  /** Tarefas pessoais não arquivadas (para vincular e para exibir as vinculadas). */
+  tasks: Task[];
+  /** Subtarefas originais das tarefas vinculadas. */
+  subtasks: Subtask[];
+  todayKey: string;
 }) {
   const [completions, setCompletions] = useState(initialCompletions);
   const [tab, setTab] = useState("hoje");
@@ -29,6 +39,17 @@ export function RotinaPageClient({
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Activity | undefined>();
   const [defaultWeekday, setDefaultWeekday] = useState<number | undefined>();
+  const [defaultDate, setDefaultDate] = useState<string | undefined>();
+
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  const subtasksByTask = useMemo(() => {
+    const map = new Map<string, Subtask[]>();
+    for (const s of subtasks) map.set(s.parent_id, [...(map.get(s.parent_id) ?? []), s]);
+    return map;
+  }, [subtasks]);
+  const linkedIds = new Set(activities.map((a) => a.task_id).filter(Boolean));
+  // Vinculáveis: pendentes ou recorrentes (as já vinculadas continuam na lista para a edição mostrar o nome).
+  const linkableTasks = tasks.filter((t) => t.recurrence === "weekly" || t.status !== "concluida" || linkedIds.has(t.id));
   const [deleting, setDeleting] = useState<Activity | undefined>();
 
   const today = new Date();
@@ -50,9 +71,10 @@ export function RotinaPageClient({
 
   const weekOcc = useMemo(() => getRealOccurrences(activities, completions, weekDays[0], weekDays[6]), [activities, completions, weekDays]);
 
-  function openCreate(weekday?: number) {
+  function openCreate(weekday?: number, date?: string) {
     setEditing(undefined);
     setDefaultWeekday(weekday);
+    setDefaultDate(date);
     setFormOpen(true);
   }
 
@@ -91,6 +113,23 @@ export function RotinaPageClient({
   }
 
   function renderOcc(occ: RealActivityOccurrence) {
+    const linkedTask = occ.activity.task_id ? taskById.get(occ.activity.task_id) : undefined;
+    if (linkedTask) {
+      return (
+        <LinkedRoutineItem
+          key={`${occ.activity.id}-${occ.date}`}
+          activity={occ.activity}
+          task={linkedTask}
+          subtasks={subtasksByTask.get(linkedTask.id) ?? []}
+          date={occ.date}
+          todayKey={todayKey}
+          sessionDone={occ.completed}
+          onToggleSession={() => toggle(occ)}
+          onEdit={() => openEdit(occ.activity)}
+          onDelete={() => setDeleting(occ.activity)}
+        />
+      );
+    }
     return (
       <ChecklistItem
         key={`${occ.activity.id}-${occ.date}`}
@@ -139,7 +178,7 @@ export function RotinaPageClient({
               title="Nenhuma atividade para hoje"
               description="Adicione sua primeira atividade do dia."
               action={
-                <Button size="sm" onClick={() => openCreate(today.getDay())}>
+                <Button size="sm" onClick={() => openCreate(today.getDay(), todayKey)}>
                   <Plus className="h-4 w-4" /> Nova atividade
                 </Button>
               }
@@ -175,7 +214,7 @@ export function RotinaPageClient({
                     <p className={`text-sm font-semibold ${isToday ? "text-primary" : "text-foreground"}`}>{weekdayLabel(d.getDay())}</p>
                     <span className="text-xs text-muted-foreground">{formatDateShort(d)}</span>
                     {dayPct !== null && <span className="text-xs font-medium text-primary">{dayPct}%</span>}
-                    <button onClick={() => openCreate(d.getDay())} className="ml-auto text-xs text-primary hover:underline">
+                    <button onClick={() => openCreate(d.getDay(), dateKey)} className="ml-auto min-h-9 px-1 text-xs text-primary hover:underline">
                       + adicionar
                     </button>
                   </div>
@@ -191,13 +230,17 @@ export function RotinaPageClient({
         </TabsContent>
       </Tabs>
 
-      <ActivityFormDialog open={formOpen} onOpenChange={setFormOpen} activity={editing} defaultWeekday={defaultWeekday} />
+      <ActivityFormDialog open={formOpen} onOpenChange={setFormOpen} activity={editing} defaultWeekday={defaultWeekday} defaultDate={defaultDate} tasks={linkableTasks} />
 
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(open) => !open && setDeleting(undefined)}
-        title="Excluir atividade?"
-        description={`"${deleting?.title}" será removida da sua rotina, incluindo todas as ocorrências recorrentes.`}
+        title={deleting?.task_id ? "Tirar tarefa da rotina?" : "Excluir atividade?"}
+        description={
+          deleting?.task_id
+            ? `"${taskById.get(deleting.task_id)?.title ?? deleting.title}" sai da rotina. A tarefa original e as subtarefas continuam na página Tarefas.`
+            : `"${deleting?.title}" será removida da sua rotina, incluindo todas as ocorrências recorrentes.`
+        }
         onConfirm={handleDelete}
       />
     </div>

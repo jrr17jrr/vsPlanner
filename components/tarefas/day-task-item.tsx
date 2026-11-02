@@ -9,6 +9,13 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDateShort, weekdayLabel } from "@/lib/format";
 import { formatWeekdays, weekdayOfKey, type DayTaskEntry } from "@/lib/tasks";
+import { groupSubtasks, type Subtask } from "@/lib/task-schedule";
+import { todayKeySaoPaulo } from "@/lib/format";
+
+function hasHighlights(subtasks: Subtask[]) {
+  const g = groupSubtasks(subtasks, { todayKey: todayKeySaoPaulo() });
+  return g.today.some((e) => !e.subtask.is_done) || g.overdue.length > 0;
+}
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,6 +25,7 @@ import { cn } from "@/lib/utils";
  */
 export function DayTaskItem({
   entry,
+  subtasks,
   done,
   onToggle,
   onEdit,
@@ -25,6 +33,8 @@ export function DayTaskItem({
   onEndRecurrence,
 }: {
   entry: DayTaskEntry;
+  /** Subtarefas já carregadas no servidor (Meu Dia) — abre direto se houver algo para hoje/atrasado. */
+  subtasks?: Subtask[];
   done: boolean;
   onToggle: () => void;
   onEdit?: () => void;
@@ -51,7 +61,13 @@ export function DayTaskItem({
       <div className="min-w-0 flex-1">
         <p className={cn("break-words text-sm font-medium text-foreground", done && "line-through")}>{entry.title}</p>
         <ExpandableDescription text={entry.task.description} className="mt-0.5" />
-        <Subtasks parentType="pessoal" parentId={entry.task.id} onChanged={() => router.refresh()}/>
+        <Subtasks
+          parentType="pessoal"
+          parentId={entry.task.id}
+          initialItems={subtasks}
+          initialOpen={!!subtasks && hasHighlights(subtasks)}
+          onChanged={() => router.refresh()}
+        />
         {entry.location && (
           <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3 shrink-0" />

@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { addDaysToKey, isRecurringTask, pastRecurringDates, recurringTaskOccursOn } from "@/lib/tasks";
 import {
+  ACTIVITY_LINK_COLUMNS,
   isMissingColumnError,
   MISSING_SCHEDULE_WARNING,
   normalizeReminderOffsets,
@@ -402,62 +403,137 @@ export async function deleteTaskAction(taskId: string): Promise<ActionState> {
 export type ActivityFormInput = {
   title: string;
   category?: string;
+  /** Repetição semanal (0=domingo..6=sábado). Ignorado quando `specificDate` vem preenchido. */
   weekdays: number[];
   startTime: string;
   endTime?: string;
   notes?: string;
+  /** Vincula uma tarefa existente (nunca cria cópia). */
+  taskId?: string | null;
+  /** Ocorrência única nesse dia. */
+  specificDate?: string | null;
+  reminderOffsets?: number[];
 };
 
-export async function createActivityAction(input: ActivityFormInput): Promise<ActionState> {
-  const { profile, space } = await requirePersonalSpace();
-  if (!input.title.trim()) return { error: "Título é obrigatório." };
-  if (input.weekdays.length === 0) return { error: "Escolha pelo menos um dia da semana." };
+type ActivityValues = {
+  title: string;
+  category: string | null;
+  weekdays: number[];
+  start_time: string;
+  end_time: string | null;
+  notes: string | null;
+  task_id: string | null;
+  specific_date: string | null;
+  reminder_offsets: number[];
+};
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("activities")
-    .insert({
-      space_id: space.id,
-      user_id: profile.id,
-      title: input.title.trim(),
+const LINK_NEEDS_MIGRATION =
+  "Para vincular tarefas ou criar ocorrência única, o banco precisa da atualização de agenda (migration 20261102100000).";
+
+/**
+ * Valida o formulário e, se for vínculo, confere que a tarefa é do próprio
+ * usuário e que ela ainda não está na rotina no mesmo dia (evita duplicar
+ * a mesma tarefa na mesma tela). O título da atividade vinculada é só um
+ * rótulo de reserva — a tela sempre mostra o título atual da tarefa.
+ */
+async function normalizeActivityInput(
+  supabase: SupabaseServer,
+  userId: string,
+  input: ActivityFormInput,
+  activityId?: string
+): Promise<{ error: string } | { values: ActivityValues }> {
+  if (input.specificDate && !DATE_KEY.test(input.specificDate)) return { error: "Data inválida." };
+  if (!input.startTime || !TIME_KEY.test(input.startTime)) return { error: "Horário inválido." };
+  if (input.endTime && !TIME_KEY.test(input.endTime)) return { error: "Horário de fim inválido." };
+  const weekdays = input.specificDate
+    ? []
+    : [...new Set(input.weekdays)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b);
+  if (!input.specificDate && weekdays.length === 0) return { error: "Escolha pelo menos um dia da semana ou uma data." };
+
+  let title = input.title.trim();
+  if (input.taskId) {
+    const task = await getOwnTask(supabase, input.taskId, userId);
+    if (!task || task.archived_at) return { error: "Tarefa não encontrada." };
+    title = task.title;
+
+    const { data: links, error } = await supabase.from("activities").select("id,weekdays,specific_date").eq("user_id", userId).eq("task_id", input.taskId);
+    if (error) return { error: isMissingColumnError(error) ? LINK_NEEDS_MIGRATION : error.message };
+    const clash = (links ?? []).some((l) => {
+      if (l.id === activityId) return false;
+      const other = l as { weekdays: number[]; specific_date: string | null };
+      if (input.specificDate && other.specific_date) return input.specificDate === other.specific_date;
+      if (input.specificDate) return other.weekdays.includes(new Date(`${input.specificDate}T12:00:00Z`).getUTCDay());
+      if (other.specific_date) return weekdays.includes(new Date(`${other.specific_date}T12:00:00Z`).getUTCDay());
+      return other.weekdays.some((d) => weekdays.includes(d));
+    });
+    if (clash) return { error: "Essa tarefa já está na rotina em um desses dias. Edite o vínculo existente." };
+  }
+  if (!title) return { error: "Título é obrigatório." };
+
+  return {
+    values: {
+      title,
       category: input.category?.trim() || null,
-      weekdays: input.weekdays,
+      weekdays,
       start_time: input.startTime,
       end_time: input.endTime || null,
       notes: input.notes?.trim() || null,
-    })
-    .select("id")
-    .single();
+      task_id: input.taskId || null,
+      specific_date: input.specificDate || null,
+      reminder_offsets: normalizeReminderOffsets(input.reminderOffsets),
+    },
+  };
+}
 
-  if (error) return { error: error.message };
+/** Grava a atividade; antes da migration, atividades simples continuam funcionando (vínculo/data única exigem a migration). */
+async function writeActivity(
+  write: (values: Partial<ActivityValues>) => PromiseLike<{ error: { code?: string; message: string } | null; data?: unknown }>,
+  values: ActivityValues
+): Promise<{ error?: string; warning?: string; data?: unknown }> {
+  const first = await write(values);
+  if (!first.error) return { data: first.data };
+  if (!isMissingColumnError(first.error)) return { error: first.error.message };
+  if (values.task_id || values.specific_date) return { error: LINK_NEEDS_MIGRATION };
+  const stripped = stripScheduleColumns(values, ACTIVITY_LINK_COLUMNS);
+  const second = await write(stripped.values);
+  if (second.error) return { error: second.error.message };
+  return { data: second.data, warning: stripped.lost ? MISSING_SCHEDULE_WARNING : undefined };
+}
+
+function revalidateRoutinePaths() {
   revalidatePath("/rotina");
   revalidatePath("/hoje");
-  return { success: "Atividade criada.", id: data.id };
+  revalidatePath("/");
+}
+
+export async function createActivityAction(input: ActivityFormInput): Promise<ActionState> {
+  const { profile, space } = await requirePersonalSpace();
+  const supabase = await createSupabaseServerClient();
+  const normalized = await normalizeActivityInput(supabase, profile.id, input);
+  if ("error" in normalized) return { error: normalized.error };
+
+  const result = await writeActivity(
+    (values) => supabase.from("activities").insert({ ...values, title: values.title ?? normalized.values.title, space_id: space.id, user_id: profile.id } as never).select("id").single(),
+    normalized.values
+  );
+  if (result.error) return { error: result.error };
+  revalidateRoutinePaths();
+  return { success: input.taskId ? "Tarefa vinculada à rotina." : "Atividade criada.", id: (result.data as { id: string } | undefined)?.id, warning: result.warning };
 }
 
 export async function updateActivityAction(activityId: string, input: ActivityFormInput): Promise<ActionState> {
   const { profile } = await requirePersonalSpace();
-  if (!input.title.trim()) return { error: "Título é obrigatório." };
-  if (input.weekdays.length === 0) return { error: "Escolha pelo menos um dia da semana." };
-
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
-    .from("activities")
-    .update({
-      title: input.title.trim(),
-      category: input.category?.trim() || null,
-      weekdays: input.weekdays,
-      start_time: input.startTime,
-      end_time: input.endTime || null,
-      notes: input.notes?.trim() || null,
-    })
-    .eq("id", activityId)
-    .eq("user_id", profile.id);
+  const normalized = await normalizeActivityInput(supabase, profile.id, input, activityId);
+  if ("error" in normalized) return { error: normalized.error };
 
-  if (error) return { error: error.message };
-  revalidatePath("/rotina");
-  revalidatePath("/hoje");
-  return { success: "Atividade atualizada." };
+  const result = await writeActivity(
+    (values) => supabase.from("activities").update(values as never).eq("id", activityId).eq("user_id", profile.id),
+    normalized.values
+  );
+  if (result.error) return { error: result.error };
+  revalidateRoutinePaths();
+  return { success: "Atividade atualizada.", warning: result.warning };
 }
 
 export async function toggleActivityActiveAction(activityId: string, isActive: boolean): Promise<ActionState> {

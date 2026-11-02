@@ -16,7 +16,7 @@ import { DayTaskItem } from "@/components/tarefas/day-task-item";
 import { useTaskToggle } from "@/components/tarefas/use-task-toggle";
 import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
 import { moveTaskDeadlineAction } from "@/lib/supabase/personal-actions";
-import { taskSchedule } from "@/lib/task-schedule";
+import { taskSchedule, type Subtask } from "@/lib/task-schedule";
 import {
   formatWeekdays,
   getDayTaskEntries,
@@ -39,9 +39,12 @@ export function TarefasPageClient({
   tasks,
   occurrences,
   todayKey,
+  subtasksByTask = {},
 }: {
   tasks: Task[];
   occurrences: TaskOccurrence[];
+  /** Subtarefas originais por tarefa (carregadas no servidor). */
+  subtasksByTask?: Record<string, Subtask[]>;
   /** "Hoje" calculado no servidor (America/Sao_Paulo). */
   todayKey: string;
 }) {
@@ -75,6 +78,7 @@ export function TarefasPageClient({
       <DayTaskItem
         key={entry.key}
         entry={entry}
+        subtasks={subtasksByTask[entry.task.id] ?? []}
         done={toggle.isEntryDone(entry)}
         onToggle={() => toggle.toggleEntry(entry)}
         onEdit={withActions && !entry.task.archived_at ? () => dialogs.openEdit(entry.task) : undefined}
@@ -107,7 +111,7 @@ export function TarefasPageClient({
             {task.category && <span className="text-[11px] text-muted-foreground">{task.category}</span>}
           </>
         }
-      /><Subtasks parentType="pessoal" parentId={task.id} onChanged={refresh}/></div>
+      /><Subtasks parentType="pessoal" parentId={task.id} initialItems={subtasksByTask[task.id] ?? []} onChanged={refresh}/></div>
     );
   }
 

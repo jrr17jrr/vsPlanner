@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isMissingColumnError, type Subtask } from "@/lib/task-schedule";
 import type { Activity, ActivityCompletion, Goal, PersonalWorkTask, Task, TaskOccurrence } from "@/types/database.types";
 
 /**
@@ -93,4 +94,58 @@ export async function listGoals(spaceId: string): Promise<Goal[]> {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
+}
+
+/** Tarefas por id (vínculos da Rotina) — RLS garante que só voltam as do próprio usuário. */
+export async function listTasksByIds(ids: string[]): Promise<Task[]> {
+  if (ids.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.from("tasks").select("*").in("id", ids.slice(0, 200));
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Subtarefas (registro original) das tarefas pessoais informadas. */
+export async function listPersonalSubtasks(parentIds: string[]): Promise<Subtask[]> {
+  if (parentIds.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  // Lotes de 100 ids: evita URL longa demais no PostgREST com muitas tarefas.
+  const chunks: string[][] = [];
+  for (let i = 0; i < parentIds.length; i += 100) chunks.push(parentIds.slice(i, i + 100));
+  const results = await Promise.all(
+    chunks.map((ids) =>
+      supabase
+        .from("task_subtasks" as never)
+        .select("*")
+        .eq("parent_type", "pessoal")
+        .in("parent_id", ids)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true })
+    )
+  );
+  const out: Subtask[] = [];
+  for (const { data, error } of results) {
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as Subtask[]));
+  }
+  return out;
+}
+
+/**
+ * Subtarefas pessoais relevantes para o Meu Dia: programadas para hoje
+ * (inclusive concluídas, para mostrar o progresso), prazo hoje, e
+ * pendentes com execução ou prazo vencidos. Antes da migration
+ * 20261102100000 (sem scheduled_date), cai para o prazo (due_date).
+ */
+export async function listMyDaySubtasks(userId: string, todayKey: string): Promise<Subtask[]> {
+  const supabase = await createSupabaseServerClient();
+  const base = () => supabase.from("task_subtasks" as never).select("*").eq("user_id", userId).eq("parent_type", "pessoal");
+  const full = await base().or(
+    `scheduled_date.eq.${todayKey},and(is_done.eq.false,or(scheduled_date.lt.${todayKey},due_date.lte.${todayKey}))`
+  );
+  if (!full.error) return (full.data ?? []) as unknown as Subtask[];
+  if (!isMissingColumnError(full.error)) throw full.error;
+  const legacy = await base().eq("is_done", false).lte("due_date", todayKey);
+  if (legacy.error) throw legacy.error;
+  return (legacy.data ?? []) as unknown as Subtask[];
 }

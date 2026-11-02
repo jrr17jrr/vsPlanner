@@ -3,6 +3,7 @@ import { getTodayMeetingsForHoje } from "@/lib/supabase/meetings-actions";
 import { getTodayWorkItemsForHoje } from "@/lib/supabase/work-items-actions";
 import { listActivities, listActivityCompletions, listPersonalWorkTasks } from "@/lib/supabase/repositories/personal.repository";
 import { loadMyDayTasks } from "@/lib/supabase/my-day";
+import { loadMyDaySubtasks } from "@/lib/supabase/my-day-subtasks";
 import { loadSection } from "@/lib/supabase/section-result";
 import { HojePageClient } from "@/components/hoje/hoje-page-client";
 import { todayKeySaoPaulo } from "@/lib/format";
@@ -29,6 +30,10 @@ export default async function HojePage() {
     ),
     loadSection("meu-dia:clt", () => listPersonalWorkTasks(space.id)),
   ]);
+  // Subtarefas dependem das seções acima (para não repetir o que já aparece).
+  const subtasks = await loadSection("meu-dia:subtarefas", () =>
+    loadMyDaySubtasks(profile.id, todayKey, myDay.ok ? myDay.data : null, rotina.ok ? rotina.data[0] : [])
+  );
 
   return (
     <HojePageClient
@@ -41,12 +46,14 @@ export default async function HojePage() {
       activities={rotina.ok ? rotina.data[0] : []}
       completions={rotina.ok ? rotina.data[1] : []}
       workTasks={workTasks.ok ? workTasks.data.filter((t) => t.due_date === todayKey) : []}
+      subtaskData={subtasks.ok ? subtasks.data : { subtasksByTask: {}, tasks: [] }}
       errors={{
         tarefas: myDay.ok ? undefined : myDay.error,
         compromissos: meetings.ok ? undefined : meetings.error,
         trabalhos: workItems.ok ? undefined : workItems.error,
         rotina: rotina.ok ? undefined : rotina.error,
         clt: workTasks.ok ? undefined : workTasks.error,
+        subtarefas: subtasks.ok ? undefined : subtasks.error,
       }}
     />
   );

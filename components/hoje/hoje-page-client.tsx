@@ -12,6 +12,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TodayMeetingItem } from "@/components/visionario/reunioes/today-meeting-item";
 import { DayTaskItem } from "@/components/tarefas/day-task-item";
+import { LinkedRoutineItem } from "@/components/rotina/linked-routine-item";
+import { Subtasks } from "@/components/shared/subtasks";
+import { planMyDaySections } from "@/lib/my-day-plan";
+import { taskDeadline } from "@/lib/tasks";
+import type { MyDaySubtaskData } from "@/lib/supabase/my-day-subtasks";
+import { useRouter } from "next/navigation";
 import { useTaskToggle } from "@/components/tarefas/use-task-toggle";
 import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
 import { updateWorkItemStatusAction } from "@/lib/supabase/work-items-actions";
@@ -19,7 +25,7 @@ import { toggleActivityCompletionAction, togglePersonalWorkTaskStatusAction } fr
 import { getRealOccurrencesForDay } from "@/lib/routine-real";
 import { isRecurrenceEnded, type MyDayTasks } from "@/lib/tasks";
 import type { SectionError as SectionErrorData } from "@/lib/supabase/section-result";
-import { formatDate, formatDateLong, parseLocalDate, weekdayLabel } from "@/lib/format";
+import { formatDate, formatDateLong, nowTimeSaoPaulo, parseLocalDate, weekdayLabel } from "@/lib/format";
 import type { Activity, ActivityCompletion, Meeting, PersonalWorkTask, Task, WorkItem } from "@/types/database.types";
 
 export function HojePageClient({
@@ -32,6 +38,7 @@ export function HojePageClient({
   activities,
   completions: initialCompletions,
   workTasks: initialWorkTasks,
+  subtaskData,
   errors,
 }: {
   /** "Hoje" calculado no servidor (America/Sao_Paulo) — nunca recalculado no navegador, pra nunca divergir do que foi buscado. */
@@ -45,8 +52,10 @@ export function HojePageClient({
   activities: Activity[];
   completions: ActivityCompletion[];
   workTasks: PersonalWorkTask[];
+  /** Subtarefas de hoje/atrasadas e tarefas vinculadas à Rotina (registros originais). */
+  subtaskData: MyDaySubtaskData;
   /** Seções que falharam ao carregar — o erro real é exibido no lugar do conteúdo. */
-  errors: Partial<Record<"tarefas" | "compromissos" | "trabalhos" | "rotina" | "clt", SectionErrorData>>;
+  errors: Partial<Record<"tarefas" | "compromissos" | "trabalhos" | "rotina" | "clt" | "subtarefas", SectionErrorData>>;
 }) {
   const [items, setItems] = useState(workItems);
   const [completions, setCompletions] = useState(initialCompletions);
@@ -54,13 +63,18 @@ export function HojePageClient({
   const taskToggle = useTaskToggle();
   const taskDialogs = useTaskDialogs(todayKey);
   const myDay: MyDayTasks = loadedMyDay ?? { todayKey, today: [], missed: [], deadlines: { overdue: [], dueToday: [] } };
+  const router = useRouter();
+  const refresh = () => router.refresh();
+  const plan = planMyDaySections({ myDay, activities, tasks: subtaskData.tasks, subtasksByTask: subtaskData.subtasksByTask, todayKey, nowTime: nowTimeSaoPaulo() });
+  const linkedTaskById = new Map(subtaskData.tasks.map((t) => [t.id, t]));
+  const subtasksOf = (taskId: string) => subtaskData.subtasksByTask[taskId];
 
   const today = parseLocalDate(todayKey);
   const sortedMeetings = [...meetings].sort((a, b) => a.start_time.localeCompare(b.start_time));
   const doneCount = items.filter((w) => w.status === "concluido").length;
   const todayOcc = getRealOccurrencesForDay(activities, completions, today);
-  const deadlineTasks = [...myDay.deadlines.overdue, ...myDay.deadlines.dueToday];
-  const tasksDone = myDay.today.filter((e) => taskToggle.isEntryDone(e)).length;
+  const deadlineTasks = plan.deadlines;
+  const tasksDone = plan.today.filter((e) => taskToggle.isEntryDone(e)).length;
 
   async function toggleWorkItemDone(workItem: WorkItem) {
     const nextStatus = workItem.status === "concluido" ? "pendente" : "concluido";
@@ -107,8 +121,9 @@ export function HojePageClient({
     sortedMeetings.length === 0 &&
     items.length === 0 &&
     todayOcc.length === 0 &&
-    myDay.today.length === 0 &&
-    myDay.missed.length === 0 &&
+    plan.today.length === 0 &&
+    plan.missed.length === 0 &&
+    plan.subtaskParents.length === 0 &&
     deadlineTasks.length === 0 &&
     workTasks.length === 0;
 
@@ -130,7 +145,23 @@ export function HojePageClient({
         ) : todayOcc.length === 0 ? (
           <EmptyState icon={Repeat} title="Nenhuma atividade de rotina programada para hoje" />
         ) : (
-          todayOcc.map((occ) => (
+          todayOcc.map((occ) => {
+            const linked = occ.activity.task_id ? linkedTaskById.get(occ.activity.task_id) : undefined;
+            if (linked) {
+              return (
+                <LinkedRoutineItem
+                  key={occ.activity.id}
+                  activity={occ.activity}
+                  task={linked}
+                  subtasks={subtasksOf(linked.id) ?? []}
+                  date={todayKey}
+                  todayKey={todayKey}
+                  sessionDone={occ.completed}
+                  onToggleSession={() => toggleActivity(occ.activity.id)}
+                />
+              );
+            }
+            return (
             <ChecklistItem
               key={occ.activity.id}
               title={occ.activity.title}
@@ -139,19 +170,20 @@ export function HojePageClient({
               onToggle={() => toggleActivity(occ.activity.id)}
               badges={occ.activity.category ? <span className="text-[11px] text-muted-foreground">{occ.activity.category}</span> : undefined}
             />
-          ))
+            );
+          })
         )}
       </Section>
 
       <Section
         title="Tarefas de hoje"
-        hint={myDay.today.length > 0 ? `${tasksDone} de ${myDay.today.length} feitas` : undefined}
+        hint={plan.today.length > 0 ? `${tasksDone} de ${plan.today.length} feitas` : undefined}
         href="/tarefas"
         linkLabel="Ver todas"
       >
         {errors.tarefas ? (
           <SectionError title="Não foi possível carregar as tarefas" error={errors.tarefas} />
-        ) : myDay.today.length === 0 ? (
+        ) : plan.today.length === 0 ? (
           <EmptyState
             icon={ListChecks}
             title="Nenhuma tarefa para hoje"
@@ -162,10 +194,11 @@ export function HojePageClient({
             }
           />
         ) : (
-          myDay.today.map((entry) => (
+          plan.today.map((entry) => (
             <DayTaskItem
               key={entry.key}
               entry={entry}
+              subtasks={subtasksOf(entry.task.id)}
               done={taskToggle.isEntryDone(entry)}
               onToggle={() => taskToggle.toggleEntry(entry)}
               {...taskMenu(entry.task)}
@@ -174,12 +207,26 @@ export function HojePageClient({
         )}
       </Section>
 
-      {myDay.missed.length > 0 && (
+      {errors.subtarefas && <SectionError title="Não foi possível carregar as subtarefas" error={errors.subtarefas} />}
+
+      {plan.subtaskParents.length > 0 && (
+        <Section title="Subtarefas de hoje e atrasadas" href="/tarefas" linkLabel="Ver tarefas">
+          {plan.subtaskParents.map((task) => (
+            <div key={task.id} className="rounded-lg border border-border bg-card px-3 py-2.5">
+              <p className="break-words text-sm font-medium text-foreground">{task.title}</p>
+              <Subtasks parentType="pessoal" parentId={task.id} initialItems={subtasksOf(task.id) ?? []} initialOpen onChanged={refresh} />
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {plan.missed.length > 0 && (
         <Section title="Ficou pendente" hint="últimos 7 dias">
-          {myDay.missed.map((entry) => (
+          {plan.missed.map((entry) => (
             <DayTaskItem
               key={entry.key}
               entry={entry}
+              subtasks={subtasksOf(entry.task.id)}
               done={taskToggle.isEntryDone(entry)}
               onToggle={() => taskToggle.toggleEntry(entry)}
             />
@@ -190,7 +237,8 @@ export function HojePageClient({
       {deadlineTasks.length > 0 && (
         <Section title="Prazos" href="/tarefas" linkLabel="Ver todos">
           {deadlineTasks.map((task) => {
-            const overdue = !!task.due_date && task.due_date < todayKey;
+            const deadline = taskDeadline(task);
+            const overdue = !!deadline && deadline < todayKey;
             return (
               <ChecklistItem
                 key={task.id}
@@ -203,7 +251,7 @@ export function HojePageClient({
                 badges={
                   <>
                     <Badge variant={overdue ? "destructive" : "warning"} className="border-0">
-                      {overdue ? `Atrasada · prazo ${formatDate(task.due_date!)}` : "Prazo hoje"}
+                      {overdue ? `Atrasada · prazo ${formatDate(deadline!)}` : "Prazo hoje"}
                     </Badge>
                     {task.priority === "importante" && <Badge variant="destructive" className="border-0">Importante</Badge>}
                   </>

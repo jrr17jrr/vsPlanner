@@ -16,6 +16,15 @@ export type RealActivityOccurrence = {
  * `ActivityCompletion` por (activity_id, date), então marcar hoje nunca
  * afeta outra ocorrência.
  */
+/**
+ * Ocorrência única (`specific_date`, migration 20261102100000) aparece só
+ * naquele dia; senão, nos `weekdays` (comportamento de sempre).
+ */
+export function activityOccursOn(activity: Pick<Activity, "weekdays" | "specific_date">, dateKey: string, weekday: number): boolean {
+  if (activity.specific_date) return activity.specific_date === dateKey;
+  return activity.weekdays.includes(weekday);
+}
+
 export function getRealOccurrences(
   activities: Activity[],
   completions: ActivityCompletion[],
@@ -34,7 +43,7 @@ export function getRealOccurrences(
     const weekday = cursor.getDay();
     for (const activity of activities) {
       if (!activity.is_active) continue;
-      if (!activity.weekdays.includes(weekday)) continue;
+      if (!activityOccursOn(activity, dateKey, weekday)) continue;
       out.push({ activity, date: dateKey, completed: completedSet.has(`${activity.id}__${dateKey}`) });
     }
     cursor.setDate(cursor.getDate() + 1);
