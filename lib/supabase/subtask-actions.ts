@@ -4,10 +4,27 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isMissingDescriptionColumn, MISSING_DESCRIPTION_WARNING, normalizeSubtaskDescription } from "@/lib/subtask-description";
+import { isMissingColumnError, MISSING_SCHEDULE_WARNING, normalizeReminderOffsets, stripScheduleColumns, SUBTASK_SCHEDULE_COLUMNS, type Subtask } from "@/lib/task-schedule";
 
-export type SubtaskParent = "pessoal" | "clt" | "visionario";
-/** `description` só existe após a migration 20261031100000 (antes, vem undefined). */
-export type Subtask = { id: string; parent_type: SubtaskParent; parent_id: string; user_id: string; title: string; due_date: string | null; is_done: boolean; position: number; parent_subtask_id: string | null; description?: string | null };
+export type SubtaskParent = Subtask["parent_type"];
+/** Linha de task_subtasks — definição única em lib/task-schedule.ts. */
+export type { Subtask };
+
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_KEY = /^\d{2}:\d{2}(:\d{2})?$/;
+type DbError = { code?: string; message: string } | null;
+
+/**
+ * Grava; se o banco ainda não tem as colunas novas (migration 20261102100000),
+ * regrava sem elas e devolve o aviso — nunca perde a subtarefa inteira.
+ */
+async function writeWithScheduleFallback(write: (values: Record<string, unknown>) => PromiseLike<{ error: DbError }>, values: Record<string, unknown>): Promise<{ error: DbError; warning?: string }> {
+  const first = await write(values);
+  if (!first.error || !isMissingColumnError(first.error) || isMissingDescriptionColumn(first.error)) return { error: first.error };
+  const stripped = stripScheduleColumns(values, SUBTASK_SCHEDULE_COLUMNS);
+  const second = await write(stripped.values);
+  return { error: second.error, warning: stripped.lost ? MISSING_SCHEDULE_WARNING : undefined };
+}
 
 async function context(parentType: SubtaskParent, parentId: string) {
   const db = (await createSupabaseServerClient()) as unknown as SupabaseClient;
@@ -21,7 +38,7 @@ async function context(parentType: SubtaskParent, parentId: string) {
 }
 
 function refresh() {
-  for (const path of ["/tarefas", "/meu-dia", "/trabalho/tarefas", "/trabalho/meu-dia", "/visionario/trabalhos", "/visionario"]) revalidatePath(path);
+  for (const path of ["/tarefas", "/hoje", "/rotina", "/", "/trabalho", "/trabalho/tarefas", "/visionario/trabalhos", "/visionario"]) revalidatePath(path);
   revalidatePath("/visionario/mkt", "layout");
 }
 
@@ -32,11 +49,51 @@ export async function listSubtasks(parentType: SubtaskParent, parentId: string):
   return (data ?? []) as Subtask[];
 }
 
-export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: { id?: string; title: string; dueDate?: string | null; parentSubtaskId?: string | null; description?: string | null }): Promise<{ error?: string; success?: boolean; warning?: string }> {
+export type SubtaskInput = {
+  id?: string;
+  title: string;
+  /** PRAZO final (coluna due_date, como sempre foi). */
+  dueDate?: string | null;
+  parentSubtaskId?: string | null;
+  description?: string | null;
+  /** Campos de agenda: `undefined` = não mexe (telas antigas continuam funcionando). */
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+  deadlineTime?: string | null;
+  priority?: "normal" | "importante";
+  reminderOffsets?: number[];
+};
+
+function scheduleValues(input: SubtaskInput): { error?: string; values: Record<string, unknown> } {
+  const values: Record<string, unknown> = {};
+  if (input.scheduledDate !== undefined) {
+    if (input.scheduledDate && !DATE_KEY.test(input.scheduledDate)) return { error: "Data de execução inválida.", values };
+    values.scheduled_date = input.scheduledDate || null;
+  }
+  for (const [key, col] of [["scheduledTime", "scheduled_time"], ["deadlineTime", "deadline_time"]] as const) {
+    const v = input[key];
+    if (v === undefined) continue;
+    if (v && !TIME_KEY.test(v)) return { error: "Horário inválido.", values };
+    values[col] = v || null;
+  }
+  if (input.priority !== undefined) {
+    if (input.priority !== "normal" && input.priority !== "importante") return { error: "Prioridade inválida.", values };
+    values.priority = input.priority;
+  }
+  if (input.reminderOffsets !== undefined) values.reminder_offsets = normalizeReminderOffsets(input.reminderOffsets);
+  if (values.scheduled_date && input.dueDate && input.dueDate < (values.scheduled_date as string)) {
+    return { error: "O prazo final não pode ser antes do dia de execução.", values };
+  }
+  return { values };
+}
+
+export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: SubtaskInput): Promise<{ error?: string; success?: boolean; warning?: string }> {
   const { db, user } = await context(parentType, parentId);
   const title = input.title.trim();
   if (!title || title.length > 300) return { error: "Informe um título de até 300 caracteres." };
-  if (input.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) return { error: "Data inválida." };
+  if (input.dueDate && !DATE_KEY.test(input.dueDate)) return { error: "Data inválida." };
+  const schedule = scheduleValues(input);
+  if (schedule.error) return { error: schedule.error };
   const description = normalizeSubtaskDescription(input.description);
   if (description.error) return { error: description.error };
   let warning: string | undefined;
@@ -48,20 +105,25 @@ export async function saveSubtask(parentType: SubtaskParent, parentId: string, i
     const id = input.id;
     const base = { title, due_date: input.dueDate || null, updated_at: new Date().toISOString() };
     const update = (values: Record<string, unknown>) => db.from("task_subtasks").update(values).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
-    let { error } = await update(description.value !== undefined ? { ...base, description: description.value } : base);
+    const withSchedule = await writeWithScheduleFallback(update, { ...base, ...schedule.values, ...(description.value !== undefined ? { description: description.value } : {}) });
+    warning = withSchedule.warning;
+    let { error } = withSchedule;
     // Banco ainda sem a coluna (migration pendente): salva o resto e avisa.
     if (error && description.value !== undefined && isMissingDescriptionColumn(error)) {
-      ({ error } = await update(base));
+      ({ error } = await writeWithScheduleFallback(update, { ...base, ...schedule.values }));
       if (!error && description.value) warning = MISSING_DESCRIPTION_WARNING;
     }
     if (error) return { error: error.message };
   } else {
     const { data } = await db.from("task_subtasks").select("position").eq("parent_type", parentType).eq("parent_id", parentId).order("position", { ascending: false }).limit(1);
-    const row: Record<string, unknown> = { parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, parent_subtask_id: input.parentSubtaskId || null, position: (data?.[0]?.position ?? -1) + 1 };
+    const row: Record<string, unknown> = { parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, parent_subtask_id: input.parentSubtaskId || null, position: (data?.[0]?.position ?? -1) + 1, ...schedule.values };
+    const insert = (values: Record<string, unknown>) => db.from("task_subtasks").insert(values);
     // Sem descrição a coluna nem é enviada (funciona antes e depois da migration).
-    let { error } = await db.from("task_subtasks").insert(description.value ? { ...row, description: description.value } : row);
+    const first = await writeWithScheduleFallback(insert, description.value ? { ...row, description: description.value } : row);
+    warning = first.warning;
+    let { error } = first;
     if (error && description.value && isMissingDescriptionColumn(error)) {
-      ({ error } = await db.from("task_subtasks").insert(row));
+      ({ error } = await writeWithScheduleFallback(insert, row));
       if (!error) warning = MISSING_DESCRIPTION_WARNING;
     }
     if (error) return { error: error.message };
@@ -76,7 +138,9 @@ export async function setSubtaskDone(parentType: SubtaskParent, parentId: string
     const { data: children } = await db.from("task_subtasks").select("id,is_done").eq("parent_subtask_id",id).eq("parent_type",parentType).eq("parent_id",parentId);
     if (children?.some(x=>!x.is_done)) return { error: "Conclua os itens do checklist antes de finalizar a etapa." };
   }
-  const { error } = await db.from("task_subtasks").update({ is_done: done, updated_at: new Date().toISOString() }).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
+  const now = new Date().toISOString();
+  const update = (values: Record<string, unknown>) => db.from("task_subtasks").update(values).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
+  const { error } = await writeWithScheduleFallback(update, { is_done: done, completed_at: done ? now : null, updated_at: now });
   if (error) return { error: error.message };
   refresh();
   return { success: true };

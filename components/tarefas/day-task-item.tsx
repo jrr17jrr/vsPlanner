@@ -2,7 +2,8 @@
 import { Subtasks } from "@/components/shared/subtasks";
 import { ExpandableDescription } from "@/components/shared/expandable-description";
 
-import { Check, MapPin, MoreVertical, Pencil, Repeat, Square, Trash2, CircleStop } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Flag, MapPin, MoreVertical, Pencil, Repeat, Square, Trash2, CircleStop } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -30,14 +31,16 @@ export function DayTaskItem({
   onDelete?: () => void;
   onEndRecurrence?: () => void;
 }) {
+  const router = useRouter();
   const overdue = entry.overdue && !done;
+  const deadlineOverdue = entry.deadlineOverdue && !done;
   const hasMenu = onEdit || onDelete || onEndRecurrence;
 
   return (
     <div
       className={cn(
         "flex items-start gap-3 rounded-lg border bg-card px-3 py-2.5",
-        overdue ? "border-warning/40" : entry.important && !done ? "border-destructive/40" : "border-border",
+        deadlineOverdue ? "border-destructive/40" : overdue ? "border-warning/40" : entry.important && !done ? "border-destructive/40" : "border-border",
         done && "opacity-60"
       )}
     >
@@ -48,20 +51,27 @@ export function DayTaskItem({
       <div className="min-w-0 flex-1">
         <p className={cn("break-words text-sm font-medium text-foreground", done && "line-through")}>{entry.title}</p>
         <ExpandableDescription text={entry.task.description} className="mt-0.5" />
-        <Subtasks parentType="pessoal" parentId={entry.task.id}/>
+        <Subtasks parentType="pessoal" parentId={entry.task.id} onChanged={() => router.refresh()}/>
         {entry.location && (
           <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3 shrink-0" />
             <span className="break-words">{entry.location}</span>
           </p>
         )}
-        {(entry.important || entry.recurring || overdue) && (
+        {(entry.important || entry.recurring || overdue || entry.deadlineDate) && (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {overdue && (
               <Badge variant="warning" className="border-0">
-                Pendente · {weekdayLabel(weekdayOfKey(entry.date)).slice(0, 3)} {formatDateShort(entry.date)}
+                Execução pendente · {weekdayLabel(weekdayOfKey(entry.date)).slice(0, 3)} {formatDateShort(entry.date)}
               </Badge>
             )}
+            {entry.deadlineDate && (deadlineOverdue ? (
+              <Badge variant="destructive" className="border-0">Prazo vencido · {formatDateShort(entry.deadlineDate)}</Badge>
+            ) : (
+              <span className={cn("flex items-center gap-1 text-[11px] text-muted-foreground", done && "line-through")}>
+                <Flag className="h-3 w-3" /> Prazo {weekdayLabel(weekdayOfKey(entry.deadlineDate)).slice(0, 3)} {formatDateShort(entry.deadlineDate)}{entry.deadlineTime && ` · ${entry.deadlineTime}`}
+              </span>
+            ))}
             {entry.important && <Badge variant="destructive" className="border-0">Importante</Badge>}
             {entry.recurring && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">

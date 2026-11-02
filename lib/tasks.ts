@@ -1,5 +1,6 @@
 import { classifyDueDate } from "@/lib/due-date";
 import { parseLocalDate, toDateKey } from "@/lib/format";
+import { taskSchedule } from "@/lib/task-schedule";
 import type { Task, TaskOccurrence } from "@/types/database.types";
 
 /**
@@ -93,18 +94,29 @@ export type DayTaskEntry = {
   important: boolean;
   notes: string | null;
   done: boolean;
-  /** Dia já passou sem conclusão. */
+  /** Dia (execução) já passou sem conclusão. */
   overdue: boolean;
+  /** Prazo final independente da execução (null = sem prazo). */
+  deadlineDate: string | null;
+  deadlineTime: string | null;
+  /** Prazo final já passou sem conclusão. */
+  deadlineOverdue: boolean;
 };
 
 function occurrenceKey(taskId: string, dateKey: string) {
   return `${taskId}__${dateKey}`;
 }
 
+function deadlineFields(task: Task, done: boolean, todayKey: string) {
+  const { deadlineDate, deadlineTime } = taskSchedule(task);
+  return { deadlineDate, deadlineTime, deadlineOverdue: !done && !!deadlineDate && deadlineDate < todayKey };
+}
+
 function singleDayEntry(task: Task, todayKey: string): DayTaskEntry {
   const date = task.due_date ?? todayKey;
   const done = task.status === "concluida";
   return {
+    ...deadlineFields(task, done, todayKey),
     key: occurrenceKey(task.id, date),
     task,
     date,
@@ -123,6 +135,7 @@ function recurringEntry(task: Task, date: string, occurrence: TaskOccurrence | u
   // Ocorrência gravada = snapshot daquele dia; editar a recorrência depois não reescreve o passado.
   const done = occurrence?.status === "concluida";
   return {
+    ...deadlineFields(task, done, todayKey),
     key: occurrenceKey(task.id, date),
     task,
     date,
@@ -226,14 +239,24 @@ export type DeadlineGroups = {
   noDate: Task[];
 };
 
-/** Tarefas com prazo pendentes agrupadas — mesma classificação (`classifyDueDate`) do resto do sistema. */
+/** Prazo final de uma tarefa (kind 'prazo' → due_date; kind 'dia' → deadline_date). */
+export function taskDeadline(task: Task): string | null {
+  return taskSchedule(task).deadlineDate;
+}
+
+/**
+ * Tarefas com prazo pendentes agrupadas — mesma classificação
+ * (`classifyDueDate`) do resto do sistema. Entram as tarefas "com prazo"
+ * (kind 'prazo', inclusive sem data) e as tarefas do dia NÃO recorrentes
+ * que também têm prazo final.
+ */
 export function groupDeadlineTasks(tasks: Task[], todayKey: string): DeadlineGroups {
   const groups: DeadlineGroups = { overdue: [], dueToday: [], upcoming: [], noDate: [] };
   const pending = tasks
-    .filter((t) => t.kind === "prazo" && !t.archived_at && t.status !== "concluida")
-    .sort((a, b) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999"));
+    .filter((t) => !t.archived_at && t.status !== "concluida" && !isRecurringTask(t) && (t.kind === "prazo" || !!taskDeadline(t)))
+    .sort((a, b) => (taskDeadline(a) ?? "9999").localeCompare(taskDeadline(b) ?? "9999"));
   for (const task of pending) {
-    const bucket = classifyDueDate(task.due_date, false, todayKey);
+    const bucket = classifyDueDate(taskDeadline(task), false, todayKey);
     if (bucket === "atrasado") groups.overdue.push(task);
     else if (bucket === "vence_hoje") groups.dueToday.push(task);
     else if (bucket === "proximo") groups.upcoming.push(task);
@@ -259,11 +282,16 @@ export function buildMyDayTasks(
   lookbackDays = MY_DAY_LOOKBACK_DAYS
 ): MyDayTasks {
   const { overdue, dueToday } = groupDeadlineTasks(tasks, todayKey);
+  const today = getDayTaskEntries(tasks, occurrences, todayKey, todayKey);
+  const missed = getMissedDayTaskEntries(tasks, occurrences, todayKey, lookbackDays);
+  // Mesma tarefa nunca aparece duas vezes no Meu Dia: se já está em "hoje"
+  // ou "ficou pendente" (com o prazo como selo), sai da seção de prazos.
+  const shown = new Set([...today, ...missed].map((e) => e.task.id));
   return {
     todayKey,
-    today: getDayTaskEntries(tasks, occurrences, todayKey, todayKey),
-    missed: getMissedDayTaskEntries(tasks, occurrences, todayKey, lookbackDays),
-    deadlines: { overdue, dueToday },
+    today,
+    missed,
+    deadlines: { overdue: overdue.filter((t) => !shown.has(t.id)), dueToday: dueToday.filter((t) => !shown.has(t.id)) },
   };
 }
 

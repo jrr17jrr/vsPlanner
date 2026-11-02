@@ -83,6 +83,11 @@ export function toDateKey(date: Date): string {
  * vencimentos em geral usam esta função, nunca `toDateKey(new Date())`
  * diretamente, pra nunca haver um bug de "hoje errado" perto da meia-noite.
  */
+/** Hora atual (HH:MM, 24h) no fuso de São Paulo. */
+export function nowTimeSaoPaulo(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(now);
+}
+
 export function todayKeySaoPaulo(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",

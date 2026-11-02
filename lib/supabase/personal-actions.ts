@@ -5,6 +5,13 @@ import { requirePersonalSpace } from "@/lib/supabase/dal";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { addDaysToKey, isRecurringTask, pastRecurringDates, recurringTaskOccursOn } from "@/lib/tasks";
+import {
+  isMissingColumnError,
+  MISSING_SCHEDULE_WARNING,
+  normalizeReminderOffsets,
+  stripScheduleColumns,
+  TASK_SCHEDULE_COLUMNS,
+} from "@/lib/task-schedule";
 import type {
   Database,
   GoalStatus,
@@ -19,7 +26,7 @@ import type {
 
 type TaskUpdate = Database["public"]["Tables"]["tasks"]["Update"];
 
-type ActionState = { error?: string; success?: string; id?: string };
+type ActionState = { error?: string; success?: string; id?: string; warning?: string };
 
 /**
  * Tudo aqui é do space Pessoal do usuário autenticado — `requirePersonalSpace()`
@@ -36,9 +43,15 @@ export type TaskFormInput = {
   kind: TaskKind;
   title: string;
   description?: string;
-  /** Prazo (kind 'prazo') ou dia da tarefa (kind 'dia' sem repetição). */
+  /** kind 'dia': dia da EXECUÇÃO (sem repetição). kind 'prazo': o PRAZO final (legado). */
   date?: string;
+  /** kind 'dia': horário da execução. kind 'prazo': horário limite (legado). */
   time?: string;
+  /** Prazo final independente da execução (kind 'dia'). Em kind 'prazo', se vier, prevalece sobre `date`. */
+  deadlineDate?: string;
+  deadlineTime?: string;
+  /** Lembretes antes da execução (min): 0, 15, 30, 60, 1440. */
+  reminderOffsets?: number[];
   location?: string;
   priority: TaskPriority;
   recurrence: TaskRecurrence;
@@ -49,6 +62,7 @@ export type TaskFormInput = {
 type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_KEY = /^\d{2}:\d{2}(:\d{2})?$/;
 
 function revalidateTaskPaths() {
   revalidatePath("/tarefas");
@@ -64,6 +78,8 @@ function normalizeTaskInput(input: TaskFormInput): { error: string } | { values:
   if (input.kind !== "prazo" && input.kind !== "dia") return { error: "Tipo de tarefa inválido." };
   if (input.priority !== "normal" && input.priority !== "importante") return { error: "Prioridade inválida." };
   if (input.date && !DATE_KEY.test(input.date)) return { error: "Data inválida." };
+  if (input.deadlineDate && !DATE_KEY.test(input.deadlineDate)) return { error: "Prazo final inválido." };
+  if ((input.time && !TIME_KEY.test(input.time)) || (input.deadlineTime && !TIME_KEY.test(input.deadlineTime))) return { error: "Horário inválido." };
 
   const recurring = input.kind === "dia" && input.recurrence === "weekly";
   const weekdays = recurring
@@ -72,13 +88,26 @@ function normalizeTaskInput(input: TaskFormInput): { error: string } | { values:
   if (recurring && weekdays.length === 0) return { error: "Escolha pelo menos um dia da semana." };
   if (input.kind === "dia" && !recurring && !input.date) return { error: "Escolha a data da tarefa." };
 
+  // Execução x prazo final (lib/task-schedule.ts). Em kind 'prazo' o prazo
+  // continua em due_date (+ scheduled_time como horário limite, para
+  // registros/telas antigos); em kind 'dia' vai para deadline_*.
+  const isDeadlineKind = input.kind === "prazo";
+  const deadlineDate = recurring ? null : (isDeadlineKind ? input.deadlineDate || input.date : input.deadlineDate) || null;
+  const deadlineTime = deadlineDate ? (isDeadlineKind ? input.deadlineTime || input.time : input.deadlineTime) || null : null;
+  if (!isDeadlineKind && !recurring && deadlineDate && input.date && deadlineDate < input.date) {
+    return { error: "O prazo final não pode ser antes do dia de execução." };
+  }
+
   return {
     values: {
       kind: input.kind,
       title,
       description: input.description?.trim() || null,
-      due_date: recurring ? null : input.date || null,
-      scheduled_time: input.time || null,
+      due_date: recurring ? null : isDeadlineKind ? deadlineDate : input.date || null,
+      scheduled_time: isDeadlineKind ? deadlineTime : input.time || null,
+      deadline_date: isDeadlineKind ? null : deadlineDate,
+      deadline_time: deadlineTime,
+      reminder_offsets: isDeadlineKind ? [] : normalizeReminderOffsets(input.reminderOffsets),
       location: input.kind === "dia" ? input.location?.trim() || null : null,
       priority: input.priority,
       recurrence: recurring ? "weekly" : "none",
@@ -136,21 +165,25 @@ export async function createTaskAction(input: TaskFormInput): Promise<ActionStat
   const { values } = normalized;
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("tasks")
-    .insert({
-      ...values,
-      title: values.title ?? input.title.trim(),
-      space_id: space.id,
-      user_id: profile.id,
-      recurrence_start: values.recurrence === "weekly" ? todayKeySaoPaulo() : null,
-    })
-    .select("id")
-    .single();
+  const row = {
+    ...values,
+    title: values.title ?? input.title.trim(),
+    space_id: space.id,
+    user_id: profile.id,
+    recurrence_start: values.recurrence === "weekly" ? todayKeySaoPaulo() : null,
+  };
+  let warning: string | undefined;
+  let { data, error } = await supabase.from("tasks").insert(row).select("id").single();
+  // Banco sem a migration de agenda: grava o resto e avisa (nada se perde em silêncio).
+  if (error && isMissingColumnError(error)) {
+    const stripped = stripScheduleColumns(row, TASK_SCHEDULE_COLUMNS);
+    ({ data, error } = await supabase.from("tasks").insert(stripped.values as typeof row).select("id").single());
+    if (stripped.lost) warning = MISSING_SCHEDULE_WARNING;
+  }
 
-  if (error) return { error: error.message };
+  if (error || !data) return { error: error?.message ?? "Erro ao criar tarefa." };
   revalidateTaskPaths();
-  return { success: "Tarefa criada.", id: data.id };
+  return { success: "Tarefa criada.", id: data.id, warning };
 }
 
 export async function updateTaskAction(taskId: string, input: TaskFormInput): Promise<ActionState> {
@@ -185,10 +218,16 @@ export async function updateTaskAction(taskId: string, input: TaskFormInput): Pr
     update.completed_at = null;
   }
 
-  const { error } = await supabase.from("tasks").update(update).eq("id", taskId).eq("user_id", profile.id);
+  let warning: string | undefined;
+  let { error } = await supabase.from("tasks").update(update).eq("id", taskId).eq("user_id", profile.id);
+  if (error && isMissingColumnError(error)) {
+    const stripped = stripScheduleColumns(update, TASK_SCHEDULE_COLUMNS);
+    ({ error } = await supabase.from("tasks").update(stripped.values).eq("id", taskId).eq("user_id", profile.id));
+    if (stripped.lost) warning = MISSING_SCHEDULE_WARNING;
+  }
   if (error) return { error: error.message };
   revalidateTaskPaths();
-  return { success: "Tarefa atualizada." };
+  return { success: "Tarefa atualizada.", warning };
 }
 
 /** Conclui/reabre uma tarefa NÃO recorrente (com prazo ou do dia). */
@@ -281,6 +320,27 @@ export async function endTaskRecurrenceAction(taskId: string): Promise<ActionSta
   return { success: "Repetição encerrada. O histórico foi mantido." };
 }
 
+/**
+ * Muda só o PRAZO FINAL (nunca a execução): kind 'prazo' → due_date;
+ * kind 'dia' → deadline_date.
+ */
+export async function moveTaskDeadlineAction(taskId: string, deadlineDate: string): Promise<ActionState> {
+  const { profile } = await requirePersonalSpace();
+  if (!DATE_KEY.test(deadlineDate)) return { error: "Data inválida." };
+  const supabase = await createSupabaseServerClient();
+  const task = await getOwnTask(supabase, taskId, profile.id);
+  if (!task || task.archived_at) return { error: "Tarefa não encontrada." };
+  if (task.kind === "dia" && task.due_date && deadlineDate < task.due_date) {
+    return { error: "O prazo final não pode ser antes do dia de execução." };
+  }
+  const update: TaskUpdate = task.kind === "prazo" ? { due_date: deadlineDate } : { deadline_date: deadlineDate };
+  const { error } = await supabase.from("tasks").update(update).eq("id", taskId).eq("user_id", profile.id);
+  if (error) return { error: isMissingColumnError(error) ? MISSING_SCHEDULE_WARNING : error.message };
+  revalidateTaskPaths();
+  return { success: "Prazo alterado." };
+}
+
+/** Reagenda a EXECUÇÃO (kind 'dia') ou o prazo legado (kind 'prazo'). Nunca mexe em deadline_date. */
 export async function moveTaskDateAction(taskId: string, dueDate: string): Promise<ActionState> {
   const { profile } = await requirePersonalSpace();
   if (!DATE_KEY.test(dueDate)) return { error: "Data inválida." };

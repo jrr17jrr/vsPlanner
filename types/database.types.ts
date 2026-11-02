@@ -398,6 +398,15 @@ export type Task = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Prazo final de tarefas com execução (kind 'dia') — migration 20261102100000.
+   * Opcionais: antes da migration a coluna não vem. Leia execução/prazo
+   * sempre por `lib/task-schedule.ts`, nunca por `due_date` direto.
+   */
+  deadline_date?: string | null;
+  deadline_time?: string | null;
+  /** Minutos antes da execução: 0, 15, 30, 60, 1440. */
+  reminder_offsets?: number[] | null;
 };
 
 /**
@@ -441,6 +450,11 @@ export type Activity = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  /** Tarefa original vinculada (migration 20261102100000) — nunca uma cópia. */
+  task_id?: string | null;
+  /** Ocorrência única nesse dia (ignora `weekdays`). */
+  specific_date?: string | null;
+  reminder_offsets?: number[] | null;
 };
 
 export type ActivityCompletion = {

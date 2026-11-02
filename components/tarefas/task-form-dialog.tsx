@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createTaskAction, updateTaskAction, type TaskFormInput } from "@/lib/supabase/personal-actions";
 import { addDaysToKey, isRecurringTask, WEEKDAY_ORDER, WEEKDAY_SHORT } from "@/lib/tasks";
-import { cn } from "@/lib/utils";
-import type { Task, TaskKind, TaskPriority, TaskRecurrence } from "@/types/database.types";
+import { normalizeReminderOffsets, taskSchedule } from "@/lib/task-schedule";
+import { ReminderOffsetsPicker } from "@/components/shared/reminder-offsets-picker";
+import type { Task, TaskKind, TaskPriority } from "@/types/database.types";
 
 export function TaskFormDialog({
   open,
@@ -63,6 +64,7 @@ function Segmented<T extends string>({
     </div>
   );
 }
+type WhenMode = "dia" | "semana" | "nenhum";
 
 function TaskForm({
   onOpenChange,
@@ -76,21 +78,27 @@ function TaskForm({
   defaultKind: TaskKind;
 }) {
   const editingRecurring = !!task && isRecurringTask(task);
+  const initial = task ? taskSchedule(task) : null;
+  const initialMode: WhenMode = task
+    ? isRecurringTask(task) ? "semana" : task.kind === "dia" ? "dia" : "nenhum"
+    : defaultKind === "dia" ? "dia" : "nenhum";
 
   const [title, setTitle] = useState(task?.title ?? "");
-  const [kind, setKind] = useState<TaskKind>(task?.kind ?? defaultKind);
-  const [date, setDate] = useState(task?.due_date ?? (task ? "" : defaultKind === "dia" ? todayKey : ""));
-  const [time, setTime] = useState(task?.scheduled_time?.slice(0, 5) ?? "");
+  const [mode, setMode] = useState<WhenMode>(initialMode);
+  const [date, setDate] = useState(initial?.executionDate ?? (task ? "" : defaultKind === "dia" ? todayKey : ""));
+  const [time, setTime] = useState(initial?.executionTime ?? "");
+  const [deadlineDate, setDeadlineDate] = useState(initial?.deadlineDate ?? "");
+  const [deadlineTime, setDeadlineTime] = useState(initial?.deadlineTime ?? "");
+  const [reminders, setReminders] = useState<number[]>(normalizeReminderOffsets(task?.reminder_offsets));
   const [location, setLocation] = useState(task?.location ?? "");
   const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? "normal");
-  const [recurrence, setRecurrence] = useState<TaskRecurrence>(task?.recurrence ?? "none");
   const [weekdays, setWeekdays] = useState<number[]>(task?.weekdays ?? []);
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [pending, setPending] = useState(false);
 
-  const isDay = kind === "dia";
-  const isRecurring = isDay && recurrence === "weekly";
+  const isRecurring = mode === "semana";
+  const hasExecution = mode !== "nenhum";
 
   function toggleWeekday(day: number) {
     setWeekdays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
@@ -100,17 +108,22 @@ function TaskForm({
     e.preventDefault();
     if (!title.trim()) return toast.error("Dê um título para a tarefa.");
     if (isRecurring && weekdays.length === 0) return toast.error("Escolha pelo menos um dia da semana.");
-    if (isDay && !isRecurring && !date) return toast.error("Escolha a data da tarefa.");
+    if (mode === "dia" && !date) return toast.error("Escolha o dia de execução — ou marque “Sem dia definido”.");
+    if (mode === "dia" && deadlineDate && deadlineDate < date) return toast.error("O prazo final não pode ser antes do dia de execução.");
 
+    const kind: TaskKind = hasExecution ? "dia" : "prazo";
     const input: TaskFormInput = {
       kind,
       title,
       description: description || undefined,
-      date: isRecurring ? undefined : date || undefined,
-      time: time || undefined,
-      location: isDay ? location || undefined : undefined,
+      date: mode === "dia" ? date : kind === "prazo" ? deadlineDate || undefined : undefined,
+      time: hasExecution ? time || undefined : deadlineTime || undefined,
+      deadlineDate: isRecurring ? undefined : deadlineDate || undefined,
+      deadlineTime: isRecurring || !deadlineDate ? undefined : deadlineTime || undefined,
+      reminderOffsets: hasExecution ? reminders : [],
+      location: hasExecution ? location || undefined : undefined,
       priority,
-      recurrence: isDay ? recurrence : "none",
+      recurrence: isRecurring ? "weekly" : "none",
       weekdays: isRecurring ? weekdays : [],
       notes: notes || undefined,
     };
@@ -120,7 +133,8 @@ function TaskForm({
     setPending(false);
 
     if (result.error) return toast.error(result.error);
-    toast.success(result.success ?? "Tarefa salva.");
+    if (result.warning) toast.warning(result.warning);
+    else toast.success(result.success ?? "Tarefa salva.");
     onOpenChange(false);
   }
 
@@ -129,7 +143,7 @@ function TaskForm({
       <DialogHeader>
         <DialogTitle>{task ? "Editar tarefa" : "Nova tarefa"}</DialogTitle>
       </DialogHeader>
-      <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto pr-1">
+      <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-4 overflow-y-auto overscroll-contain pr-1">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="task-title">Título *</Label>
           <Input
@@ -138,105 +152,109 @@ function TaskForm({
             onChange={(e) => setTitle(e.target.value)}
             disabled={pending}
             autoFocus
-            placeholder={isDay ? "Gravar vídeos na Ótica" : "Finalizar site do cliente"}
+            placeholder={hasExecution ? "Gravar vídeos na Ótica" : "Finalizar site do cliente"}
           />
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label>Tipo</Label>
+        <fieldset className="flex flex-col gap-3 rounded-lg border border-border p-3">
+          <legend className="px-1 text-sm font-medium">Fazer no dia</legend>
           <Segmented
-            value={kind}
+            value={mode}
             onChange={(v) => {
-              setKind(v);
+              setMode(v);
               if (v === "dia" && !date) setDate(todayKey);
             }}
             disabled={pending || editingRecurring}
             options={[
-              { value: "dia", label: "Tarefa do dia" },
-              { value: "prazo", label: "Com prazo" },
+              { value: "dia", label: "Em um dia" },
+              { value: "semana", label: "Dias da semana" },
+              { value: "nenhum", label: "Sem dia" },
             ]}
           />
-          <p className="text-[11px] text-muted-foreground">
-            {isDay ? "Algo para fazer em um dia específico." : "Algo que precisa estar pronto até uma data."}
-          </p>
-        </div>
+          {editingRecurring && (
+            <p className="text-[11px] text-muted-foreground">
+              Alterações valem a partir de hoje; dias anteriores ficam no histórico. Para parar de repetir, use “Encerrar repetição”.
+            </p>
+          )}
+          {mode === "nenhum" && (
+            <p className="text-[11px] text-muted-foreground">Sem dia de execução — aparece em “Com prazo”.</p>
+          )}
 
-        {isDay && (
-          <div className="flex flex-col gap-1.5">
-            <Label>Repetir</Label>
-            <Segmented
-              value={recurrence}
-              onChange={setRecurrence}
-              disabled={pending || editingRecurring}
-              options={[
-                { value: "none", label: "Não repetir" },
-                { value: "weekly", label: "Dias da semana" },
-              ]}
-            />
-            {editingRecurring && (
-              <p className="text-[11px] text-muted-foreground">
-                Alterações valem a partir de hoje; dias anteriores ficam no histórico. Para parar de repetir, use “Encerrar repetição”.
-              </p>
-            )}
-            {isRecurring && (
-              <div className="grid grid-cols-7 gap-1">
-                {WEEKDAY_ORDER.map((day) => (
-                  <Button
-                    key={day}
-                    type="button"
-                    size="sm"
-                    variant={weekdays.includes(day) ? "default" : "outline"}
-                    onClick={() => toggleWeekday(day)}
-                    disabled={pending}
-                    className="h-9 px-0 text-xs"
-                    aria-pressed={weekdays.includes(day)}
-                  >
-                    {WEEKDAY_SHORT[day]}
-                  </Button>
-                ))}
+          {mode === "dia" && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="task-date">Data de execução *</Label>
+              <Input id="task-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={pending} />
+              <div className="flex gap-1.5">
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setDate(todayKey)} disabled={pending}>Hoje</Button>
+                <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setDate(addDaysToKey(todayKey, 1))} disabled={pending}>Amanhã</Button>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+
+          {isRecurring && (
+            <div className="grid grid-cols-7 gap-1">
+              {WEEKDAY_ORDER.map((day) => (
+                <Button
+                  key={day}
+                  type="button"
+                  size="sm"
+                  variant={weekdays.includes(day) ? "default" : "outline"}
+                  onClick={() => toggleWeekday(day)}
+                  disabled={pending}
+                  className="h-9 px-0 text-xs"
+                  aria-pressed={weekdays.includes(day)}
+                >
+                  {WEEKDAY_SHORT[day]}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {hasExecution && (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="task-time">Horário de execução</Label>
+                  <Input id="task-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={pending} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="task-location">Local</Label>
+                  <Input id="task-location" value={location} onChange={(e) => setLocation(e.target.value)} disabled={pending} placeholder="Opcional" />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Lembretes</Label>
+                <ReminderOffsetsPicker value={reminders} onChange={setReminders} disabled={pending} hasTime={!!time} />
+              </div>
+            </>
+          )}
+        </fieldset>
 
         {!isRecurring && (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-date">{isDay ? "Data *" : "Prazo"}</Label>
-            <Input id="task-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={pending} />
-            <div className="flex gap-1.5">
-              <Button type="button" variant="outline" size="sm" onClick={() => setDate(todayKey)} disabled={pending}>
-                Hoje
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => setDate(addDaysToKey(todayKey, 1))} disabled={pending}>
-                Amanhã
-              </Button>
-              {!isDay && date && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setDate("")} disabled={pending}>
+          <fieldset className="flex flex-col gap-3 rounded-lg border border-border p-3">
+            <legend className="px-1 text-sm font-medium">Prazo final</legend>
+            <p className="-mt-1 text-[11px] text-muted-foreground">Até quando precisa estar pronta. Opcional e independente do dia de execução.</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-deadline">Data limite</Label>
+                <Input id="task-deadline" type="date" value={deadlineDate} min={mode === "dia" ? date || undefined : undefined} onChange={(e) => setDeadlineDate(e.target.value)} disabled={pending} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="task-deadline-time">Horário limite</Label>
+                <Input id="task-deadline-time" type="time" value={deadlineTime} onChange={(e) => setDeadlineTime(e.target.value)} disabled={pending || !deadlineDate} />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setDeadlineDate(todayKey)} disabled={pending}>Hoje</Button>
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => setDeadlineDate(addDaysToKey(todayKey, 7))} disabled={pending}>Em 7 dias</Button>
+              {deadlineDate && (
+                <Button type="button" variant="ghost" size="sm" className="h-9" onClick={() => { setDeadlineDate(""); setDeadlineTime(""); }} disabled={pending}>
                   Sem prazo
                 </Button>
               )}
             </div>
-          </div>
+          </fieldset>
         )}
-
-        <div className={cn("grid grid-cols-1 gap-3", isDay && "sm:grid-cols-2")}>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="task-time">Horário</Label>
-            <Input id="task-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={pending} />
-          </div>
-          {isDay && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-location">Local</Label>
-              <Input
-                id="task-location"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                disabled={pending}
-                placeholder="Opcional"
-              />
-            </div>
-          )}
-        </div>
 
         <div className="flex flex-col gap-1.5">
           <Label>Prioridade</Label>

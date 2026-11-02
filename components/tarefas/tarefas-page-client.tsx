@@ -2,6 +2,7 @@
 import { Subtasks } from "@/components/shared/subtasks";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, ListChecks, Repeat, MapPin, MoreVertical, Pencil, Trash2, CircleStop, CalendarDays } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
@@ -14,7 +15,8 @@ import { ChecklistItem } from "@/components/shared/checklist-item";
 import { DayTaskItem } from "@/components/tarefas/day-task-item";
 import { useTaskToggle } from "@/components/tarefas/use-task-toggle";
 import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
-import { moveTaskDateAction } from "@/lib/supabase/personal-actions";
+import { moveTaskDeadlineAction } from "@/lib/supabase/personal-actions";
+import { taskSchedule } from "@/lib/task-schedule";
 import {
   formatWeekdays,
   getDayTaskEntries,
@@ -46,6 +48,8 @@ export function TarefasPageClient({
   const [tab, setTab] = useState<Tab>("dia");
   const toggle = useTaskToggle();
   const dialogs = useTaskDialogs(todayKey);
+  const router = useRouter();
+  const refresh = () => router.refresh();
 
   const todayEntries = getDayTaskEntries(tasks, occurrences, todayKey, todayKey).sort((a,b)=>byPriority(a.task,b.task));
   const missed = getMissedDayTaskEntries(tasks, occurrences, todayKey, TASKS_PAGE_LOOKBACK_DAYS).sort((a,b)=>byPriority(a.task,b.task));
@@ -81,27 +85,29 @@ export function TarefasPageClient({
   }
 
   function renderDeadline(task: Task, overdue = false) {
+    const schedule = taskSchedule(task);
     return (
       <div key={task.id}><ChecklistItem
         key={task.id}
         title={task.title}
         description={task.description}
         done={toggle.isTaskDone(task)}
-        time={task.scheduled_time?.slice(0, 5)}
+        time={schedule.executionTime ?? schedule.deadlineTime ?? undefined}
         onToggle={() => toggle.toggleTask(task)}
         onEdit={() => dialogs.openEdit(task)}
         onDelete={() => dialogs.askDelete(task)}
-        onMove={(d) => moveTaskDateAction(task.id, d).then((r) => r.error && toast.error(r.error))}
+        onMove={(d) => moveTaskDeadlineAction(task.id, d).then((r) => r.error && toast.error(r.error))}
         className={cn(overdue && "border-destructive/40")}
         badges={
           <>
-            {overdue && <Badge variant="destructive" className="border-0">Atrasada</Badge>}
+            {overdue && <Badge variant="destructive" className="border-0">Prazo vencido</Badge>}
             {task.priority === "importante" && <Badge variant="destructive" className="border-0">Importante</Badge>}
-            {task.due_date && <span className="text-[11px] text-muted-foreground">prazo {formatDate(task.due_date)}</span>}
+            {schedule.deadlineDate && <span className="text-[11px] text-muted-foreground">prazo {formatDate(schedule.deadlineDate)}{schedule.deadlineTime && ` · ${schedule.deadlineTime}`}</span>}
+            {schedule.executionDate && <span className="text-[11px] text-muted-foreground">fazer {formatDate(schedule.executionDate)}{schedule.executionTime && ` · ${schedule.executionTime}`}</span>}
             {task.category && <span className="text-[11px] text-muted-foreground">{task.category}</span>}
           </>
         }
-      /><Subtasks parentType="pessoal" parentId={task.id}/></div>
+      /><Subtasks parentType="pessoal" parentId={task.id} onChanged={refresh}/></div>
     );
   }
 
