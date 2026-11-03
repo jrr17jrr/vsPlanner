@@ -800,3 +800,27 @@ export async function deleteGoalAction(goalId: string): Promise<ActionState> {
   revalidatePath("/metas");
   return { success: "Meta excluída." };
 }
+
+/**
+ * Reprogramar a EXECUÇÃO pelo Meu Dia. Nunca altera o prazo final:
+ *  - kind 'dia' (não recorrente): muda só `due_date` (execução);
+ *  - kind 'prazo' (só prazo): passa a ter execução nesse dia e o prazo
+ *    original vai para `deadline_date` (precisa da migration de agenda).
+ * Se o prazo já venceu, continua aparecendo como "Prazo vencido".
+ */
+export async function rescheduleTaskExecutionAction(taskId: string, date: string): Promise<ActionState> {
+  const { profile } = await requirePersonalSpace();
+  if (!DATE_KEY.test(date)) return { error: "Data inválida." };
+  const supabase = await createSupabaseServerClient();
+  const task = await getOwnTask(supabase, taskId, profile.id);
+  if (!task || task.archived_at) return { error: "Tarefa não encontrada." };
+  if (isRecurringTask(task)) return { error: "Tarefa que se repete: edite a repetição na página Tarefas." };
+  const update: TaskUpdate = task.kind === "prazo" ? { kind: "dia", due_date: date, deadline_date: task.due_date } : { due_date: date };
+  const { error } = await supabase.from("tasks").update(update).eq("id", taskId).eq("user_id", profile.id);
+  if (error) {
+    if (isMissingColumnError(error)) return { error: "Para dar uma data de execução a uma tarefa só com prazo, aplique a migração 20261102100000 no Supabase (o prazo não pode se perder)." };
+    return { error: error.message };
+  }
+  revalidateTaskPaths();
+  return { success: "Execução reprogramada. O prazo final não mudou." };
+}

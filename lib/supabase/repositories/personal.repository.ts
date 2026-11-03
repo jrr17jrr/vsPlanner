@@ -149,3 +149,23 @@ export async function listMyDaySubtasks(userId: string, todayKey: string): Promi
   if (legacy.error) throw legacy.error;
   return (legacy.data ?? []) as unknown as Subtask[];
 }
+
+/**
+ * Subtarefas pessoais para as quatro seções do Meu Dia: pendentes com
+ * execução ou prazo até `horizonKey` (inclui atrasadas) + concluídas hoje.
+ * Antes da migration de agenda: só o prazo (due_date) e sem "concluídas hoje".
+ */
+export async function listMyDayBoardSubtasks(userId: string, todayKey: string, horizonKey: string): Promise<Subtask[]> {
+  const supabase = await createSupabaseServerClient();
+  const base = () => supabase.from("task_subtasks" as never).select("*").eq("user_id", userId).eq("parent_type", "pessoal");
+  // Meia-noite em São Paulo (UTC-3, sem horário de verão desde 2019).
+  const startOfToday = `${todayKey}T03:00:00Z`;
+  const full = await base().or(
+    `and(is_done.eq.false,or(scheduled_date.lte.${horizonKey},due_date.lte.${horizonKey})),completed_at.gte.${startOfToday}`
+  );
+  if (!full.error) return (full.data ?? []) as unknown as Subtask[];
+  if (!isMissingColumnError(full.error)) throw full.error;
+  const legacy = await base().eq("is_done", false).lte("due_date", horizonKey);
+  if (legacy.error) throw legacy.error;
+  return (legacy.data ?? []) as unknown as Subtask[];
+}

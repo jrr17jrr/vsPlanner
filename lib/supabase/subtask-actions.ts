@@ -170,3 +170,13 @@ export async function moveSubtask(parentType: SubtaskParent, parentId: string, i
   refresh();
   return { success: true };
 }
+
+/** Reprogramar a execução ("fazer no dia") de uma subtarefa. O prazo final não muda. */
+export async function rescheduleSubtaskAction(parentType: SubtaskParent, parentId: string, id: string, date: string) {
+  const { db, user } = await context(parentType, parentId);
+  if (!DATE_KEY.test(date)) return { error: "Data inválida." };
+  const { error } = await db.from("task_subtasks").update({ scheduled_date: date, updated_at: new Date().toISOString() }).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
+  if (error) return { error: isMissingColumnError(error) ? "Reprogramar subtarefas precisa da migração 20261102100000 aplicada no Supabase." : error.message };
+  refresh();
+  return { success: "Subtarefa reprogramada. O prazo final não mudou." };
+}

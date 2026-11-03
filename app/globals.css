@@ -178,3 +178,16 @@ label:has(> input[type="checkbox"]):hover { border-color: rgba(0,225,255,.65); }
 /* Prevent iOS standalone PWA from retaining a horizontally scrolled viewport. */
 html, body { width: 100%; max-width: 100%; overflow-x: clip; }
 body { min-width: 0; }
+
+/*
+ * iPhone/PWA: campo com fonte menor que 16px faz o Safari dar zoom ao tocar
+ * (e a tela fica "desalinhada"). Em telas de toque os campos usam pelo menos
+ * 16px. Fora de @layer de propósito: vence os utilitários text-sm/text-xs.
+ */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}

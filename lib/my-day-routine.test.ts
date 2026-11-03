@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planMyDaySections } from "./my-day-plan";
+import { buildMyDayBoard } from "./my-day-board";
 import { activityOccursOn, getRealOccurrences } from "./routine-real";
-import { buildMyDayTasks } from "./tasks";
 import { groupSubtasks, type Subtask } from "./task-schedule";
 import type { Activity, ActivityCompletion, Task } from "@/types/database.types";
 
@@ -40,34 +39,30 @@ describe("Rotina — repetição semanal x somente uma vez", () => {
   });
 });
 
-describe("Meu Dia — cada tarefa aparece uma vez", () => {
+describe("Meu Dia — vínculo com a Rotina (quatro seções)", () => {
   const vs = task({ id: "vs", title: "VS Planner", due_date: MON, deadline_date: "2026-11-05" });
   const other = task({ id: "other", title: "Outra", due_date: MON });
   const parentOnly = task({ id: "p", title: "Estudar JavaScript", kind: "prazo", due_date: "2026-11-20" });
-  const subs: Record<string, Subtask[]> = {
-    vs: [sub({ id: "s1", parent_id: "vs", scheduled_date: MON })],
-    p: [sub({ id: "s2", parent_id: "p", scheduled_date: MON }), sub({ id: "s3", parent_id: "p", due_date: "2026-10-30" })],
-  };
-  const myDay = buildMyDayTasks([vs, other, parentOnly], [], MON);
+  const subs = [sub({ id: "s1", parent_id: "vs", scheduled_date: MON, title: "s1" }), sub({ id: "s2", parent_id: "p", scheduled_date: MON, title: "s2" }), sub({ id: "s3", parent_id: "p", due_date: "2026-10-30", title: "s3" })];
+  const run = (activities: Activity[]) => buildMyDayBoard({ todayKey: MON, tasks: [vs, other, parentOnly], occurrences: [], subtasks: subs, activities });
 
-  it("tarefa vinculada à rotina de hoje sai de 'Tarefas de hoje' (fica no card da Rotina)", () => {
-    const plan = planMyDaySections({ myDay, activities: [activity({ task_id: "vs" })], tasks: [vs, parentOnly], subtasksByTask: subs, todayKey: MON });
-    expect([...plan.linkedTaskIds]).toEqual(["vs"]);
-    expect(plan.today.map((e) => e.task.id)).toEqual(["other"]);
+  it("tarefa vinculada à rotina de hoje sai de Hoje (fica no card da Rotina)", () => {
+    const b = run([activity({ task_id: "vs" })]);
+    expect(b.linkedTaskIds).toEqual(["vs"]);
+    expect(b.hoje.map((i) => i.title)).toEqual(["Outra", "s2"]);
   });
-  it("sem vínculo hoje (rotina em outro dia), continua em 'Tarefas de hoje'", () => {
-    const plan = planMyDaySections({ myDay, activities: [activity({ task_id: "vs", weekdays: [3] })], tasks: [vs, parentOnly], subtasksByTask: subs, todayKey: MON });
-    expect(plan.today.map((e) => e.task.id).sort()).toEqual(["other", "vs"]);
+  it("sem vínculo hoje (rotina em outro dia), continua em Hoje", () => {
+    const b = run([activity({ task_id: "vs", weekdays: [3] })]);
+    expect(b.hoje.map((i) => i.title)).toEqual(["Outra", "s2", "VS Planner", "s1"]);
   });
-  it("subtarefas de hoje/atrasadas de tarefa que não aparece em outra seção ganham a seção própria", () => {
-    const plan = planMyDaySections({ myDay, activities: [], tasks: [vs, parentOnly], subtasksByTask: subs, todayKey: MON });
-    expect(plan.subtaskParents.map((t) => t.id)).toEqual(["p"]);
-    const g = groupSubtasks(subs.p, { todayKey: MON });
+  it("subtarefas de tarefa que não está no dia aparecem sozinhas, com o vínculo", () => {
+    const b = run([]);
+    expect(b.atrasadas.map((i) => [i.title, i.status])).toEqual([["s3", "prazo_vencido"]]);
+    const g = groupSubtasks(subs.filter((x) => x.parent_id === "p"), { todayKey: MON });
     expect(g.today.map((e) => e.subtask.id)).toEqual(["s2"]);
     expect(g.overdue.map((e) => e.subtask.id)).toEqual(["s3"]);
   });
   it("vínculo inativo não esconde a tarefa", () => {
-    const plan = planMyDaySections({ myDay, activities: [activity({ task_id: "vs", is_active: false })], tasks: [vs], subtasksByTask: subs, todayKey: MON });
-    expect(plan.linkedTaskIds.size).toBe(0);
+    expect(run([activity({ task_id: "vs", is_active: false })]).linkedTaskIds).toEqual([]);
   });
 });

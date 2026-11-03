@@ -286,3 +286,13 @@ export async function saveCltAdLevelResultAction(input:{campaignId:string;adSetI
  const {error}=await s.from("clt_ad_level_results").upsert({user_id:user.id,campaign_id:input.campaignId,ad_set_id:input.adSetId,creative_id:input.creativeId||null,entry_date:input.date,spent_amount:input.spent,messages:input.messages,sales:input.sales,generated_revenue:input.revenue,views:input.views,impressions:input.impressions||0,reach:input.reach||0,engagements:input.engagements||0,link_clicks:input.linkClicks||0,thruplays:input.thruplays||0,leads:input.leads||0,profile_visits:input.profileVisits||0,appointments:input.appointments||0},{onConflict:"ad_set_id,creative_id,entry_date"});
  if(error)return{error:error.message};refresh();return{success:"Resultados salvos."};
 }
+
+/** Meu Dia: muda a data de uma tarefa do CLT/MKT que não se repete (execução, ou o prazo se for tarefa "com prazo"). */
+export async function rescheduleCltTaskAction(id:string,date:string):Promise<State>{
+  const {s,user}=await ctx();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return{error:"Data inválida."};
+  const {error}=await s.from("clt_tasks").update({due_date:date}).eq("id",id).eq("user_id",user.id).eq("recurrence","none");
+  if(error)return{error:error.message};
+  refresh();revalidatePath("/hoje");
+  return{success:"Data alterada."};
+}
