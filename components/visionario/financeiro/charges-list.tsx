@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CheckCircle2, Ban, HandCoins, Pencil, MoreVertical, Plus, Repeat, StopCircle } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, ScrollableTabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -162,13 +162,13 @@ export function ChargesList({
       <div className="border-t border-border pt-3"><p className="text-sm font-semibold">Contas e cobranças de {new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(Number(monthKey.slice(0,4)),Number(monthKey.slice(5,7))-1,1))}</p><p className="text-xs text-muted-foreground">As recorrências acima são compromissos contínuos. A lista abaixo mostra cobranças individuais conforme o filtro escolhido.</p></div>
 
       <Tabs value={bucket} onValueChange={(v) => setBucket(v as Bucket)}>
-        <TabsList className="flex-wrap">
+        <ScrollableTabsList aria-label="Filtro de cobranças">
           {(Object.keys(bucketLabels) as Bucket[]).map((b) => (
             <TabsTrigger key={b} value={b}>
               {bucketLabels[b]}
             </TabsTrigger>
           ))}
-        </TabsList>
+        </ScrollableTabsList>
       </Tabs>
 
       {filtered.length === 0 ? (
