@@ -19,6 +19,7 @@ import { MODULES, type CltModule } from "@/lib/clt/module";
 import type { CltCampaignResultEntry } from "@/types/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FollowerRecord } from "@/lib/clt/followers";
+import { importedPeriodStart } from "@/lib/clt/period-results";
 
 /**
  * Telas do Trabalho / CLT reaproveitadas pelo MKT. Cada uma recebe o módulo
@@ -46,7 +47,7 @@ export async function CltCompaniesPage({ module, clients = [] }: { module: CltMo
   const followers = companyIds.length ? await (s as unknown as SupabaseClient).from("clt_instagram_followers").select("id,company_id,followers,recorded_at").in("company_id", companyIds) : { data: [], error: null };
   if (followers.error) console.error("Instagram followers (lista de empresas)", followers.error);
   const description = module === "mkt" ? "Cadastre, edite e acompanhe as empresas do MKT: as suas e as dos clientes da Visionário Dev." : "Cadastre, edite e acompanhe as empresas do Trabalho / CLT.";
-  return <div className="space-y-4"><PageHeader title="Empresas" description={description} /><ModulePendingNotice module={module} ready={d.moduleReady} /><CompaniesClient companies={d.companies} responsibles={d.responsibles} campaigns={d.campaigns} results={merged.results} clients={clients} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
+  return <div className="space-y-4"><PageHeader title="Empresas" description={description} /><ModulePendingNotice module={module} ready={d.moduleReady} /><CompaniesClient companies={d.companies} responsibles={d.responsibles} campaigns={d.campaigns} results={merged.results.map(r => ({ ...r, period_start: importedPeriodStart(r) }))} clients={clients} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
 }
 
 export async function CltCampaignsPage({ module }: { module: CltModule }) {

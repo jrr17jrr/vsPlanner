@@ -33,7 +33,7 @@ describe("Empresas do MKT", () => {
     expect(t).toContain("Visionário Dev Empresa própria");
   });
   it("cards completos e links do MKT", () => {
-    for (const label of ["Ativas: 0", "Finalizadas: 0", "Mensagens", "Visualizações", "Impressões", "ThruPlays", "Vendas", "Faturamento bruto", "Gasto em anúncios", "Resultado após anúncios", "Saldo atual", "Ver detalhes", "Editar empresa", "Movimentar saldo", "Nova empresa"]) expect(t).toContain(label);
+    for (const label of ["Campanhas no período: 0", "Ativas agora: 0", "Finalizadas: 0", "0 no histórico", "Mensagens", "Visualizações", "Impressões", "ThruPlays", "Vendas", "Faturamento bruto", "Gasto em anúncios", "Resultado após anúncios", "Saldo atual", "Ver detalhes", "Editar empresa", "Movimentar saldo", "Nova empresa"]) expect(t).toContain(label);
     expect(html).toContain('href="/visionario/mkt/empresas/s"');
     expect(html).not.toContain('href="/trabalho/');
   });
@@ -46,6 +46,19 @@ describe("Empresas do CLT (sem mudança visual)", () => {
     expect(t).toContain("AIV Ruben Jr");
     expect(t).not.toContain("Minhas empresas");
     expect(html).toContain('href="/trabalho/empresas/a"');
+  });
+});
+
+describe("cards seguem o período (caso IG Predial)", () => {
+  it("novembro sem campanhas nem resultados: tudo zero; saldo atual mantido; 1 campanha no histórico", () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-03T12:00:00-03:00"));
+    const campaigns = [{ id: "cabo", company_id: "ig", name: "Cabo Frio", starts_on: "2026-10-15", ends_on: "2026-10-29", campaign_status: "finalizada" }] as never;
+    const results = [{ id: "import:cabo:2026-09-30:2026-10-29", campaign_id: "cabo", entry_date: "2026-10-29", period_start: "2026-09-30", spent_amount: 206.22, messages: 21, sales: 37, generated_revenue: 9360, views: 0, impressions: 17981, thruplays: 0 }] as never;
+    const t = text(renderToStaticMarkup(<CompaniesClient companies={[company("ig", "IG Predial", { current_ad_balance: 150 })]} responsibles={[]} campaigns={campaigns} results={results} />));
+    vi.useRealTimers();
+    expect(t).toContain("Campanhas no período: 0 Ativas agora: 0 Finalizadas: 0 1 no histórico");
+    expect(t).toMatch(/Mensagens 0 Visualizações 0 Impressões 0 ThruPlays 0 Vendas 0 Faturamento bruto R\$\s?0,00 Gasto em anúncios R\$\s?0,00/);
+    expect(t).toMatch(/Saldo atual R\$\s?150,00/);
   });
 });
 

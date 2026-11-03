@@ -16,7 +16,13 @@ export type ReportPeriod =
   | { kind: "month"; month: string }
   | { kind: "days"; from: string; to: string }
   | { kind: "months"; from: string; to: string }
-  | { kind: "year"; year: number };
+  | { kind: "year"; year: number }
+  /** Todo o histórico (sem limite de datas). */
+  | { kind: "all" };
+
+/** Limites de "Todos os períodos". */
+export const ALL_FROM = "0000-01-01";
+export const ALL_TO = "9999-12-31";
 
 const DAY_MS = 86_400_000;
 const addDays = (date: string, n: number) => new Date(Date.parse(date + "T12:00:00Z") + n * DAY_MS).toISOString().slice(0, 10);
@@ -32,11 +38,13 @@ export function periodBounds(p: ReportPeriod): { from: string; to: string } {
     case "months": return { from: `${p.from}-01`, to: lastDayOf(p.to) };
     case "year": return { from: `${p.year}-01-01`, to: `${p.year}-12-31` };
     case "days": return { from: p.from, to: p.to };
+    case "all": return { from: ALL_FROM, to: ALL_TO };
   }
 }
 
 /** Erro de preenchimento do seletor, ou null. */
 export function validatePeriod(p: ReportPeriod): string | null {
+  if (p.kind === "all") return null;
   if (p.kind === "month") return MONTH.test(p.month) ? null : "Escolha o mês.";
   if (p.kind === "year") return Number.isInteger(p.year) && p.year >= 2000 && p.year <= 2100 ? null : "Escolha o ano.";
   const re = p.kind === "days" ? DATE : MONTH;
@@ -46,6 +54,7 @@ export function validatePeriod(p: ReportPeriod): string | null {
 }
 
 export function reportPeriodLabel(p: ReportPeriod): string {
+  if (p.kind === "all") return "Todos os períodos";
   if (p.kind === "month") return monthLabel(p.month);
   if (p.kind === "year") return String(p.year);
   if (p.kind === "months") return p.from === p.to ? monthLabel(p.from) : `${monthLabel(p.from)} a ${monthLabel(p.to)}`;
@@ -54,12 +63,15 @@ export function reportPeriodLabel(p: ReportPeriod): string {
 
 /** "01/10/2026 a 31/10/2026". */
 export function reportPeriodDates(p: ReportPeriod): string {
+  if (p.kind === "all") return "todo o histórico";
   const { from, to } = periodBounds(p);
   return `${br(from)} a ${br(to)}`;
 }
 
 /** Período anterior equivalente (mesmo tipo e duração, imediatamente antes). */
+/** Período anterior equivalente. "Todos os períodos" não tem anterior (devolve ele mesmo; a tela esconde a comparação). */
 export function previousPeriod(p: ReportPeriod): ReportPeriod {
+  if (p.kind === "all") return p;
   if (p.kind === "month") return { kind: "month", month: shiftMonth(p.month, -1) };
   if (p.kind === "year") return { kind: "year", year: p.year - 1 };
   if (p.kind === "months") {
@@ -73,6 +85,7 @@ export function previousPeriod(p: ReportPeriod): ReportPeriod {
 
 /** Meses (yyyy-MM) cobertos pelo período — base da "Evolução mensal". */
 export function periodMonths(p: ReportPeriod): string[] {
+  if (p.kind === "all") return [];
   const { from, to } = periodBounds(p);
   const out: string[] = [];
   for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = shiftMonth(m, 1)) out.push(m);
@@ -84,6 +97,7 @@ export type Span = { start: string; end: string };
 /** O dado entra no período? (ver regra no topo). `partial` = cruza a borda de um intervalo de dias. */
 export function spanInPeriod(span: Span, p: ReportPeriod): "in" | "out" | "partial" {
   const { from, to } = periodBounds(p);
+  if (p.kind === "all") return "in";
   if (p.kind !== "days") return span.end >= from && span.end <= to ? "in" : "out";
   if (span.start >= from && span.end <= to) return "in";
   return span.start <= to && span.end >= from ? "partial" : "out";
@@ -91,7 +105,7 @@ export function spanInPeriod(span: Span, p: ReportPeriod): "in" | "out" | "parti
 
 // ------------------------------------------------------------------ dados
 
-export type ReportResult = { campaign_id: string; entry_date: string; spent_amount: number; generated_revenue: number; views: number; impressions: number; thruplays: number; messages: number; sales: number; period_start?: string | null };
+export type ReportResult = { campaign_id: string; entry_date: string; spent_amount: number; generated_revenue: number; views: number; impressions: number; thruplays: number; messages: number; sales: number; period_start?: string | null; reach?: number | null; link_clicks?: number | null; leads?: number | null; engagements?: number | null };
 export type ReportMovement = { company_id: string; movement_date: string; kind: string; amount: number };
 export type ReportCampaign = { id: string; company_id: string; starts_on: string; planned_amount: number | null | undefined };
 
@@ -101,6 +115,8 @@ const pointSpan = (p: MessagingPoint): Span => ({ start: (p.period_start || p.da
 
 export type ReportMetrics = {
   gasto: number; faturamento: number; resultado: number; views: number; impressions: number; thruplays: number; messages: number; sales: number;
+  /** Alcance é somado entre registros (não é alcance único). */
+  reach: number; linkClicks: number; leads: number; engagements: number;
   deposito: number; credito: number; planned: number;
   /** Custo por mensagem: só investimento/conversas de campanhas/conjuntos de MENSAGENS. */
   msgSpend: number; msgMessages: number;
@@ -108,7 +124,7 @@ export type ReportMetrics = {
   partial: number;
 };
 
-export const EMPTY_METRICS: ReportMetrics = { gasto: 0, faturamento: 0, resultado: 0, views: 0, impressions: 0, thruplays: 0, messages: 0, sales: 0, deposito: 0, credito: 0, planned: 0, msgSpend: 0, msgMessages: 0, partial: 0 };
+export const EMPTY_METRICS: ReportMetrics = { gasto: 0, faturamento: 0, resultado: 0, views: 0, impressions: 0, thruplays: 0, messages: 0, sales: 0, reach: 0, linkClicks: 0, leads: 0, engagements: 0, deposito: 0, credito: 0, planned: 0, msgSpend: 0, msgMessages: 0, partial: 0 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -135,6 +151,7 @@ export function periodMetrics(input: {
     out.gasto += Number(r.spent_amount || 0); out.faturamento += Number(r.generated_revenue || 0);
     out.views += Number(r.views || 0); out.impressions += Number(r.impressions || 0); out.thruplays += Number(r.thruplays || 0);
     out.messages += Number(r.messages || 0); out.sales += Number(r.sales || 0);
+    out.reach += Number(r.reach || 0); out.linkClicks += Number(r.link_clicks || 0); out.leads += Number(r.leads || 0); out.engagements += Number(r.engagements || 0);
   }
   const elig = messagingCost(input.messaging.filter((p) => input.campaignIds.has(p.campaign_id) && spanInPeriod(pointSpan(p), period) === "in"));
   out.msgSpend = elig.spend; out.msgMessages = elig.messages;
@@ -159,6 +176,35 @@ export function sumMetrics(list: ReportMetrics[]): ReportMetrics {
 
 export const costPerMessage = (m: ReportMetrics) => (m.msgMessages > 0 && m.msgSpend > 0 ? m.msgSpend / m.msgMessages : null);
 export const costPerSale = (m: ReportMetrics) => (m.sales > 0 && m.gasto > 0 ? m.gasto / m.sales : null);
+/** ROAS = faturamento atribuído ÷ investimento (sem investimento, não há ROAS). */
+export const roas = (m: ReportMetrics) => (m.gasto > 0 ? m.faturamento / m.gasto : null);
+
+// ------------------------------------------------------------- campanhas
+
+export type PeriodCampaign = { id: string; starts_on: string; ends_on?: string | null; campaign_status?: string | null };
+
+/**
+ * Período em que a campanha esteve EM EXECUÇÃO (datas reais, nunca a data de
+ * cadastro). Sem data final: ativa/pausada vai até hoje; planejada/finalizada
+ * fica só no dia de início — nunca se presume que uma campanha antiga segue ativa.
+ */
+export function campaignRunSpan(c: PeriodCampaign, today: string): Span {
+  const start = c.starts_on.slice(0, 10);
+  let end = c.ends_on ? c.ends_on.slice(0, 10) : c.campaign_status === "ativa" || c.campaign_status === "pausada" ? today : start;
+  if (end < start) end = start;
+  return { start, end };
+}
+
+/** Campanhas que estiveram em execução em algum dia do período (atravessar meses = aparece nos dois). */
+export function campaignsInPeriod<T extends PeriodCampaign>(campaigns: T[], p: ReportPeriod, today: string): T[] {
+  if (p.kind === "all") return campaigns;
+  const { from, to } = periodBounds(p);
+  return campaigns.filter((c) => { const s = campaignRunSpan(c, today); return s.start <= to && s.end >= from; });
+}
+
+/** Atalhos "Este mês" / "Mês passado" (São Paulo). */
+export const thisMonthPeriod = (today: string): ReportPeriod => ({ kind: "month", month: today.slice(0, 7) });
+export const lastMonthPeriod = (today: string): ReportPeriod => ({ kind: "month", month: shiftMonth(today.slice(0, 7), -1) });
 
 export type Change = { current: number | null; previous: number | null; diff: number | null; pct: number | null };
 /** Diferença absoluta e % (null quando não há base para comparar). */

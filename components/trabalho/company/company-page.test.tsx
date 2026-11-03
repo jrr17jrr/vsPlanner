@@ -99,12 +99,29 @@ describe("resultados da empresa — referência IG Predial 30/09 a 29/10/2026", 
       periodMetrics: rows.map((r, i) => ({ ...r, ad_set_id: "s" + i, creative_id: "a" + i })),
     });
     const html = text(renderToStaticMarkup(<CompanyResultsSummary results={periodResultsToEntries(merged.imported)} messaging={messagingPoints(history.facts)} />));
-    expect(html).toMatch(/Gasto em anúncios R\$ 843,17/);
+    expect(html).toMatch(/Investimento em anúncios R\$ 843,17/);
     expect(html).toMatch(/Faturamento bruto R\$ 9\.610,00/);
     expect(html).toMatch(/Mensagens 80 /);
     expect(html).toMatch(/Vendas 38 /);
     expect(html).toMatch(/Impressões 48\.283 /);
     expect(html).toMatch(/Resultado após anúncios R\$ 8\.766,83/);
     expect(html).toMatch(/Custo por mensagem R\$ 10,54/);
+  });
+
+  it("Visão Geral segue o período: campanhas do período × histórico; mês sem campanhas mostra zero", () => {
+    // Relógio em 31/10/2026: as 7 campanhas (30/09 a 29/10) estiveram em execução em outubro.
+    const campaigns = Array.from({ length: 7 }, (_, i) => ({ id: "c" + i, starts_on: "2026-09-30", ends_on: "2026-10-29", campaign_status: "finalizada" }));
+    const merged = mergePeriodResults([], rows);
+    const oct = text(renderToStaticMarkup(<CompanyResultsSummary results={periodResultsToEntries(merged.imported)} campaigns={campaigns} />));
+    expect(oct).toMatch(/Campanhas do período 7 7 no histórico/);
+    expect(oct).toMatch(/0 ativa\(s\) agora · 0 pausada\(s\) · 7 finalizada\(s\)/);
+    vi.setSystemTime(new Date("2026-11-03T12:00:00-03:00"));
+    const nov = text(renderToStaticMarkup(<CompanyResultsSummary results={periodResultsToEntries(merged.imported)} campaigns={campaigns} />));
+    vi.setSystemTime(new Date("2026-10-31T12:00:00-03:00"));
+    expect(nov).toMatch(/Campanhas do período 0 7 no histórico/);
+    expect(nov).toMatch(/Investimento em anúncios R\$ 0,00/);
+    expect(nov).toMatch(/Mensagens 0 Vendas 0 Impressões 0/);
+    expect(nov).toMatch(/ROAS —/);
+    expect(nov).toContain("Sem campanhas em execução nem resultados em novembro de 2026");
   });
 });

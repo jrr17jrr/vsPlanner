@@ -18,7 +18,7 @@ export async function withImportedPeriodResults(
 ): Promise<{ results: CltCampaignResultEntry[]; legacyKept: CltCampaignResultEntry[]; excludedLegacy: number; crossMonthPeriods: number }> {
   if (!campaignIds.length) return { results: legacy, legacyKept: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
   const db = supabase as SupabaseClient;
-  const { data, error } = await selectAdPeriodMetrics(db, "campaign_id,period_start,period_end,spend,conversations,sales,revenue,impressions", PERIOD_EXTRA_COLUMNS, (q) => q.in("campaign_id", campaignIds));
+  const { data, error } = await selectAdPeriodMetrics(db, "campaign_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads", PERIOD_EXTRA_COLUMNS, (q) => q.in("campaign_id", campaignIds));
   if (error) {
     // 42P01/PGRST205: tabela ainda não existe (migration pendente) — segue sem importados.
     if (!["42P01", "PGRST205", "PGRST204", "42703"].includes(String(error.code))) console.error("clt_ad_period_metrics", error);

@@ -5,17 +5,16 @@ import {useRouter} from "next/navigation";
 import {addCltAdAccountMovementAction} from "@/lib/supabase/clt-report-actions";
 import {messagingCost,monthLabel as historyMonthLabel,shiftMonth,type MessagingPoint} from "@/lib/clt/history";
 import {followerPeriodSummary,followerLocalDate,formatFollowerDiff,formatFollowerPct,type FollowerRecord} from "@/lib/clt/followers";
-import {change,costPerMessage,costPerSale,periodBounds,periodMetrics,previousPeriod,reportPeriodDates,reportPeriodLabel,sumMetrics,validatePeriod,type ReportMetrics,type ReportPeriod,type ReportResult} from "@/lib/clt/report-period";
+import {change,costPerMessage,costPerSale,periodBounds,periodMetrics,previousPeriod,reportPeriodDates,reportPeriodLabel,sumMetrics,type ReportMetrics,type ReportPeriod,type ReportResult} from "@/lib/clt/report-period";
 import {useCltModule} from "@/components/trabalho/module-context";
+import {PeriodPicker} from "@/components/shared/period-picker";
 type Company={id:string;name:string;current_ad_balance:number};
 type Campaign={id:string;company_id:string;name:string;starts_on:string;ends_on:string;planned_amount:number|null|undefined};
 type Movement={company_id:string;movement_date:string;kind:string;amount:number};
 type Comparison={company_id:string;old_campaign_ids:string[];new_campaign_ids:string[]};
-type PeriodKind=ReportPeriod["kind"];
 const br=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 const num=(n:number)=>n.toLocaleString("pt-BR");
 const pctText=(p:number|null)=>p===null?"—":(p>0?"+":p<0?"−":"")+Math.abs(p).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%";
-const PERIOD_KINDS:{id:PeriodKind;label:string}[]=[{id:"month",label:"Mês"},{id:"days",label:"Intervalo de dias"},{id:"months",label:"Intervalo de meses"},{id:"year",label:"Ano"}];
 /** Indicadores comparados com o período anterior (diferença absoluta e %). `money`: formato; `lowerIsBetter`: custos. */
 const COMPARE_ROWS:{id:string;label:string;value:(m:ReportMetrics)=>number|null;money?:boolean;lowerIsBetter?:boolean}[]=[
  {id:"gasto",label:"Investimento",value:m=>m.gasto,money:true},{id:"messages",label:"Conversas",value:m=>m.messages},{id:"cpm",label:"Custo por mensagem",value:costPerMessage,money:true,lowerIsBetter:true},
@@ -26,14 +25,11 @@ export function CltReportClient({companies,campaigns,results,movements,movementE
  const M=useCltModule();
  const now=new Date();const todayKey=now.toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});const thisMonth=todayKey.slice(0,7);
  // Período: mês (padrão, igual ao relatório de antes), intervalo de dias, intervalo de meses ou ano.
- const [periodKind,setPeriodKind]=useState<PeriodKind>("month");
- const [month,setMonth]=useState(thisMonth);
- const [dayFrom,setDayFrom]=useState(thisMonth+"-01"),[dayTo,setDayTo]=useState(todayKey);
- const [monthFrom,setMonthFrom]=useState(shiftMonth(thisMonth,-2)),[monthTo,setMonthTo]=useState(thisMonth);
- const [year,setYear]=useState(Number(todayKey.slice(0,4)));
- const [compare,setCompare]=useState(false);
- const period:ReportPeriod=periodKind==="month"?{kind:"month",month}:periodKind==="days"?{kind:"days",from:dayFrom,to:dayTo}:periodKind==="months"?{kind:"months",from:monthFrom,to:monthTo}:{kind:"year",year};
- const periodError=validatePeriod(period);
+ // Período: o mesmo seletor e os mesmos cálculos da Visão Geral e da página Empresas.
+ const [period,setPeriod]=useState<ReportPeriod>({kind:"month",month:thisMonth});
+ const [periodError,setPeriodError]=useState<string|null>(null);
+ const [compareChecked,setCompare]=useState(false);
+ const compare=compareChecked&&period.kind!=="all";
  const prev=previousPeriod(period);
  const bounds=periodError?null:periodBounds(period);
  const [selected,setSelected]=useState<string[]>(companies.map(c=>c.id));const [entryCompany,setEntryCompany]=useState(companies[0]?.id||"");
@@ -88,7 +84,7 @@ export function CltReportClient({companies,campaigns,results,movements,movementE
   if(included("cpm")&&cheapest)points.push(`${safe(cheapest.name)} teve o menor custo por mensagem registrado: ${ratio(costPerMessage(cheapest.m))}.`);
   // Evolução mensal (6 meses até o fim do período) — todas as campanhas da empresa, inclusive finalizadas.
   const companyCampaignIds=new Set(campaigns.filter(c=>c.company_id===company.id).map(c=>c.id));
-  const endMonth=periodBounds(period).to.slice(0,7);
+  const endMonth=period.kind==="all"?thisMonth:periodBounds(period).to.slice(0,7);
   const evoRows=Array.from({length:6},(_,i)=>shiftMonth(endMonth,i-5)).map(mo=>({mo,m:periodMetrics({period:{kind:"month",month:mo},campaignIds:companyCampaignIds,results,messaging})})).filter(r=>r.m.gasto||r.m.msgMessages||r.m.sales||r.m.faturamento);
   const historySection=included("historico")?`<section><h2>Evolução mensal</h2>${evoRows.length?table(["Mês","Investimento","Conversas (mensagens)","Custo por mensagem","Vendas","Faturamento"],evoRows.map(r=>[safe(historyMonthLabel(r.mo)),br(r.m.gasto),num(r.m.msgMessages),ratio(costPerMessage(r.m)),num(r.m.sales),br(r.m.faturamento)])):`<p class="muted">Sem resultados registrados nos 6 meses até o fim do período.</p>`}</section>`:"";
   const highlights=included("destaques")&&points.length?`<section><h2>Destaques do período</h2><div class="highlight">${points.join(" ")}</div></section>`:"";
@@ -105,21 +101,14 @@ export function CltReportClient({companies,campaigns,results,movements,movementE
  };
  const save=()=>{const n=Number(amount.replace(",","."));if(!entryCompany||!Number.isFinite(n)||n<=0){toast.error("Informe empresa e valor.");return;}start(async()=>{const r=await addCltAdAccountMovementAction({companyId:entryCompany,date,kind,amount:n,notes});if(r.error)toast.error(r.error);else{toast.success(r.success);setAmount("");setNotes("");router.refresh();}})};
  const field="min-w-0 rounded border bg-background p-2 text-sm";
- const years=Array.from({length:Number(todayKey.slice(0,4))-2023},(_,i)=>2024+i).reverse();
  const fmtCompare=(v:number|null,money?:boolean)=>v===null?"—":money?br(v):num(v);
  return <div className="space-y-5">
  {movementError&&<p className="rounded-lg border border-amber-500 p-3 text-sm">Para registrar depósitos e créditos, execute a migração SQL 20261021_clt_ad_account_movements.sql no Supabase. {movementError}</p>}
  <section className="space-y-3 rounded-xl border p-4"><h2 className="font-semibold">Empresas e período do relatório</h2>
- <div className="space-y-2"><p className="text-sm font-medium">Período</p>
-  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="group" aria-label="Tipo de período">{PERIOD_KINDS.map(k=><button key={k.id} type="button" aria-pressed={periodKind===k.id} onClick={()=>setPeriodKind(k.id)} className={"min-h-9 rounded-md border px-2 py-1.5 text-sm leading-tight "+(periodKind===k.id?"border-cyan-400 bg-cyan-400 font-semibold text-black":"hover:border-cyan-400/60")}>{k.label}</button>)}</div>
-  <div className="grid gap-2 sm:grid-cols-2 lg:max-w-xl">
-   {periodKind==="month"&&<label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">Mês<input className={field} type="month" value={month} onChange={e=>setMonth(e.target.value)}/></label>}
-   {periodKind==="days"&&<><label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">De<input className={field} type="date" value={dayFrom} max={dayTo||undefined} onChange={e=>setDayFrom(e.target.value)}/></label><label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">Até<input className={field} type="date" value={dayTo} min={dayFrom||undefined} onChange={e=>setDayTo(e.target.value)}/></label></>}
-   {periodKind==="months"&&<><label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">Mês inicial<input className={field} type="month" value={monthFrom} max={monthTo||undefined} onChange={e=>setMonthFrom(e.target.value)}/></label><label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">Mês final<input className={field} type="month" value={monthTo} min={monthFrom||undefined} onChange={e=>setMonthTo(e.target.value)}/></label></>}
-   {periodKind==="year"&&<label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">Ano<select className={field} value={year} onChange={e=>setYear(Number(e.target.value))}>{years.map(y=><option key={y} value={y}>{y}</option>)}</select></label>}
-  </div>
-  {periodError?<p className="text-sm text-destructive">{periodError}</p>:<p className="text-xs text-muted-foreground">{label} · {dates}{periodKind==="days"?" · resultados importados por período só entram se o período inteiro estiver dentro das datas.":""}</p>}
-  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/>Comparar com o período anterior{!periodError&&<span className="text-xs text-muted-foreground">({prevLabel} · {reportPeriodDates(prev)})</span>}</label>
+ <div className="space-y-2">
+  <PeriodPicker idPrefix="relatorio" onChange={(p,err)=>{setPeriod(p);setPeriodError(err);}}/>
+  {period.kind==="days"&&!periodError&&<p className="text-xs text-muted-foreground">Intervalo de dias: resultados importados por período só entram se o período inteiro estiver dentro das datas.</p>}
+  {period.kind!=="all"&&<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/>Comparar com o período anterior{!periodError&&<span className="text-xs text-muted-foreground">({prevLabel} · {reportPeriodDates(prev)})</span>}</label>}
  </div>
  <div className="flex flex-wrap gap-2"><button className="rounded border px-3 py-1 text-sm" onClick={()=>setSelected(companies.map(c=>c.id))}>Marcar todas</button><button className="rounded border px-3 py-1 text-sm" onClick={()=>setSelected([])}>Desmarcar todas</button></div><div className="grid gap-2 sm:grid-cols-3">{companies.map(c=><label key={c.id} className="flex min-w-0 items-center gap-2 rounded-lg border p-2 text-sm"><input type="checkbox" checked={selected.includes(c.id)} onChange={e=>setSelected(v=>e.target.checked?[...v,c.id]:v.filter(x=>x!==c.id))}/><span className="min-w-0 break-words">{c.name}</span></label>)}</div><button onClick={()=>setPdfOptionsOpen(true)} disabled={!rows.length||!!periodError} className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">Gerar PDF das selecionadas</button><p className="text-xs text-muted-foreground">Abre a impressão do navegador. Escolha “Salvar como PDF” para baixar.</p></section>
  {pdfOptionsOpen&&<div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/60 p-3 py-4 touch-pan-y [-webkit-overflow-scrolling:touch] sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Personalizar relatório PDF"><div className="w-full max-w-lg min-h-0 max-h-[calc(100dvh-2rem)] space-y-4 overflow-y-auto overscroll-contain rounded-2xl border bg-background p-4 shadow-xl touch-pan-y [-webkit-overflow-scrolling:touch] sm:p-5"><div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Personalizar relatório PDF</h2><p className="text-sm text-muted-foreground">{label} · {dates}{compare?` · comparado com ${prevLabel}`:""}</p></div><button aria-label="Fechar" className="rounded border px-2 py-1" onClick={()=>setPdfOptionsOpen(false)}>✕</button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{fieldDefs.map(f=><label key={f.id} className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={pdfFields.includes(f.id)} onChange={e=>setPdfFields(old=>e.target.checked?[...old,f.id]:old.filter(x=>x!==f.id))}/>{f.label}</label>)}</div><p className="text-xs text-muted-foreground">Todos os indicadores são opcionais, inclusive custo por mensagem, custo por venda, campanhas e destaques. Cada empresa selecionada começa em uma nova página.{compare?" A comparação com o período anterior usa os indicadores marcados.":""} Dados ausentes podem aparecer como zero.</p><div className="flex justify-end gap-2"><button className="rounded border px-4 py-2 text-sm" onClick={()=>setPdfOptionsOpen(false)}>Cancelar</button><button className="rounded bg-cyan-400 px-4 py-2 text-sm font-semibold text-black" onClick={exportPdf}>Gerar PDF</button></div></div></div>}

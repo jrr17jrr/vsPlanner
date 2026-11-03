@@ -31,6 +31,9 @@ export type PeriodMetricRow = {
   views?: number | null;
   thruplays?: number | null;
   engagements?: number | null;
+  reach?: number | null;
+  link_clicks?: number | null;
+  leads?: number | null;
 };
 
 export type LegacyResultRow = { campaign_id: string; entry_date: string };
@@ -48,6 +51,10 @@ export type PeriodResult = {
   views: number;
   thruplays: number;
   engagements: number;
+  /** Somado entre anúncios/períodos (não é alcance único). */
+  reach: number;
+  link_clicks: number;
+  leads: number;
   /** 'import' substitui lançamentos antigos no período; 'manual_update' só soma a diferença. */
   source: "import" | "manual_update";
 };
@@ -62,7 +69,7 @@ export function mergePeriodResults<T extends LegacyResultRow>(legacy: T[], perio
     const start = String(m.period_start).slice(0, 10), end = String(m.period_end).slice(0, 10);
     const source = isManualUpdate(m) ? "manual_update" as const : "import" as const;
     const key = `${m.campaign_id}|${start}|${end}|${source}`;
-    const g = groups.get(key) ?? { campaign_id: m.campaign_id, entry_date: end, period_start: start, period_end: end, spent_amount: 0, messages: 0, sales: 0, generated_revenue: 0, impressions: 0, views: 0, thruplays: 0, engagements: 0, source };
+    const g = groups.get(key) ?? { campaign_id: m.campaign_id, entry_date: end, period_start: start, period_end: end, spent_amount: 0, messages: 0, sales: 0, generated_revenue: 0, impressions: 0, views: 0, thruplays: 0, engagements: 0, reach: 0, link_clicks: 0, leads: 0, source };
     g.spent_amount = Math.round((g.spent_amount + n(m.spend)) * 100) / 100;
     g.messages += n(m.conversations);
     g.sales += n(m.sales);
@@ -71,6 +78,9 @@ export function mergePeriodResults<T extends LegacyResultRow>(legacy: T[], perio
     g.views += n(m.views);
     g.thruplays += n(m.thruplays);
     g.engagements += n(m.engagements);
+    g.reach += n(m.reach);
+    g.link_clicks += n(m.link_clicks);
+    g.leads += n(m.leads);
     groups.set(key, g);
   }
   const periods = [...groups.values()];
@@ -103,12 +113,12 @@ export function periodResultsToEntries(imported: PeriodResult[]): CltCampaignRes
     views: p.views ?? 0,
     appointments: 0,
     impressions: p.impressions,
-    reach: 0,
+    reach: p.reach ?? 0,
     profile_visits: 0,
-    link_clicks: 0,
+    link_clicks: p.link_clicks ?? 0,
     engagements: p.engagements ?? 0,
     thruplays: p.thruplays ?? 0,
-    leads: 0,
+    leads: p.leads ?? 0,
     generated_revenue: p.generated_revenue,
     notes: p.source === "manual_update"
       ? `Atualização manual dos anúncios — período ${p.period_start} a ${p.period_end} (diferença para o total anterior).`
