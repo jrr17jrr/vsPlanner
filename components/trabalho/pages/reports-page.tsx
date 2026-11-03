@@ -11,6 +11,7 @@ import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltModule } from "@/lib/clt/module";
 import type { CltCampaignResultEntry } from "@/types/database.types";
 import type { FollowerRecord } from "@/lib/clt/followers";
+import { sanitizeReportMetrics } from "@/lib/clt/report-metrics";
 
 /**
  * Relatórios (PDF) do módulo. Empresas, campanhas, resultados, movimentações
@@ -24,16 +25,20 @@ export async function CltReportsPage({ module }: { module: CltModule }) {
   if (!user) return <p>Faça login.</p>;
   const scope = await getModuleScope(s, user.id, module);
   const ids = inList(scope.companyIds);
-  const [campaigns, movements, comparisons, followers] = await Promise.all([
+  const [campaigns, movements, comparisons, followers, prefs] = await Promise.all([
     s.from("clt_campaigns").select("id,company_id,name,objective,starts_on,ends_on,planned_amount,campaign_status").eq("user_id", user.id).in("company_id", ids),
     db.from("clt_ad_account_movements").select("company_id,movement_date,kind,amount").eq("user_id", user.id).in("company_id", ids),
     db.from("clt_campaign_comparisons").select("company_id,old_campaign_ids,new_campaign_ids").eq("user_id", user.id).in("company_id", ids),
     // Seguidores do Instagram (contagem manual) — sem a migration, o relatório segue sem essa seção.
     db.from("clt_instagram_followers").select("id,company_id,followers,recorded_at").eq("user_id", user.id).in("company_id", ids),
+    // Métricas escolhidas por empresa ("Personalizar relatório") — migration 20261106100000; sem ela, vale o padrão.
+    db.from("clt_report_preferences").select("company_id,metrics").eq("user_id", user.id).in("company_id", ids),
   ]);
+  const preferences: Record<string, string[]> = {};
+  for (const p of (prefs.error ? [] : prefs.data || []) as { company_id: string; metrics: unknown }[]) { const clean = sanitizeReportMetrics(p.metrics); if (clean) preferences[p.company_id] = clean; }
   const campaignIds = (campaigns.data || []).map(c => c.id);
   const results = campaignIds.length
-    ? await s.from("clt_campaign_result_entries").select("campaign_id,entry_date,spent_amount,generated_revenue,views,impressions,thruplays,messages,sales").eq("user_id", user.id).in("campaign_id", campaignIds)
+    ? await s.from("clt_campaign_result_entries").select("campaign_id,entry_date,spent_amount,generated_revenue,views,impressions,thruplays,messages,sales,reach,link_clicks,leads,engagements").eq("user_id", user.id).in("campaign_id", campaignIds)
     : { data: [], error: null };
   const movementError = movements.error?.message || "";
   // Resultados importados por anúncio/período entram no mês do FIM do período; lançamentos antigos da mesma campanha dentro do período não são somados de novo.
@@ -46,5 +51,5 @@ export async function CltReportsPage({ module }: { module: CltModule }) {
   const reportResults = merged.results.map(r => ({ ...r, period_start: importedPeriodStart(r) }));
   const companies = scope.companies.filter(c => c.is_active).map(c => ({ id: c.id, name: c.name, current_ad_balance: c.current_ad_balance }));
   const title = module === "mkt" ? "Relatórios MKT" : "Relatórios CLT";
-  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e período (mês, intervalo de dias, intervalo de meses ou ano), registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={reportResults} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
+  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e período (mês, intervalo de dias, intervalo de meses ou ano), registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={reportResults} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} preferences={preferences} preferencesAvailable={!prefs.error} /></div>;
 }

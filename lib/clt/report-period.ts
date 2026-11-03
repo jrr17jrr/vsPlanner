@@ -1,4 +1,5 @@
 import { messagingCost, monthLabel, shiftMonth, type MessagingPoint } from "@/lib/clt/history";
+import { EXTRA_METRIC_KEYS, addRatio, cpc as cpcOf, cpm as cpmOf, ctr as ctrOf, emptyRatio, rowRatioBase, type ExtraMetricKey, type RatioBase } from "@/lib/clt/result-metrics";
 
 /**
  * Períodos dos Relatórios (CLT e MKT) — puro, usado pela prévia e pelo PDF.
@@ -105,7 +106,7 @@ export function spanInPeriod(span: Span, p: ReportPeriod): "in" | "out" | "parti
 
 // ------------------------------------------------------------------ dados
 
-export type ReportResult = { campaign_id: string; entry_date: string; spent_amount: number; generated_revenue: number; views: number; impressions: number; thruplays: number; messages: number; sales: number; period_start?: string | null; reach?: number | null; link_clicks?: number | null; leads?: number | null; engagements?: number | null };
+export type ReportResult = { campaign_id: string; entry_date: string; spent_amount: number; generated_revenue: number; views: number; impressions: number; thruplays: number; messages: number; sales: number; period_start?: string | null; reach?: number | null; link_clicks?: number | null; leads?: number | null; engagements?: number | null; ratio?: RatioBase } & Partial<Record<ExtraMetricKey, number | null>>;
 export type ReportMovement = { company_id: string; movement_date: string; kind: string; amount: number };
 export type ReportCampaign = { id: string; company_id: string; starts_on: string; planned_amount: number | null | undefined };
 
@@ -117,14 +118,19 @@ export type ReportMetrics = {
   gasto: number; faturamento: number; resultado: number; views: number; impressions: number; thruplays: number; messages: number; sales: number;
   /** Alcance é somado entre registros (não é alcance único). */
   reach: number; linkClicks: number; leads: number; engagements: number;
+  /** Engajamento e vídeo (novos seguidores = atribuídos aos anúncios; não é o total do Instagram). */
+  reactions: number; comments: number; shares: number; newFollowers: number; video3s: number; video75: number; video100: number;
   deposito: number; credito: number; planned: number;
   /** Custo por mensagem: só investimento/conversas de campanhas/conjuntos de MENSAGENS. */
   msgSpend: number; msgMessages: number;
   /** Resultados importados que cruzam a borda de um intervalo de dias (não incluídos). */
   partial: number;
-};
+} & RatioBase;
 
-export const EMPTY_METRICS: ReportMetrics = { gasto: 0, faturamento: 0, resultado: 0, views: 0, impressions: 0, thruplays: 0, messages: 0, sales: 0, reach: 0, linkClicks: 0, leads: 0, engagements: 0, deposito: 0, credito: 0, planned: 0, msgSpend: 0, msgMessages: 0, partial: 0 };
+export const EMPTY_METRICS: ReportMetrics = { gasto: 0, faturamento: 0, resultado: 0, views: 0, impressions: 0, thruplays: 0, messages: 0, sales: 0, reach: 0, linkClicks: 0, leads: 0, engagements: 0, reactions: 0, comments: 0, shares: 0, newFollowers: 0, video3s: 0, video75: 0, video100: 0, deposito: 0, credito: 0, planned: 0, msgSpend: 0, msgMessages: 0, partial: 0, ...emptyRatio() };
+
+/** Campo de `ReportMetrics` de cada coluna nova. */
+const EXTRA_TO_METRIC: Record<ExtraMetricKey, keyof ReportMetrics> = { reactions: "reactions", comments: "comments", shares: "shares", new_followers: "newFollowers", video_plays_3s: "video3s", video_p75: "video75", video_p100: "video100" };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -152,6 +158,8 @@ export function periodMetrics(input: {
     out.views += Number(r.views || 0); out.impressions += Number(r.impressions || 0); out.thruplays += Number(r.thruplays || 0);
     out.messages += Number(r.messages || 0); out.sales += Number(r.sales || 0);
     out.reach += Number(r.reach || 0); out.linkClicks += Number(r.link_clicks || 0); out.leads += Number(r.leads || 0); out.engagements += Number(r.engagements || 0);
+    for (const k of EXTRA_METRIC_KEYS) out[EXTRA_TO_METRIC[k]] += Number(r[k] || 0);
+    Object.assign(out, addRatio(out, rowRatioBase(r)));
   }
   const elig = messagingCost(input.messaging.filter((p) => input.campaignIds.has(p.campaign_id) && spanInPeriod(pointSpan(p), period) === "in"));
   out.msgSpend = elig.spend; out.msgMessages = elig.messages;
@@ -162,7 +170,7 @@ export function periodMetrics(input: {
   }
   // Planejado: campanhas informadas (todas da empresa, como sempre) que começam no período.
   out.planned = (input.campaigns ?? []).filter((c) => c.starts_on.slice(0, 10) >= from && c.starts_on.slice(0, 10) <= to).reduce((a, c) => a + Number(c.planned_amount || 0), 0);
-  for (const k of ["gasto", "faturamento", "deposito", "credito", "planned"] as const) out[k] = round2(out[k]);
+  for (const k of ["gasto", "faturamento", "deposito", "credito", "planned", "cpcSpend", "cpmSpend"] as const) out[k] = round2(out[k]);
   out.resultado = round2(out.faturamento - out.gasto);
   return out;
 }
@@ -170,7 +178,7 @@ export function periodMetrics(input: {
 export function sumMetrics(list: ReportMetrics[]): ReportMetrics {
   const out = { ...EMPTY_METRICS };
   for (const m of list) for (const k of Object.keys(out) as (keyof ReportMetrics)[]) out[k] += m[k];
-  for (const k of ["gasto", "faturamento", "resultado", "deposito", "credito", "planned", "msgSpend"] as const) out[k] = round2(out[k]);
+  for (const k of ["gasto", "faturamento", "resultado", "deposito", "credito", "planned", "msgSpend", "cpcSpend", "cpmSpend"] as const) out[k] = round2(out[k]);
   return out;
 }
 
@@ -178,6 +186,10 @@ export const costPerMessage = (m: ReportMetrics) => (m.msgMessages > 0 && m.msgS
 export const costPerSale = (m: ReportMetrics) => (m.sales > 0 && m.gasto > 0 ? m.gasto / m.sales : null);
 /** ROAS = faturamento atribuído ÷ investimento (sem investimento, não há ROAS). */
 export const roas = (m: ReportMetrics) => (m.gasto > 0 ? m.faturamento / m.gasto : null);
+/** CPC, CTR (%) e CPM do período — só com registros que informaram as duas pontas; sem base → null ("—"). */
+export const cpc = (m: ReportMetrics) => cpcOf(m);
+export const ctr = (m: ReportMetrics) => ctrOf(m);
+export const cpm = (m: ReportMetrics) => cpmOf(m);
 
 // ------------------------------------------------------------- campanhas
 

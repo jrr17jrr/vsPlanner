@@ -4,7 +4,9 @@ import Link from "next/link";
 import {Card,CardContent} from "@/components/ui/card";
 import {PeriodPicker} from "@/components/shared/period-picker";
 import type {MessagingPoint} from "@/lib/clt/history";
-import {campaignsInPeriod,costPerMessage,periodMetrics,reportPeriodLabel,roas,type PeriodCampaign,type ReportPeriod,type ReportResult} from "@/lib/clt/report-period";
+import {campaignsInPeriod,costPerMessage,cpc,cpm as cpmMil,ctr,periodMetrics,reportPeriodLabel,roas,type PeriodCampaign,type ReportPeriod,type ReportResult} from "@/lib/clt/report-period";
+import {formatMetric,NEW_FOLLOWERS_LABEL} from "@/lib/clt/result-metrics";
+import {COSTS_NOTE,ENGAGEMENT_NOTE,MetricCardSections} from "@/components/trabalho/result-metric-sections";
 const money=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 const num=(n:number)=>n.toLocaleString("pt-BR");
 const todaySP=()=>new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});
@@ -33,7 +35,13 @@ export function CompanyResultsSummary({results,messaging=[],campaigns=[],analyse
   </div>
   {/* Hierarquia: investimento e retorno em destaque; volume e alcance abaixo. */}
   <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">{([["Investimento em anúncios",money(m.gasto)],["Faturamento bruto",money(m.faturamento)],["Resultado após anúncios",money(m.resultado)],["Custo por mensagem",cpm===null?"—":money(cpm)],["ROAS",r===null?"—":r.toFixed(2).replace(".",",")+"x"]] as const).map(([label,value],i)=><div key={label} className={"rounded-lg border border-primary/20 bg-primary/[0.04] p-3"+(i===4?" col-span-2 lg:col-span-1":"")}><p className="text-xs text-muted-foreground">{label}</p><p className={"mt-1 text-xl font-semibold"+(label==="Resultado após anúncios"&&m.resultado<0?" text-destructive":"")}>{value}</p></div>)}</div>
-  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{([["Mensagens",m.messages],["Vendas",m.sales],["Impressões",m.impressions],["Alcance (soma)",m.reach],["Visualizações",m.views],["ThruPlays",m.thruplays],["Cliques no link",m.linkClicks],["Leads",m.leads],["Interações",m.engagements]] as const).map(([label,value])=><div key={label} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{num(value)}</p></div>)}</div>
+  {/* Volume em seções recolhíveis: principais abertas; engajamento, vídeo e custos sob demanda. */}
+  <MetricCardSections sections={[
+   {id:"principal",title:"Resultados principais",defaultOpen:true,cards:([["messages","Mensagens",m.messages],["sales","Vendas",m.sales],["impressions","Impressões",m.impressions],["reach","Alcance (soma)",m.reach],["engagements","Interações",m.engagements],["leads","Leads",m.leads]] as const).map(([key,label,v])=>({key,label,value:num(v)}))},
+   {id:"engajamento",title:"Engajamento",note:ENGAGEMENT_NOTE,cards:([["reactions","Reações",m.reactions],["comments","Comentários",m.comments],["shares","Compartilhamentos",m.shares],["newFollowers",NEW_FOLLOWERS_LABEL,m.newFollowers],["linkClicks","Cliques no link",m.linkClicks]] as const).map(([key,label,v])=>({key,label,value:num(v)}))},
+   {id:"video",title:"Vídeo",cards:([["views","Visualizações",m.views],["video3s","Reproduções de 3 segundos",m.video3s],["thruplays","ThruPlays",m.thruplays],["video75","Visualizações de 75%",m.video75],["video100","Visualizações de 100%",m.video100]] as const).map(([key,label,v])=>({key,label,value:num(v)}))},
+   {id:"custos",title:"Custos e taxas (CPC, CTR, CPM)",note:COSTS_NOTE,cards:[{key:"cpc",label:"CPC (custo por clique)",value:formatMetric(cpc(m),"money")},{key:"ctr",label:"CTR (taxa de cliques)",value:formatMetric(ctr(m),"pct")},{key:"cpm",label:"CPM (custo por mil impressões)",value:formatMetric(cpmMil(m),"money")}]},
+  ]}/>
   {empty&&<p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">Sem campanhas em execução nem resultados em {reportPeriodLabel(period).toLowerCase()}.</p>}
   {m.partial>0&&<p className="rounded-md border border-amber-500/60 p-3 text-xs">{m.partial} resultado(s) registrados por período começam antes ou terminam depois das datas escolhidas e não foram incluídos — os valores não são divididos entre dias.</p>}
   <p className="text-xs text-muted-foreground">Resultado após anúncios = faturamento bruto menos investimento em anúncios; não é lucro líquido. Custo por mensagem considera só campanhas/conjuntos de mensagens. ROAS = faturamento ÷ investimento.</p>

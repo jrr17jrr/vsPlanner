@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { moveCltAdResultUpdatePeriodAction, updateCltAdResultsAction } from "@/lib/supabase/clt-ad-results-actions";
-import { AD_METRICS, currentTotals, monthReference, primaryMetrics, type AdMetricKey, type CountedRow, type Totals } from "@/lib/clt/ad-result-update";
+import { AD_METRICS, currentTotals, isExtraMetric, monthReference, primaryMetrics, type AdMetricKey, type CountedRow, type Totals } from "@/lib/clt/ad-result-update";
 import type { ResultType } from "@/lib/clt/history";
+import { SECTION_TITLES, type MetricSection } from "@/lib/clt/result-metrics";
+import { CollapsibleSection } from "@/components/trabalho/company/collapsible-section";
 
 export type AdResultUpdate = {
   id: string;
@@ -84,22 +86,63 @@ export function parseMetricInput(k: AdMetricKey, raw: string): number | null {
  * Botão + formulário "Atualizar resultados" de UM anúncio. A pessoa informa
  * os NOVOS TOTAIS acumulados (não a diferença); campo vazio = não informado.
  */
-export function AdResultsUpdateButton({ adId, adName, rows, type, campaignStatus }: { adId: string; adName: string; rows: CountedRow[]; type: ResultType | "misto" | null; campaignStatus?: string | null }) {
+export function AdResultsUpdateButton({ adId, adName, rows, type, campaignStatus, extrasAvailable = true }: { adId: string; adName: string; rows: CountedRow[]; type: ResultType | "misto" | null; campaignStatus?: string | null; extrasAvailable?: boolean }) {
   const [open, setOpen] = useState(false);
   return <>
     <Button onClick={() => setOpen(true)}>Atualizar resultados</Button>
     <Dialog open={open} onOpenChange={setOpen}>
-      {open && <AdResultsForm key={adId} adId={adId} adName={adName} totals={currentTotals(rows)} type={type} campaignStatus={campaignStatus} close={() => setOpen(false)} />}
+      {open && <AdResultsForm key={adId} adId={adId} adName={adName} totals={currentTotals(rows)} type={type} campaignStatus={campaignStatus} extrasAvailable={extrasAvailable} close={() => setOpen(false)} />}
     </Dialog>
   </>;
 }
 
-function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { adId: string; adName: string; totals: Totals; type: ResultType | "misto" | null; campaignStatus?: string | null; close: () => void }) {
+const SECTIONS: MetricSection[] = ["principal", "engajamento", "video"];
+
+/**
+ * Campos do formulário em três seções recolhíveis: Resultados principais
+ * (aberta), Engajamento e Vídeo (fechadas). Fechar uma seção não apaga nada
+ * (o conteúdo continua montado). Todos os campos são opcionais.
+ */
+export function AdResultsFields({ adId, totals, type, fields, setField, pending = false, extrasAvailable = true }: { adId: string; totals: Totals; type: ResultType | "misto" | null; fields: Record<AdMetricKey, string>; setField: (k: AdMetricKey, v: string) => void; pending?: boolean; extrasAvailable?: boolean }) {
+  // Dentro de "Resultados principais", os campos do tipo de resultado do conjunto vêm primeiro.
+  const order = primaryMetrics(type);
+  const rank = (k: AdMetricKey) => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+  const keysOf = (s: MetricSection) => {
+    const keys = AD_METRICS.filter((m) => m.section === s).map((m) => m.key);
+    return s === "principal" ? [...keys].sort((a, b) => rank(a) - rank(b)) : keys;
+  };
+  const parsedOf = (k: AdMetricKey) => parseMetricInput(k, fields[k]);
+  const changedOf = (k: AdMetricKey) => { const p = parsedOf(k); return p !== null && !Number.isNaN(p) && p !== totals[k]; };
+  const field = (k: AdMetricKey) => {
+    const m = AD_METRICS.find((x) => x.key === k)!;
+    const p = parsedOf(k);
+    const locked = !extrasAvailable && isExtraMetric(k);
+    return <div key={k} className="flex min-w-0 flex-col gap-1">
+      <Label htmlFor={`ad-${adId}-${k}`} className="text-xs">{m.label}</Label>
+      <Input id={`ad-${adId}-${k}`} inputMode={isMoney(k) ? "decimal" : "numeric"} placeholder="Não informado" value={fields[k]} disabled={pending || locked}
+        aria-invalid={Number.isNaN(p) || undefined} onChange={(e) => setField(k, e.target.value)} />
+      <p className={`text-[11px] ${Number.isNaN(p) ? "text-destructive" : changedOf(k) ? "text-primary" : "text-muted-foreground"}`}>
+        {Number.isNaN(p) ? "Número inválido" : changedOf(k) ? `Atual: ${show(k, totals[k])} → ${show(k, p)}` : `Atual: ${show(k, totals[k])}`}
+      </p>
+    </div>;
+  };
+  return <div className="flex min-w-0 flex-col gap-2">{SECTIONS.map((s) => {
+    const keys = keysOf(s);
+    const changed = keys.filter(changedOf).length;
+    const invalid = keys.filter((k) => Number.isNaN(parsedOf(k))).length;
+    const informed = keys.filter((k) => totals[k] !== null).length;
+    const locked = !extrasAvailable && keys.some(isExtraMetric);
+    const summary = invalid ? `${invalid} campo(s) com número inválido` : changed ? `${changed} campo(s) alterado(s)` : locked ? "Campos novos disponíveis após aplicar a migração 20261106100000" : `${keys.length} campos · ${informed} informado(s) · opcionais`;
+    return <CollapsibleSection key={s} compact className="shadow-none" title={SECTION_TITLES[s]} defaultOpen={s === "principal"} summary={<span className={invalid ? "text-destructive" : changed ? "text-primary" : undefined}>{summary}</span>}>
+      <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">{keys.map(field)}</div>
+      {s === "engajamento" && <p className="mt-2 text-[11px] text-muted-foreground">Novos seguidores atribuídos aos anúncios (Meta Ads) — não é o total de seguidores do Instagram. Cliques no link não contam como conversas.</p>}
+    </CollapsibleSection>;
+  })}</div>;
+}
+
+function AdResultsForm({ adId, adName, totals, type, campaignStatus, extrasAvailable, close }: { adId: string; adName: string; totals: Totals; type: ResultType | "misto" | null; campaignStatus?: string | null; extrasAvailable: boolean; close: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const primary = primaryMetrics(type);
-  const secondary = AD_METRICS.map((m) => m.key).filter((k) => !primary.includes(k));
-  const [showAll, setShowAll] = useState(secondary.some((k) => totals[k] !== null));
   const [fields, setFields] = useState<Record<AdMetricKey, string>>(() => Object.fromEntries(AD_METRICS.map((m) => [m.key, toField(m.key, totals[m.key])])) as Record<AdMetricKey, string>);
   const [reference, setReference] = useState<{ start: string; end: string } | null>(() => monthReference(todaySP().slice(0, 7), todaySP()));
 
@@ -120,20 +163,7 @@ function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { 
     });
   }
 
-  const field = (k: AdMetricKey) => {
-    const m = AD_METRICS.find((x) => x.key === k)!;
-    const changed = changes.some((c) => c.key === k);
-    return <div key={k} className="flex min-w-0 flex-col gap-1">
-      <Label htmlFor={`ad-${adId}-${k}`} className="text-xs">{m.label}</Label>
-      <Input id={`ad-${adId}-${k}`} inputMode={isMoney(k) ? "decimal" : "numeric"} placeholder="Não informado" value={fields[k]} disabled={pending}
-        aria-invalid={Number.isNaN(parsed[k]) || undefined} onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))} />
-      <p className={`text-[11px] ${Number.isNaN(parsed[k]) ? "text-destructive" : changed ? "text-primary" : "text-muted-foreground"}`}>
-        {Number.isNaN(parsed[k]) ? "Número inválido" : changed ? `Atual: ${show(k, totals[k])} → ${show(k, parsed[k])}` : `Atual: ${show(k, totals[k])}`}
-      </p>
-    </div>;
-  };
-
-  return <DialogContent className="sm:max-w-xl">
+  return <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-xl">
     <DialogHeader>
       <DialogTitle>Atualizar resultados</DialogTitle>
       <p className="text-sm text-muted-foreground break-words">{adName}{campaignStatus ? ` · campanha ${campaignStatus}` : ""}</p>
@@ -145,9 +175,7 @@ function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { 
         <ReferencePeriodFields idPrefix={`ad-${adId}-ref`} onChange={setReference} />
         <p className="mt-2 text-[11px] text-muted-foreground">Quando os resultados aconteceram — é o que vale nos filtros e relatórios. A data do registro (hoje) fica no histórico.</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">{primary.map(field)}</div>
-      <button type="button" className="self-start text-xs text-primary" aria-expanded={showAll} onClick={() => setShowAll(!showAll)}>{showAll ? "Menos indicadores" : "Mais indicadores"}</button>
-      {showAll && <div className="grid grid-cols-2 gap-3">{secondary.map(field)}</div>}
+      <AdResultsFields adId={adId} totals={totals} type={type} fields={fields} setField={(k, v) => setFields((f) => ({ ...f, [k]: v }))} pending={pending} extrasAvailable={extrasAvailable} />
       {changes.length > 0 && <div className="rounded-md border border-primary/40 p-3 text-xs">
         <p className="mb-1 font-medium">Vai mudar</p>
         <ul className="space-y-0.5">{changes.map((m) => <li key={m.key} className="break-words">{m.label.replace(" (R$)", "")}: {show(m.key, totals[m.key])} → <b>{show(m.key, parsed[m.key])}</b></li>)}</ul>

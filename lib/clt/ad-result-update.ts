@@ -1,4 +1,5 @@
 import type { ResultType } from "@/lib/clt/history";
+import { EXTRA_METRIC_KEYS, NEW_FOLLOWERS_LABEL, type ExtraMetricKey, type MetricSection } from "@/lib/clt/result-metrics";
 
 /**
  * "Atualizar resultados" de UM anúncio — puro (sem I/O), usado pela ação do
@@ -18,21 +19,35 @@ import type { ResultType } from "@/lib/clt/history";
  * Campo vazio = "não informado": não muda nada.
  */
 
-export type AdMetricKey = "spend" | "conversations" | "sales" | "revenue" | "impressions" | "reach" | "views" | "thruplays" | "engagements" | "link_clicks" | "leads";
+export type AdMetricKey = "spend" | "conversations" | "sales" | "revenue" | "impressions" | "reach" | "views" | "thruplays" | "engagements" | "link_clicks" | "leads" | ExtraMetricKey;
 
-export const AD_METRICS: Array<{ key: AdMetricKey; label: string; money?: boolean; rowKey: string }> = [
-  { key: "spend", label: "Investimento (R$)", money: true, rowKey: "spent_amount" },
-  { key: "conversations", label: "Conversas / mensagens", rowKey: "messages" },
-  { key: "sales", label: "Vendas", rowKey: "sales" },
-  { key: "revenue", label: "Faturamento (R$)", money: true, rowKey: "generated_revenue" },
-  { key: "impressions", label: "Impressões", rowKey: "impressions" },
-  { key: "reach", label: "Alcance", rowKey: "reach" },
-  { key: "views", label: "Visualizações", rowKey: "views" },
-  { key: "thruplays", label: "ThruPlays", rowKey: "thruplays" },
-  { key: "engagements", label: "Interações", rowKey: "engagements" },
-  { key: "link_clicks", label: "Cliques no link", rowKey: "link_clicks" },
-  { key: "leads", label: "Leads", rowKey: "leads" },
+/**
+ * Campos do "Atualizar resultados", na ordem e na seção em que aparecem.
+ * Cliques no link ficam em Engajamento e NUNCA se confundem com conversas.
+ */
+export const AD_METRICS: Array<{ key: AdMetricKey; label: string; money?: boolean; rowKey: string; section: MetricSection }> = [
+  { key: "spend", label: "Investimento (R$)", money: true, rowKey: "spent_amount", section: "principal" },
+  { key: "conversations", label: "Conversas / mensagens", rowKey: "messages", section: "principal" },
+  { key: "sales", label: "Vendas", rowKey: "sales", section: "principal" },
+  { key: "revenue", label: "Faturamento (R$)", money: true, rowKey: "generated_revenue", section: "principal" },
+  { key: "impressions", label: "Impressões", rowKey: "impressions", section: "principal" },
+  { key: "reach", label: "Alcance", rowKey: "reach", section: "principal" },
+  { key: "engagements", label: "Interações", rowKey: "engagements", section: "principal" },
+  { key: "leads", label: "Leads", rowKey: "leads", section: "principal" },
+  { key: "reactions", label: "Reações à publicação", rowKey: "reactions", section: "engajamento" },
+  { key: "comments", label: "Comentários", rowKey: "comments", section: "engajamento" },
+  { key: "shares", label: "Compartilhamentos", rowKey: "shares", section: "engajamento" },
+  { key: "new_followers", label: NEW_FOLLOWERS_LABEL, rowKey: "new_followers", section: "engajamento" },
+  { key: "link_clicks", label: "Cliques no link", rowKey: "link_clicks", section: "engajamento" },
+  { key: "views", label: "Visualizações", rowKey: "views", section: "video" },
+  { key: "video_plays_3s", label: "Reproduções de 3 segundos", rowKey: "video_plays_3s", section: "video" },
+  { key: "thruplays", label: "ThruPlays", rowKey: "thruplays", section: "video" },
+  { key: "video_p75", label: "Visualizações de 75%", rowKey: "video_p75", section: "video" },
+  { key: "video_p100", label: "Visualizações de 100%", rowKey: "video_p100", section: "video" },
 ];
+
+/** Campos que só existem após a migration 20261106100000. */
+export const isExtraMetric = (k: AdMetricKey): k is ExtraMetricKey => (EXTRA_METRIC_KEYS as readonly string[]).includes(k);
 
 /** Campos mostrados primeiro conforme o tipo de resultado do conjunto/campanha (os demais ficam em "mais indicadores"). */
 export function primaryMetrics(type: ResultType | "misto" | null): AdMetricKey[] {

@@ -4,12 +4,15 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { effectivePeriodRows, isManualUpdate, mergeAdLevelResults, type PeriodMetricFullRow } from "@/lib/clt/ad-metrics";
-import { planAdResultUpdate, validateReference, type AdMetricKey, type CountedRow, type UpdateRow } from "@/lib/clt/ad-result-update";
+import { isExtraMetric, planAdResultUpdate, validateReference, type AdMetricKey, type CountedRow, type UpdateRow } from "@/lib/clt/ad-result-update";
+import { EXTRA_COLUMNS } from "@/lib/clt/result-metrics";
 import { todayKeySaoPaulo } from "@/lib/format";
 import type { CltAdLevelResult } from "@/types/database.types";
 
 type State = { error?: string; success?: string };
 const MIGRATION = "Aplique a migração 20261104110000_clt_ad_result_updates.sql no Supabase para atualizar resultados.";
+const MIGRATION_EXTRA = "Para salvar engajamento e vídeo (reações, comentários, compartilhamentos, novos seguidores, reproduções de 3s, 75% e 100%), aplique a migração 20261106100000_clt_ad_engagement_video_metrics.sql no Supabase.";
+const PERIOD_COLUMNS = "id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads,source,views,thruplays,engagements";
 const missing = (e: { code?: string; message?: string }) => ["42703", "PGRST204", "42P01", "PGRST205", "PGRST202", "42883"].includes(String(e.code));
 
 function refreshViews() {
@@ -65,15 +68,21 @@ export async function updateCltAdResultsAction(creativeId: string, values: Parti
     const { data: campaign } = set ? await db.from("clt_campaigns").select("id,starts_on").eq("id", set.campaign_id).eq("user_id", user.id).maybeSingle() : { data: null };
     if (!set || !campaign) return { error: "Campanha do anúncio não encontrada." };
 
-    const [period, manual, profile] = await Promise.all([
-      db.from("clt_ad_period_metrics").select("id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads,source,views,thruplays,engagements").eq("creative_id", creativeId).eq("user_id", user.id),
+    // Colunas de engajamento/vídeo só existem após a migration 20261106100000: sem ela, segue sem esses campos.
+    const readPeriod = async (columns: string): Promise<{ data: unknown[] | null; error: { code?: string; message: string } | null }> =>
+      await db.from("clt_ad_period_metrics").select(columns).eq("creative_id", creativeId).eq("user_id", user.id);
+    let period = await readPeriod(`${PERIOD_COLUMNS},${EXTRA_COLUMNS}`);
+    const extrasReady = !period.error;
+    if (period.error && ["42703", "PGRST204"].includes(String(period.error.code))) period = await readPeriod(PERIOD_COLUMNS);
+    if (!extrasReady && Object.entries(values).some(([k, v]) => isExtraMetric(k as AdMetricKey) && v !== null && v !== undefined)) return { error: MIGRATION_EXTRA };
+    const [manual, profile] = await Promise.all([
       db.from("clt_ad_level_results").select("*").eq("creative_id", creativeId).eq("user_id", user.id),
       db.from("profiles").select("name").eq("id", user.id).maybeSingle(),
     ]);
     if (period.error) return { error: missing(period.error) ? MIGRATION : period.error.message };
     if (manual.error && !missing(manual.error)) return { error: manual.error.message };
 
-    const periodRows = (period.data ?? []) as PeriodMetricFullRow[];
+    const periodRows = (period.data ?? []) as unknown as PeriodMetricFullRow[];
     const rows = mergeAdLevelResults((manual.data ?? []) as CltAdLevelResult[], periodRows).rows.filter((r) => r.creative_id === creativeId) as unknown as CountedRow[];
     const updateRows = effectivePeriodRows(periodRows).filter(isManualUpdate).map((r) => ({ ...r, period_start: String(r.period_start).slice(0, 10), period_end: String(r.period_end).slice(0, 10) })) as unknown as UpdateRow[];
 

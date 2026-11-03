@@ -1,4 +1,5 @@
 import type { CltAdLevelResult } from "@/types/database.types";
+import { EXTRA_METRIC_KEYS, type ExtraMetricKey } from "@/lib/clt/result-metrics";
 
 /**
  * Métricas importadas por anúncio e período (`clt_ad_period_metrics`)
@@ -33,6 +34,14 @@ export type PeriodMetricFullRow = {
   views?: number | null;
   thruplays?: number | null;
   engagements?: number | null;
+  /** Engajamento e vídeo — migration 20261106100000 (ausentes antes dela = não informado). */
+  reactions?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  new_followers?: number | null;
+  video_plays_3s?: number | null;
+  video_p75?: number | null;
+  video_p100?: number | null;
   /** 'import' (padrão) ou 'manual_update' ("Atualizar resultados"). */
   source?: string | null;
 };
@@ -40,7 +49,7 @@ export type PeriodMetricFullRow = {
 /** Campos de `CltAdLevelResult` que o período nunca traz (sempre "não informado"). */
 const NOT_IMPORTED = ["profile_visits", "appointments"] as const;
 
-export type AdLevelRow = CltAdLevelResult & {
+export type AdLevelRow = CltAdLevelResult & Partial<Record<ExtraMetricKey, number>> & {
   /** Presentes só nas linhas por período (importadas ou atualizações manuais). */
   period_start?: string;
   period_end?: string;
@@ -66,7 +75,7 @@ const num = (v: number | string | null | undefined) => (v === null || v === unde
 const day = (d: string) => String(d).slice(0, 10);
 
 export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
-  const fields: Array<[keyof CltAdLevelResult, number | null]> = [
+  const fields: Array<[keyof CltAdLevelResult | ExtraMetricKey, number | null]> = [
     ["spent_amount", num(m.spend)],
     ["messages", num(m.conversations)],
     ["sales", num(m.sales)],
@@ -78,6 +87,7 @@ export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
     ["views", num(m.views)],
     ["thruplays", num(m.thruplays)],
     ["engagements", num(m.engagements)],
+    ...EXTRA_METRIC_KEYS.map((k) => [k, num(m[k])] as [ExtraMetricKey, number | null]),
   ];
   const row = {
     id: `period:${m.id}`,

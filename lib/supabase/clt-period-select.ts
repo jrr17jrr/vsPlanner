@@ -1,26 +1,37 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { EXTRA_COLUMNS } from "@/lib/clt/result-metrics";
 
 /**
- * Leitura de `clt_ad_period_metrics` com as colunas da migration
- * 20261104110000 (origem e visualizações/ThruPlays/interações). Antes dela,
- * a consulta é refeita sem essas colunas — as telas continuam funcionando,
- * só sem as atualizações manuais.
+ * Leitura de `clt_ad_period_metrics` tolerante a migrations pendentes:
+ *  1. base + extras + engajamento/vídeo (migration 20261106100000);
+ *  2. base + extras (origem e visualizações/ThruPlays/interações — 20261104110000);
+ *  3. só base.
+ * As telas continuam funcionando em qualquer estágio; `engagementVideo`
+ * diz se as colunas novas existem (sem elas, os campos ficam desativados).
  */
 const MISSING_COLUMN = ["42703", "PGRST204"];
+
+type Filter = (q: ReturnType<ReturnType<SupabaseClient["from"]>["select"]>) => PromiseLike<{ data: unknown[] | null; error: { code?: string; message: string } | null }>;
 
 export async function selectAdPeriodMetrics(
   db: unknown,
   baseColumns: string,
   extraColumns: string,
-  filter: (q: ReturnType<ReturnType<SupabaseClient["from"]>["select"]>) => PromiseLike<{ data: unknown[] | null; error: { code?: string; message: string } | null }>,
-): Promise<{ data: Record<string, unknown>[]; error: { code?: string; message: string } | null }> {
+  filter: Filter,
+  options: { engagementVideo?: boolean } = {},
+): Promise<{ data: Record<string, unknown>[]; error: { code?: string; message: string } | null; engagementVideo: boolean }> {
   const client = db as SupabaseClient;
-  const first = await filter(client.from("clt_ad_period_metrics").select(`${baseColumns},${extraColumns}`));
-  if (!first.error || !MISSING_COLUMN.includes(String(first.error.code))) return { data: (first.data ?? []) as Record<string, unknown>[], error: first.error };
-  const second = await filter(client.from("clt_ad_period_metrics").select(baseColumns));
-  return { data: (second.data ?? []) as Record<string, unknown>[], error: second.error };
+  const tiers = [...(options.engagementVideo ? [`${baseColumns},${extraColumns},${EXTRA_COLUMNS}`] : []), `${baseColumns},${extraColumns}`, baseColumns];
+  let last: { data: unknown[] | null; error: { code?: string; message: string } | null } = { data: [], error: null };
+  for (let i = 0; i < tiers.length; i++) {
+    last = await filter(client.from("clt_ad_period_metrics").select(tiers[i]));
+    if (!last.error || !MISSING_COLUMN.includes(String(last.error.code))) {
+      return { data: (last.data ?? []) as Record<string, unknown>[], error: last.error, engagementVideo: !!options.engagementVideo && i === 0 && !last.error };
+    }
+  }
+  return { data: (last.data ?? []) as Record<string, unknown>[], error: last.error, engagementVideo: false };
 }
 
 export const PERIOD_EXTRA_COLUMNS = "creative_id,source,views,thruplays,engagements";

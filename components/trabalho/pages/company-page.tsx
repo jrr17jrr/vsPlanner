@@ -59,7 +59,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  supabase.from("clt_audiences").select("*").eq("company_id",id).order("created_at",{ascending:false}),
  supabase.from("clt_ad_level_results").select("*").in("campaign_id",campaignFilter),
  // Métricas importadas por anúncio/período: alimentam campanha, conjunto e anúncio (o importado prevalece sobre lançamentos antigos do mesmo período).
- selectAdPeriodMetrics(db,"id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads","source,views,thruplays,engagements",q=>q.eq("company_id",id)),
+ selectAdPeriodMetrics(db,"id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads","source,views,thruplays,engagements",q=>q.eq("company_id",id),{engagementVideo:true}),
  db.from("clt_campaign_reconciliations").select("campaign_id,period_start,period_end,reported_spend,reported_conversations,unallocated_spend,unallocated_conversations,notes").eq("company_id",id),
  db.from("clt_ad_account_movements").select("id,movement_date,kind,amount,notes").eq("company_id",id).order("movement_date",{ascending:false}).limit(50),
  db.from("clt_instagram_followers").select("id,company_id,followers,recorded_at").eq("company_id",id).order("recorded_at",{ascending:false}),
@@ -121,7 +121,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  </div>
  <CompanyTabs initialTab={initialTab} panels={{
   "visao-geral":overview,
-  campanhas:<TrafficManager companyId={id} companyName={company.name} audiences={audiences} month={month} budget={budget} campaigns={campaigns} results={mergedResults.legacyKept} sets={sets} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null} adUpdates={adUpdates} adUpdatesAvailable={adUpdatesAvailable} periodChanges={periodChanges}/>,
+  campanhas:<TrafficManager companyId={id} companyName={company.name} audiences={audiences} month={month} budget={budget} campaigns={campaigns} results={mergedResults.legacyKept} sets={sets} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null} adUpdates={adUpdates} adUpdatesAvailable={adUpdatesAvailable} periodChanges={periodChanges} extrasAvailable={periodQuery.engagementVideo}/>,
   publicos:<AudienceManager companyId={id} companyName={company.name} audiences={audiences} usage={usage}/>,
   tarefas:<CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={occurrences}/>,
   financeiro:<CompanyFinance company={company} month={month} budget={budget} totalSpent={spent} monthSpent={monthSpent} movements={(movementsQuery.error?[]:movementsQuery.data||[]) as AccountMovement[]} movementsAvailable={!movementsQuery.error} basePath={base}/>,
