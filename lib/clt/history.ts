@@ -395,9 +395,10 @@ export function compareInsight(summaries: HistorySummary[], objective: ResultTyp
 }
 
 /** Pontos elegíveis para custo por mensagem (usados pelos painéis/relatórios existentes). */
-export type MessagingPoint = { campaign_id: string; company_id: string; date: string; month: string; spend: number; messages: number };
+/** `period_start`/`period_end`: intervalo real do dado (importado por período ou dia do lançamento) — usado pelos relatórios com período personalizado. */
+export type MessagingPoint = { campaign_id: string; company_id: string; date: string; month: string; spend: number; messages: number; period_start?: string; period_end?: string };
 export function messagingPoints(facts: HistoryFact[]): MessagingPoint[] {
-  return facts.filter(f => f.type === "mensagens").map(f => ({ campaign_id: f.campaign_id, company_id: f.company_id, date: f.date, month: f.month, spend: f.m.spend ?? 0, messages: f.m.messages ?? 0 }));
+  return facts.filter(f => f.type === "mensagens").map(f => ({ campaign_id: f.campaign_id, company_id: f.company_id, date: f.date, month: f.month, spend: f.m.spend ?? 0, messages: f.m.messages ?? 0, period_start: f.period_start, period_end: f.period_end }));
 }
 export function messagingCost(points: MessagingPoint[]): { spend: number; messages: number; cost: number | null } {
   const spend = round2(points.reduce((a, p) => a + p.spend, 0));

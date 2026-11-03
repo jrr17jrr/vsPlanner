@@ -4,6 +4,7 @@ import { CltReportClient } from "@/components/trabalho/clt-report-client";
 import { ModulePendingNotice } from "@/components/trabalho/pages/module-pending-notice";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { withImportedPeriodResults } from "@/lib/supabase/clt-period-results";
+import { importedPeriodStart } from "@/lib/clt/period-results";
 import { loadHistoryInput } from "@/lib/supabase/clt-history-data";
 import { getModuleScope, inList } from "@/lib/supabase/clt-scope";
 import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
@@ -41,7 +42,9 @@ export async function CltReportsPage({ module }: { module: CltModule }) {
   const history = await loadHistoryInput(s, (campaigns.data || []).map(c => ({ id: c.id, company_id: c.company_id, name: c.name, objective: c.objective, starts_on: c.starts_on, ends_on: c.ends_on, campaign_status: c.campaign_status ?? null })));
   const messaging = messagingPoints(buildHistoryFacts(history).facts);
   const note = merged.crossMonthPeriods ? " Resultados importados por período aparecem no mês em que o período termina." : "";
+  // Início real de cada resultado importado por período: o intervalo de dias não rateia períodos que cruzam a borda.
+  const reportResults = merged.results.map(r => ({ ...r, period_start: importedPeriodStart(r) }));
   const companies = scope.companies.filter(c => c.is_active).map(c => ({ id: c.id, name: c.name, current_ad_balance: c.current_ad_balance }));
   const title = module === "mkt" ? "Relatórios MKT" : "Relatórios CLT";
-  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e mês, registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={merged.results} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
+  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e período (mês, intervalo de dias, intervalo de meses ou ano), registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={reportResults} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
 }

@@ -69,6 +69,12 @@ export function mergePeriodResults<T extends LegacyResultRow>(legacy: T[], perio
   };
 }
 
+/** Início do período de um resultado importado (id `import:<campanha>:<início>:<fim>`); null para lançamentos de um dia. */
+export function importedPeriodStart(entry: { id?: string | null }): string | null {
+  const parts = entry.id?.startsWith("import:") ? entry.id.split(":") : null;
+  return parts && parts.length === 4 ? parts[2] : null;
+}
+
 /** Períodos importados no formato de `clt_campaign_result_entries` (o que dashboards, análises e o PDF já usam). */
 export function periodResultsToEntries(imported: PeriodResult[]): CltCampaignResultEntry[] {
   return imported.map(p => ({
