@@ -19,6 +19,7 @@ import {
   calculateMRR,
   financialMonthOverview,
   listChargesForKind,
+  isOpenEndedDebt,
   clientBillingSnapshot,
   recurringRevenueByService,
 } from "@/lib/financial-calc";
@@ -145,7 +146,7 @@ export default async function VisionarioOverviewPage() {
     const incoming = listChargesForKind(charges, payments, "entrada", today);
     const outgoing = listChargesForKind(charges, payments, "saida", today);
 
-    const debt = charges.find(c => c.kind === "saida" && c.description === "Dívida — Ex-sócio G");
+    const debt = charges.find(isOpenEndedDebt);
     if (debt) {
       const paid = payments.filter(p => p.charge_id === debt.id).reduce((sum,p)=>sum+Number(p.amount),0);
       formerPartnerDebt = { total: Number(debt.amount), paid, remaining: Math.max(0,Number(debt.amount)-paid) };

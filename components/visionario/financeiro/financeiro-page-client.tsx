@@ -29,7 +29,7 @@ import { ChartCard } from "@/components/shared/chart-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, ScrollableTabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { NovaMovimentacaoDialog } from "@/components/visionario/financeiro/nova-movimentacao-dialog";
 import { ChargesList } from "@/components/visionario/financeiro/charges-list";
@@ -44,6 +44,7 @@ import {
   financialMonthOverview,
   upcomingOpenCharges,
   remainingAmount,
+  isOpenEndedDebt,
   type ReceivablePayable,
 } from "@/lib/financial-calc";
 import { chargeBadgeStatus } from "@/lib/finance-labels";
@@ -141,7 +142,7 @@ export function FinanceiroPageClient({
   const router = useRouter();
   const [debtBusy, setDebtBusy] = useState(false);
   const [payDebt, setPayDebt] = useState(false);
-  const formerDebt = charges.find(c => c.kind === "saida" && c.description === "Dívida — Ex-sócio G");
+  const formerDebt = charges.find(isOpenEndedDebt);
   const formerDebtPayments = formerDebt ? payments.filter(p => p.charge_id === formerDebt.id) : [];
   const formerDebtPaid = formerDebtPayments.reduce((total,p)=>total+Number(p.amount),0);
   const formerDebtRemaining = formerDebt ? Math.max(0,Number(formerDebt.amount)-formerDebtPaid) : 0;
@@ -175,7 +176,7 @@ export function FinanceiroPageClient({
   const { aReceber, aPagar, resultado } = overview;
   const nextMonth = shiftMonthKey(selectedMonth, 1);
   const nextMonthBills = useMemo(() => charges
-    .filter((charge) => charge.kind === "saida" && charge.status !== "cancelado" && charge.due_date.startsWith(nextMonth))
+    .filter((charge) => charge.kind === "saida" && charge.status !== "cancelado" && !isOpenEndedDebt(charge) && charge.due_date.startsWith(nextMonth))
     .map((charge) => ({ charge, remaining: remainingAmount(charge, payments) }))
     .filter((row) => row.remaining > 0)
     .sort((a, b) => a.charge.due_date.localeCompare(b.charge.due_date)), [charges, payments, nextMonth]);
@@ -227,14 +228,14 @@ export function FinanceiroPageClient({
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList className="flex-wrap">
+        <ScrollableTabsList aria-label="Seções do financeiro">
           <TabsTrigger value="visao">Visão geral</TabsTrigger>
           {scope === "pessoal" && <TabsTrigger value="categorias">Gastos por categoria</TabsTrigger>}
           <TabsTrigger value="movimentacoes">Movimentações</TabsTrigger>
           <TabsTrigger value="a_receber">A receber</TabsTrigger>
           <TabsTrigger value="a_pagar">A pagar</TabsTrigger>
           <TabsTrigger value="config">Contas e categorias</TabsTrigger>
-        </TabsList>
+        </ScrollableTabsList>
       </Tabs>
 
       {tab === "visao" && (

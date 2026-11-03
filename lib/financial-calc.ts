@@ -20,6 +20,23 @@ import { daysBetweenKeys, monthlyFactor, nextOccurrence, parseDateKey } from "@/
 
 export type ChargePaymentStatus = "cancelado" | "pendente" | "parcial" | "pago";
 
+/** Descrição fixa da dívida com o ex-sócio (criada por `initializeFormerPartnerDebtAction`). */
+export const FORMER_PARTNER_DEBT_DESCRIPTION = "Dívida — Ex-sócio G";
+
+/**
+ * Dívida sem vencimento real (paga conforme disponibilidade): tem cartão
+ * próprio com pagamentos parciais, mas NÃO é conta a pagar — fica fora de
+ * "A pagar", "Atrasado", listas de contas e alertas de atraso. Os
+ * pagamentos dela continuam sendo saída de caixa normal (saldo, pago no
+ * mês, resultado), porque esses cálculos partem dos pagamentos.
+ */
+export function isOpenEndedDebt(charge: Pick<FinancialCharge, "kind" | "description">): boolean {
+  return charge.kind === "saida" && charge.description.trim() === FORMER_PARTNER_DEBT_DESCRIPTION;
+}
+
+/** Cobrança que conta como conta a receber/pagar (exclui dívida sem vencimento). */
+const countsAsBill = (charge: FinancialCharge) => !isOpenEndedDebt(charge);
+
 const roundCents = (value: number) => Math.round(value * 100) / 100;
 
 export function paidAmountFor(chargeId: string, payments: FinancialPayment[]): number {
@@ -91,7 +108,7 @@ export function listChargesForKind(
   today: string = todayKeySaoPaulo()
 ): ReceivablePayable[] {
   return charges
-    .filter((c) => c.kind === kind && c.status !== "cancelado")
+    .filter((c) => c.kind === kind && c.status !== "cancelado" && countsAsBill(c))
     .map((charge) => {
       const status = chargeStatus(charge, payments);
       const paid = paidAmountFor(charge.id, payments);
@@ -129,7 +146,7 @@ export function cashFlowForecast(
 
   const pendingInWindow = (kind: "entrada" | "saida") =>
     charges
-      .filter((c) => c.kind === kind && c.status !== "cancelado" && c.due_date <= horizonKey)
+      .filter((c) => c.kind === kind && c.status !== "cancelado" && countsAsBill(c) && c.due_date <= horizonKey)
       .reduce((sum, c) => sum + remainingAmount(c, payments), 0);
 
   const aReceber = pendingInWindow("entrada");
@@ -249,7 +266,7 @@ export function calculateMRR(origins: FinancialOrigin[], charges: FinancialCharg
 /** Total ainda em aberto (restante, não o valor cheio) de todas as cobranças ativas de um tipo. */
 export function pendingTotal(charges: FinancialCharge[], payments: FinancialPayment[], kind: FinancialKind): number {
   return charges
-    .filter((c) => c.kind === kind && c.status !== "cancelado")
+    .filter((c) => c.kind === kind && c.status !== "cancelado" && countsAsBill(c))
     .reduce((sum, c) => sum + remainingAmount(c, payments), 0);
 }
 
@@ -290,7 +307,7 @@ export function pendingUpToMonth(
   today: string = todayKeySaoPaulo()
 ): PendingSummary {
   const open = charges
-    .filter((c) => c.kind === kind && c.status !== "cancelado" && isDueUpToMonth(c, monthKey))
+    .filter((c) => c.kind === kind && c.status !== "cancelado" && countsAsBill(c) && isDueUpToMonth(c, monthKey))
     .map((c) => ({ charge: c, remaining: remainingAmount(c, payments) }))
     .filter((x) => x.remaining > 0);
   const sum = (xs: typeof open) => roundCents(xs.reduce((s, x) => s + x.remaining, 0));

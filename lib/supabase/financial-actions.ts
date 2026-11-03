@@ -15,6 +15,7 @@ import {
 } from "@/lib/supabase/finance-core";
 import type { FinancialScope } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
+import { FORMER_PARTNER_DEBT_DESCRIPTION } from "@/lib/financial-calc";
 import {
   addMonthsKey,
   firstDueOnOrAfter,
@@ -922,7 +923,7 @@ export async function createPartnerExpenseAction(input: {
 export async function initializeFormerPartnerDebtAction(): Promise<ActionState> {
   const { space } = await requireScopedModulePermission("visionario", "financeiro", "create");
   const supabase = await createSupabaseServerClient();
-  const description = "Dívida — Ex-sócio G";
+  const description = FORMER_PARTNER_DEBT_DESCRIPTION;
   const { data: existing, error: lookupError } = await supabase.from("financial_charges")
     .select("id").eq("space_id", space.id).eq("description", description).limit(1);
   if (lookupError) return { error: lookupError.message };
