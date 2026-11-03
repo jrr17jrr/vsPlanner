@@ -58,6 +58,19 @@ export function followerPeriodSummary(records: FollowerRecord[], from: string, t
   return { start, end, growth: enough ? followerGrowth(end!.followers, start!.followers) : null, enough };
 }
 
+export type CompanyFollowerOverview = {
+  /** Último registro disponível (independente do período). */
+  latest: FollowerRecord | null;
+  /** Variação dentro do período (null = sem comparação possível). */
+  growth: FollowerGrowth | null;
+};
+
+/** Card da empresa: contagem atual + variação no período `[from, to]`. Nunca mistura empresas. */
+export function companyFollowerOverview(records: FollowerRecord[], companyId: string, from: string, to: string): CompanyFollowerOverview {
+  const own = records.filter((r) => r.company_id === companyId);
+  return { latest: sortFollowerRecords(own)[0] ?? null, growth: followerPeriodSummary(own, from, to).growth };
+}
+
 /** Período de um mês yyyy-MM. */
 export function monthBounds(month: string): { from: string; to: string } {
   const [y, m] = month.split("-").map(Number);

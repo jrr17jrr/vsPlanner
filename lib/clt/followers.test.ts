@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { followerGrowth, followerPeriodSummary, followerSnapshot, formatFollowerDiff, formatFollowerPct, monthBounds, type FollowerRecord } from "./followers";
+import { companyFollowerOverview, followerGrowth, followerPeriodSummary, followerSnapshot, formatFollowerDiff, formatFollowerPct, monthBounds, type FollowerRecord } from "./followers";
 
 const rec = (id: string, followers: number, recorded_at: string, company_id = "a"): FollowerRecord => ({ id, company_id, followers, recorded_at });
 
@@ -58,6 +58,22 @@ describe("seguidores do Instagram", () => {
   it("primeiro registro dentro do mês vira o início quando não há anterior", () => {
     const s = followerPeriodSummary([rec("1", 233, "2026-11-03T15:00:00Z"), rec("2", 250, "2026-11-20T15:00:00Z")], "2026-11-01", "2026-11-30");
     expect(s.growth?.diff).toBe(17);
+  });
+
+  it("card da empresa: atual = último registro; variação só no período; empresas não se misturam", () => {
+    const records = [
+      rec("a1", 233, "2026-10-31T20:00:00Z", "a"), rec("a2", 250, "2026-11-20T15:00:00Z", "a"),
+      rec("b1", 900, "2026-11-02T15:00:00Z", "b"), rec("b2", 1000, "2026-11-25T15:00:00Z", "b"),
+    ];
+    const nov = companyFollowerOverview(records, "a", "2026-11-01", "2026-11-30");
+    expect(nov.latest?.followers).toBe(250);
+    expect([nov.growth?.diff, formatFollowerPct(nov.growth!.pct)]).toEqual([17, "+7,30%"]);
+    // Mês passado: só um registro até o fim de outubro → sem comparação, mas o atual continua 250.
+    const oct = companyFollowerOverview(records, "a", "2026-10-01", "2026-10-31");
+    expect([oct.latest?.followers, oct.growth]).toEqual([250, null]);
+    // Todo o período.
+    expect(companyFollowerOverview(records, "b", "0000-01-01", "2026-11-30").growth?.diff).toBe(100);
+    expect(companyFollowerOverview(records, "c", "2026-11-01", "2026-11-30")).toEqual({ latest: null, growth: null });
   });
 
   it("monthBounds respeita meses curtos", () => {

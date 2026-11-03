@@ -49,6 +49,29 @@ describe("Empresas do CLT (sem mudança visual)", () => {
   });
 });
 
+describe("Seguidores do Instagram nos cards", () => {
+  // Registro do último dia do mês passado e outro agora → comparação de "Este mês" (filtro padrão).
+  const monthStart = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }).slice(0, 7) + "-01";
+  const lastDayPrev = new Date(Date.parse(monthStart + "T12:00:00Z") - 86_400_000).toISOString().slice(0, 10);
+  const followers = [
+    { id: "f1", company_id: "a", followers: 233, recorded_at: lastDayPrev + "T15:00:00Z" },
+    { id: "f2", company_id: "a", followers: 250, recorded_at: new Date().toISOString() },
+    { id: "f3", company_id: "b", followers: 80, recorded_at: new Date().toISOString() },
+  ];
+  const html = renderToStaticMarkup(<CompaniesClient companies={[company("a", "AIV"), company("b", "Beta"), company("c", "Gama")]} responsibles={[]} campaigns={[]} results={[]} followers={followers} />);
+  const cards = text(html).split("Editar empresa");
+
+  it("mostra atual, variação e percentual em verde (+17, +7,30%)", () => {
+    expect(cards[0]).toContain("Seguidores do Instagram 250 +17 seguidores (+7,30%) · este mês");
+    expect(html).toMatch(/text-success[^"]*"[^>]*>.*\+17 seguidores/);
+  });
+  it("um registro só: sem comparação; sem registros: não informado — sem misturar empresas", () => {
+    expect(cards[1]).toContain("Seguidores do Instagram 80 Sem comparação disponível");
+    expect(cards[2]).toContain("Seguidores do Instagram Não informado");
+    expect(cards[1]).not.toContain("250");
+  });
+});
+
 describe("menu", () => {
   it("MKT fica logo abaixo de Clientes na Visionário Dev, com as 7 páginas (Planejamento e Importar foram para a Central de Importação)", () => {
     const g = NAV_GROUPS.find(x => x.label === "Visionário Dev")!;

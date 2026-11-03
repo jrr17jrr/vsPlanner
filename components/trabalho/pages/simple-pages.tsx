@@ -17,6 +17,8 @@ import { loadHistoryInput } from "@/lib/supabase/clt-history-data";
 import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import { MODULES, type CltModule } from "@/lib/clt/module";
 import type { CltCampaignResultEntry } from "@/types/database.types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { FollowerRecord } from "@/lib/clt/followers";
 
 /**
  * Telas do Trabalho / CLT reaproveitadas pelo MKT. Cada uma recebe o módulo
@@ -38,9 +40,13 @@ export async function CltDashboardPage({ module }: { module: CltModule }) {
 
 export async function CltCompaniesPage({ module, clients = [] }: { module: CltModule; clients?: { id: string; name: string }[] }) {
   const d = await getCltDashboardData(module);
-  const { merged } = await resultsFor(d.campaigns.map(c => c.id));
+  const { s, merged } = await resultsFor(d.campaigns.map(c => c.id));
+  // Seguidores do Instagram só das empresas deste módulo (RLS: só do dono). Erro/migration pendente = sem seção, página segue normal.
+  const companyIds = d.companies.map(c => c.id);
+  const followers = companyIds.length ? await (s as unknown as SupabaseClient).from("clt_instagram_followers").select("id,company_id,followers,recorded_at").in("company_id", companyIds) : { data: [], error: null };
+  if (followers.error) console.error("Instagram followers (lista de empresas)", followers.error);
   const description = module === "mkt" ? "Cadastre, edite e acompanhe as empresas do MKT: as suas e as dos clientes da Visionário Dev." : "Cadastre, edite e acompanhe as empresas do Trabalho / CLT.";
-  return <div className="space-y-4"><PageHeader title="Empresas" description={description} /><ModulePendingNotice module={module} ready={d.moduleReady} /><CompaniesClient companies={d.companies} responsibles={d.responsibles} campaigns={d.campaigns} results={merged.results} clients={clients} /></div>;
+  return <div className="space-y-4"><PageHeader title="Empresas" description={description} /><ModulePendingNotice module={module} ready={d.moduleReady} /><CompaniesClient companies={d.companies} responsibles={d.responsibles} campaigns={d.campaigns} results={merged.results} clients={clients} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
 }
 
 export async function CltCampaignsPage({ module }: { module: CltModule }) {
