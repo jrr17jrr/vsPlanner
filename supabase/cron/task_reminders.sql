@@ -12,8 +12,14 @@
 -- pg_cron chama a rota A CADA MINUTO via pg_net. O cron só dispara a
 -- verificação; quem entrega a notificação é o Web Push da rota.
 --
+-- ATUALIZAÇÃO (migration 20261104100000_push_cron_selfheal.sql): o passo 2
+-- abaixo passou a ser AUTOMÁTICO — o servidor de produção grava URL e
+-- segredo no Vault ao rodar a rota, ao ativar notificações ou no "Enviar
+-- teste". O passo manual continua válido como alternativa.
+--
 -- Passo a passo (SQL Editor do Supabase de produção):
---   1. Rodar a migration 20261103100000_task_reminders_cron.sql.
+--   1. Rodar as migrations 20261103100000_task_reminders_cron.sql e
+--      20261104100000_push_cron_selfheal.sql.
 --   2. Guardar URL e segredo no Vault (troque os valores entre <>). A URL é
 --      a FINAL de produção, exatamente como aparece no navegador (sem
 --      redirecionamento: o pg_net não segue 301/307/308) e sem barra no fim.
@@ -52,6 +58,12 @@
 --    não prova que o iPhone exibiu):
 --   select event_key, status, attempts, sent_count, last_error, created_at, sent_at
 --   from public.push_delivery_log order by created_at desc limit 50;
+--
+-- Saúde do agendador sem segredos (mesmo dado do diagnóstico do app):
+--   select public.vsplanner_cron_status();
+-- Últimas execuções da rota (encontrados, enviados, falhas e motivos):
+--   select ran_at, source, local_time, due, sent, failed, no_subscription, errors
+--   from public.push_cron_runs order by ran_at desc limit 20;
 --
 -- Teste sem enviar nada (mostra o que sairia neste minuto):
 --   curl -H "Authorization: Bearer <CRON_SECRET>" "https://<domínio>/api/cron/task-reminders?dry=1"

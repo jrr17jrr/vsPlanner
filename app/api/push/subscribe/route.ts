@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { ensureCronConfigured } from "@/lib/push/cron-config";
+import type { SupabaseClient } from "@supabase/supabase-js";
 export async function POST(request: Request) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -15,6 +17,8 @@ export async function POST(request: Request) {
       user_id: user.id, endpoint: body.endpoint, subscription: body
     } as never, { onConflict: "endpoint" });
     if (error) throw error;
+    // Ativar notificações também garante o agendamento automático (só em produção).
+    await ensureCronConfigured(admin as unknown as SupabaseClient, request.url).catch(() => undefined);
     return NextResponse.json({ ok: true });
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "Falha ao salvar" }, { status: 500 }); }
 }

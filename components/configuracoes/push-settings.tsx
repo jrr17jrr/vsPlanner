@@ -3,6 +3,7 @@ import { useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { registerServiceWorker } from "@/lib/push/client";
+import { PushDiagnostics } from "@/components/configuracoes/push-diagnostics";
 function decodeKey(key: string) {
   const pad = "=".repeat((4 - key.length % 4) % 4);
   const raw = atob((key + pad).replace(/-/g, "+").replace(/_/g, "/"));
@@ -53,7 +54,9 @@ export function PushSettings() {
     try {
       const res = await fetch("/api/push/test", { method: "POST" });
       const result = await res.json();
-      setStatus(res.ok && result.sent ? "Teste enviado! Confira as notificações do iPhone." : result.error || "Nenhuma notificação entregue.");
+      const schedule = result.schedule as { ok?: boolean; skipped?: string; error?: string } | undefined;
+      const scheduleText = schedule?.error ? ` Agendador automático: ${schedule.error}.` : schedule?.ok ? " Agendador automático verificado." : "";
+      setStatus((res.ok && result.sent ? "Teste enviado! Confira as notificações do iPhone." : result.error || "Nenhuma notificação entregue.") + scheduleText);
     } catch { setStatus("Falha ao testar notificações."); }
     finally { setBusy(false); }
   }
@@ -81,5 +84,6 @@ export function PushSettings() {
       <Button size="sm" className="h-10" variant="outline" onClick={test} disabled={busy}>Enviar teste</Button>
     </div>
     {status && <p className="mt-3 text-sm" role="status">{status}</p>}
+    <PushDiagnostics />
   </Card>;
 }

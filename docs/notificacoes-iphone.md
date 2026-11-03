@@ -3,13 +3,23 @@
 ## Arquitetura (o que já é automático)
 
 - **Agendamento no servidor**: o Supabase Cron (`pg_cron` + `pg_net`) chama
-  `/api/cron/task-reminders` a cada minuto. O job é criado pela migration
-  `supabase/migrations/20261103100000_task_reminders_cron.sql`; a URL e o
-  `CRON_SECRET` ficam no Vault (passo a passo em
-  `supabase/cron/task_reminders.sql`). O cron da Vercel (`vercel.json`,
-  12:00 UTC = 09:00 em São Paulo) é só reserva: no plano Hobby ele roda 1x/dia
-  e, sozinho, quase nenhum lembrete cai na janela de 15 min. Nada depende de
-  JavaScript rodando com a página aberta.
+  `/api/cron/task-reminders` a cada minuto. Job e funções: migrations
+  `20261103100000_task_reminders_cron.sql` e
+  `20261104100000_push_cron_selfheal.sql`. A URL e o segredo ficam no Vault e
+  são gravados **pelo próprio servidor de produção** (domínio de produção da
+  Vercel + `CRON_SECRET`; sem `CRON_SECRET`, o banco gera um segredo) sempre
+  que a rota roda, alguém ativa notificações ou toca em "Enviar teste".
+  Preview/local nunca reconfiguram. O cron da Vercel (`vercel.json`, 12:00 UTC
+  = 09:00 em São Paulo) é só reserva: no plano Hobby ele roda 1x/dia e,
+  sozinho, só pega avisos das 08:45–09:00 (por isso prazo/atraso chegavam e
+  lembretes de horário não). Nada depende de JavaScript com a página aberta.
+- **Sino × push**: o sino é calculado na tela a partir das tarefas (não
+  depende do cron). O push depende do agendador. Ver o diagnóstico abaixo.
+- **Diagnóstico**: Configurações → Notificações → "Verificar notificações"
+  mostra se o agendador está rodando, aparelhos inscritos, próximos
+  lembretes (24 h) e o resultado dos últimos envios. Cada execução fica em
+  `push_cron_runs` (7 dias). "Enviado ao serviço de push" = Apple/Google
+  aceitaram; a exibição só o aparelho confirma.
 - **Financeiro**: contas vencidas aparecem no sino (não há push de
   financeiro). A dívida com o ex-sócio não é conta a pagar e não gera alerta.
 - **Regras** em `lib/push/schedule-reminders.ts` (testadas em
