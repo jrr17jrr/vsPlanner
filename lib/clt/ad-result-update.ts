@@ -52,7 +52,7 @@ export function primaryMetrics(type: ResultType | "misto" | null): AdMetricKey[]
 export type Totals = Record<AdMetricKey, number | null>;
 
 /** Linha que conta para o anúncio (formato das telas: `AdLevelRow`). */
-export type CountedRow = Record<string, unknown> & { entry_date: string; period_end?: string; unknown?: string[] };
+export type CountedRow = Record<string, unknown> & { entry_date: string; period_start?: string; period_end?: string; source?: string; unknown?: string[] };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const isMoney = (k: AdMetricKey) => k === "spend" || k === "revenue";
@@ -88,6 +88,30 @@ export type UpdatePlan = {
   delta: Partial<Record<AdMetricKey, number>>;
 };
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const br = (d: string) => d.split("-").reverse().join("/");
+
+/**
+ * Período de referência válido? Recusa datas futuras e períodos TOTALMENTE
+ * dentro de um período importado do mesmo anúncio (o importado prevalece e o
+ * valor sumiria dos totais). Usado também por "Editar período".
+ */
+export function validateReference(ref: { start: string; end: string }, today: string, rows: CountedRow[]): string | null {
+  if (!DATE_RE.test(ref.start) || !DATE_RE.test(ref.end)) return "Escolha o período dos resultados.";
+  if (ref.end < ref.start) return "A data final do período não pode ser antes da inicial.";
+  if (ref.end > today) return "O período dos resultados não pode terminar no futuro.";
+  const imp = rows.find((r) => r.source === "import" && typeof r.period_start === "string" && r.period_end && String(r.period_start) <= ref.start && String(r.period_end) >= ref.end);
+  if (imp) return `Esse período está dentro da importação de ${br(String(imp.period_start))} a ${br(String(imp.period_end))}, que prevalece — os valores não contariam. Escolha um período fora dela ou reimporte o arquivo atualizado.`;
+  return null;
+}
+
+/** "Mês de referência" → do dia 1 até o último dia (ou até hoje, no mês atual). */
+export function monthReference(month: string, today: string): { start: string; end: string } {
+  const [y, m] = month.split("-").map(Number);
+  const last = `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+  return { start: `${month}-01`, end: last > today ? today : last };
+}
+
 const addDays = (d: string, n: number) => new Date(Date.parse(d + "T12:00:00Z") + n * 86_400_000).toISOString().slice(0, 10);
 const num = (v: number | string | null | undefined) => (v === null || v === undefined || v === "" ? null : Number(v));
 
@@ -100,7 +124,17 @@ export function planAdResultUpdate(input: {
   values: Partial<Record<AdMetricKey, number | null>>;
   today: string;
   campaignStart?: string | null;
+  /**
+   * Período de REFERÊNCIA (quando os resultados aconteceram), escolhido no
+   * formulário. A data do registro fica no histórico (created_at). Sem ele,
+   * vale a regra antiga: do dia seguinte ao último dado até hoje.
+   */
+  reference?: { start: string; end: string } | null;
 }): { error: string } | UpdatePlan {
+  if (input.reference) {
+    const err = validateReference(input.reference, input.today, input.rows);
+    if (err) return { error: err };
+  }
   const prev = currentTotals(input.rows);
   const delta: Partial<Record<AdMetricKey, number>> = {};
   const updated: Partial<Record<AdMetricKey, number>> = {};
@@ -117,9 +151,20 @@ export function planAdResultUpdate(input: {
   }
   if (!Object.keys(updated).length) return { error: "Nenhum valor mudou." };
 
-  const latestUpdate = [...input.updateRows].sort((a, b) => b.period_end.localeCompare(a.period_end) || b.id.localeCompare(a.id))[0];
   const decreasing = Object.values(delta).some((d) => d! < 0);
-  const adjust = latestUpdate && (latestUpdate.period_end === input.today || decreasing) ? latestUpdate : null;
+  let adjust: UpdateRow | null;
+  if (input.reference) {
+    // Com período escolhido: só ajusta a atualização do MESMO período (nunca mexe em outro período sem você escolher).
+    const ref = input.reference;
+    adjust = input.updateRows.find((u) => u.period_start === ref.start && u.period_end === ref.end) ?? null;
+    if (!adjust && decreasing) {
+      const k = (Object.keys(delta) as AdMetricKey[]).find((x) => delta[x]! < 0)!;
+      return { error: `${AD_METRICS.find((m) => m.key === k)!.label}: o novo total é menor do que o atual. Para corrigir para baixo, escolha o MESMO período da atualização que deseja corrigir (ou use "Editar período" no histórico).` };
+    }
+  } else {
+    const latestUpdate = [...input.updateRows].sort((a, b) => b.period_end.localeCompare(a.period_end) || b.id.localeCompare(a.id))[0];
+    adjust = latestUpdate && (latestUpdate.period_end === input.today || decreasing) ? latestUpdate : null;
+  }
 
   if (adjust) {
     const values = {} as Record<AdMetricKey, number | null>;
@@ -137,7 +182,11 @@ export function planAdResultUpdate(input: {
     return { error: `${AD_METRICS.find((m) => m.key === k)!.label}: o novo total é menor do que o já registrado (${prev[k]}). Esses valores vêm de importação ou lançamentos anteriores — corrija a origem (reimporte o período).` };
   }
 
-  // Novo período: do dia seguinte ao último dado do anúncio até hoje (sem dados: desde o início da campanha).
+  if (input.reference) {
+    const values = Object.fromEntries(AD_METRICS.map((m) => [m.key, delta[m.key] ?? null])) as Record<AdMetricKey, number | null>;
+    return { mode: "novo_periodo", metricId: null, periodStart: input.reference.start, periodEnd: input.reference.end, values, previous, updated, delta };
+  }
+  // Sem período escolhido: do dia seguinte ao último dado do anúncio até hoje (sem dados: desde o início da campanha).
   const lastDay = input.rows.map((r) => String(r.period_end ?? r.entry_date).slice(0, 10)).sort().at(-1);
   let start = lastDay ? addDays(lastDay, 1) : input.campaignStart && input.campaignStart <= input.today ? input.campaignStart : input.today;
   if (start > input.today) start = input.today;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, CalendarDays, CheckCircle2, Clock, ExternalLink, Mail, Phone, Wallet } from "lucide-react";
+import { ArrowLeft, Building2, Clock, ExternalLink, Mail, Phone, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,8 @@ import { MonthlyVideoPlanSeeder } from "@/components/trabalho/company/monthly-vi
 import { InstagramFollowersCard } from "@/components/trabalho/company/instagram-followers-card";
 import type { FollowerRecord } from "@/lib/clt/followers";
 import { selectAdPeriodMetrics } from "@/lib/supabase/clt-period-select";
-import type { AdResultUpdate } from "@/components/trabalho/ad-results-update";
+import { importedPeriodStart } from "@/lib/clt/period-results";
+import type { AdResultPeriodChange, AdResultUpdate } from "@/components/trabalho/ad-results-update";
 import { loadHistoryInput } from "@/lib/supabase/clt-history-data";
 import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
@@ -50,7 +51,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  const campaigns=data.campaigns.filter(c=>c.company_id===id);
  const companyCampaignIds=campaigns.map(c=>c.id);
  const campaignFilter=companyCampaignIds.length?companyCampaignIds:["00000000-0000-0000-0000-000000000000"];
- const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery,levelResultsQuery,periodQuery,reconciliationQuery,movementsQuery,followersQuery,adUpdatesQuery]=await Promise.all([
+ const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery,levelResultsQuery,periodQuery,reconciliationQuery,movementsQuery,followersQuery,adUpdatesQuery,periodChangesQuery]=await Promise.all([
  supabase.from("clt_monthly_budgets").select("*").eq("company_id",id).eq("month_key",month+"-01").maybeSingle(),
  supabase.from("clt_campaign_result_entries").select("*").in("campaign_id",campaignFilter),
  supabase.from("clt_ad_sets").select("*").in("campaign_id",campaignFilter),
@@ -64,6 +65,8 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  db.from("clt_instagram_followers").select("id,company_id,followers,recorded_at").eq("company_id",id).order("recorded_at",{ascending:false}),
  // Histórico de "Atualizar resultados" dos anúncios (migration 20261104110000; sem ela, vazio).
  db.from("clt_ad_result_updates").select("id,creative_id,period_start,period_end,mode,previous,updated,delta,updated_by_name,created_at").eq("company_id",id).order("created_at",{ascending:false}).limit(500),
+ // Correções de período ("Editar período") — migration 20261105100000; sem ela, vazio.
+ db.from("clt_ad_result_period_changes").select("id,update_id,old_start,old_end,new_start,new_end,changed_by_name,created_at").eq("company_id",id).order("created_at",{ascending:false}).limit(500),
  ]);
  if(periodQuery.error&&!missingTable(periodQuery.error.code))throw periodQuery.error;
  // Seguidores: tabela nova — erro (ex.: migration pendente) só desativa o card, nunca derruba a página.
@@ -77,6 +80,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  const levelRows=mergeAdLevelResults((levelResultsQuery.data||[]) as CltAdLevelResult[],periodRows).rows;
  const adUpdates=(adUpdatesQuery.error?[]:adUpdatesQuery.data||[]) as AdResultUpdate[];
  const adUpdatesAvailable=!adUpdatesQuery.error;
+ const periodChanges=(periodChangesQuery.error?[]:periodChangesQuery.data||[]) as AdResultPeriodChange[];
  const audiences=(audiencesQuery.data||[]) as AudienceRecord[];
  const sets=(setsQuery.data||[]) as CltAdSet[];
  // Vínculos públicos ↔ conjuntos (somente leitura, por saved_audience_id).
@@ -94,8 +98,8 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
 
  const overview=<>
  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
- {([{label:"Saldo da Meta",value:money(Number(company.current_ad_balance)),icon:Wallet},{label:"Tarefas pendentes",value:String(pending),icon:Clock},{label:"Campanhas cadastradas",value:String(campaigns.length),icon:CalendarDays},{label:"Investimento registrado",value:money(spent),icon:CheckCircle2}]).map(item=><Card key={item.label}><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><item.icon className="h-4 w-4 text-primary"/>{item.label}</div><p className="mt-2 text-xl font-semibold">{item.value}</p></CardContent></Card>)}</div>
- <CompanyResultsSummary results={mergedResults.results} messaging={messaging} analysesHref={base+"/analises"}/>
+ {/* Situação atual (não depende do período). Campanhas e resultados do período ficam no painel abaixo, com um único filtro. */}{([{label:"Saldo atual da Meta",value:money(Number(company.current_ad_balance)),icon:Wallet},{label:"Tarefas pendentes",value:String(pending),icon:Clock}]).map(item=><Card key={item.label}><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><item.icon className="h-4 w-4 text-primary"/>{item.label}</div><p className="mt-2 text-xl font-semibold">{item.value}</p></CardContent></Card>)}</div>
+ <CompanyResultsSummary results={mergedResults.results.map(r=>({...r,period_start:importedPeriodStart(r)}))} messaging={messaging} campaigns={campaigns.map(c=>({id:c.id,starts_on:c.starts_on,ends_on:c.ends_on,campaign_status:c.campaign_status??null}))} analysesHref={base+"/analises"}/>
  <ImportedReconciliation rows={(reconciliationQuery.data||[]) as ReconciliationRow[]} campaigns={campaigns.map(c=>({id:c.id,name:c.name}))} excludedLegacy={mergedResults.excludedLegacy} basePath={base}/>
  <div className="space-y-3">
  <OverviewCampaigns campaigns={campaigns}/>
@@ -112,12 +116,12 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  <Link href={base+"/empresas"} className="inline-flex min-h-10 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4"/>Voltar para empresas</Link>
  <div className="flex flex-wrap items-start justify-between gap-3">
  <div className="min-w-0"><div className="flex items-center gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Building2 className="h-6 w-6"/></span><div className="min-w-0"><h1 className="break-words text-2xl font-semibold">{company.name}</h1><p className="text-sm text-muted-foreground">{module==="mkt"?mktOwnerLabel(company):"Responsável: "+(responsible?.name??"Não informado")} · Painel individual da empresa</p></div></div>
- <div className="mt-3 flex flex-wrap gap-2">{company.is_active&&<Badge variant="success">Empresa ativa</Badge>}<Badge variant={activeCampaigns?"default":"secondary"}>{activeCampaigns} campanha(s) ativa(s)</Badge>{pending>0&&<Badge variant="warning">{pending} tarefa(s) pendente(s)</Badge>}{Number(company.current_ad_balance)<=0&&<Badge variant="destructive">Sem saldo registrado</Badge>}</div></div>
+ <div className="mt-3 flex flex-wrap gap-2">{company.is_active&&<Badge variant="success">Empresa ativa</Badge>}<Badge variant={activeCampaigns?"default":"secondary"}>{activeCampaigns} campanha(s) ativa(s) agora</Badge>{pending>0&&<Badge variant="warning">{pending} tarefa(s) pendente(s)</Badge>}{Number(company.current_ad_balance)<=0&&<Badge variant="destructive">Sem saldo registrado</Badge>}</div></div>
  <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href={base+"/tarefas"}>Todas as tarefas</Link></Button><Button asChild variant="outline"><Link href={base+"/campanhas"}>Todas as campanhas</Link></Button></div>
  </div>
  <CompanyTabs initialTab={initialTab} panels={{
   "visao-geral":overview,
-  campanhas:<TrafficManager companyId={id} companyName={company.name} audiences={audiences} month={month} budget={budget} campaigns={campaigns} results={mergedResults.legacyKept} sets={sets} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null} adUpdates={adUpdates} adUpdatesAvailable={adUpdatesAvailable}/>,
+  campanhas:<TrafficManager companyId={id} companyName={company.name} audiences={audiences} month={month} budget={budget} campaigns={campaigns} results={mergedResults.legacyKept} sets={sets} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null} adUpdates={adUpdates} adUpdatesAvailable={adUpdatesAvailable} periodChanges={periodChanges}/>,
   publicos:<AudienceManager companyId={id} companyName={company.name} audiences={audiences} usage={usage}/>,
   tarefas:<CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={occurrences}/>,
   financeiro:<CompanyFinance company={company} month={month} budget={budget} totalSpent={spent} monthSpent={monthSpent} movements={(movementsQuery.error?[]:movementsQuery.data||[]) as AccountMovement[]} movementsAvailable={!movementsQuery.error} basePath={base}/>,

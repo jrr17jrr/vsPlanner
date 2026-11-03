@@ -7,8 +7,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { updateCltAdResultsAction } from "@/lib/supabase/clt-ad-results-actions";
-import { AD_METRICS, currentTotals, primaryMetrics, type AdMetricKey, type CountedRow, type Totals } from "@/lib/clt/ad-result-update";
+import { moveCltAdResultUpdatePeriodAction, updateCltAdResultsAction } from "@/lib/supabase/clt-ad-results-actions";
+import { AD_METRICS, currentTotals, monthReference, primaryMetrics, type AdMetricKey, type CountedRow, type Totals } from "@/lib/clt/ad-result-update";
 import type { ResultType } from "@/lib/clt/history";
 
 export type AdResultUpdate = {
@@ -24,7 +24,48 @@ export type AdResultUpdate = {
   created_at: string;
 };
 
+export type AdResultPeriodChange = { id: string; update_id: string; old_start: string; old_end: string; new_start: string; new_end: string; changed_by_name: string | null; created_at: string };
+
 const money = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const todaySP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+const dBR = (d: string) => d.slice(0, 10).split("-").reverse().join("/");
+const monthName = (m: string) => { const s = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(m + "-01T12:00:00Z")); return s.charAt(0).toUpperCase() + s.slice(1); };
+export const describeReference = (r: { start: string; end: string }) => (r.start === r.end ? dBR(r.start) : `${dBR(r.start)} a ${dBR(r.end)}`);
+
+type RefMode = "date" | "range" | "month";
+/**
+ * "Período dos resultados" (quando os resultados aconteceram): data
+ * específica, intervalo ou mês de referência. A data do REGISTRO é sempre
+ * o momento do lançamento (fica no histórico).
+ */
+export function ReferencePeriodFields({ onChange, initial, idPrefix }: { onChange: (ref: { start: string; end: string } | null) => void; initial?: { start: string; end: string }; idPrefix: string }) {
+  const today = todaySP();
+  const initMonth = initial && initial.start.endsWith("-01") && initial.start.slice(0, 7) === initial.end.slice(0, 7) && monthReference(initial.start.slice(0, 7), today).end === initial.end;
+  const [mode, setMode] = useState<RefMode>(initial ? (initMonth ? "month" : initial.start === initial.end ? "date" : "range") : "month");
+  const [date, setDate] = useState(initial?.end ?? today);
+  const [from, setFrom] = useState(initial?.start ?? today.slice(0, 7) + "-01");
+  const [to, setTo] = useState(initial?.end ?? today);
+  const [month, setMonth] = useState(initial ? initial.start.slice(0, 7) : today.slice(0, 7));
+  const build = (m: RefMode, v: { date: string; from: string; to: string; month: string }) =>
+    m === "date" ? (v.date ? { start: v.date, end: v.date } : null) : m === "range" ? (v.from && v.to ? { start: v.from, end: v.to } : null) : v.month ? monthReference(v.month, today) : null;
+  const current = build(mode, { date, from, to, month });
+  function set(p: Partial<{ mode: RefMode; date: string; from: string; to: string; month: string }>) {
+    const next = { mode, date, from, to, month, ...p };
+    if (p.mode) setMode(p.mode); if (p.date !== undefined) setDate(p.date); if (p.from !== undefined) setFrom(p.from); if (p.to !== undefined) setTo(p.to); if (p.month !== undefined) setMonth(p.month);
+    onChange(build(next.mode, next));
+  }
+  const field = "h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm";
+  const wrap = "flex min-w-0 flex-col gap-1 text-xs text-muted-foreground";
+  return <div className="flex min-w-0 flex-col gap-2">
+    <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Tipo de período dos resultados">
+      {([["date", "Data"], ["range", "Intervalo"], ["month", "Mês"]] as const).map(([m, l]) => <Button key={m} type="button" size="sm" variant={mode === m ? "default" : "outline"} aria-pressed={mode === m} className="h-9" onClick={() => set({ mode: m })}>{l}</Button>)}
+    </div>
+    {mode === "date" && <label className={wrap}>Data dos resultados<input id={`${idPrefix}-data`} className={field} type="date" max={today} value={date} onChange={(e) => set({ date: e.target.value })} /></label>}
+    {mode === "range" && <div className="grid grid-cols-2 gap-2"><label className={wrap}>De<input className={field} type="date" max={to || today} value={from} onChange={(e) => set({ from: e.target.value })} /></label><label className={wrap}>Até<input className={field} type="date" min={from || undefined} max={today} value={to} onChange={(e) => set({ to: e.target.value })} /></label></div>}
+    {mode === "month" && <label className={wrap}>Mês de referência<input className={field} type="month" max={today.slice(0, 7)} value={month} onChange={(e) => set({ month: e.target.value })} /></label>}
+    {current && <p className="text-[11px] text-muted-foreground">Os resultados contam em: <b className="text-foreground">{mode === "month" ? monthName(month) : describeReference(current)}</b>{mode === "month" ? ` (${describeReference(current)})` : ""}.</p>}
+  </div>;
+}
 const isMoney = (k: AdMetricKey) => k === "spend" || k === "revenue";
 const show = (k: AdMetricKey, v: number | null | undefined) => (v === null || v === undefined ? "não informado" : isMoney(k) ? money(v) : v.toLocaleString("pt-BR"));
 /** Valor inicial do campo (pt-BR, sem símbolo). */
@@ -60,6 +101,7 @@ function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { 
   const secondary = AD_METRICS.map((m) => m.key).filter((k) => !primary.includes(k));
   const [showAll, setShowAll] = useState(secondary.some((k) => totals[k] !== null));
   const [fields, setFields] = useState<Record<AdMetricKey, string>>(() => Object.fromEntries(AD_METRICS.map((m) => [m.key, toField(m.key, totals[m.key])])) as Record<AdMetricKey, string>);
+  const [reference, setReference] = useState<{ start: string; end: string } | null>(() => monthReference(todaySP().slice(0, 7), todaySP()));
 
   const parsed = Object.fromEntries(AD_METRICS.map((m) => [m.key, parseMetricInput(m.key, fields[m.key])])) as Record<AdMetricKey, number | null>;
   const invalid = AD_METRICS.filter((m) => Number.isNaN(parsed[m.key]));
@@ -69,9 +111,10 @@ function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { 
     e.preventDefault();
     if (invalid.length) { toast.error(`Confira: ${invalid.map((m) => m.label).join(", ")}.`); return; }
     if (!changes.length) { toast.error("Nenhum valor mudou."); return; }
+    if (!reference) { toast.error("Escolha o período dos resultados."); return; }
     start(async () => {
       const values = Object.fromEntries(changes.map((m) => [m.key, parsed[m.key]]));
-      const r = await updateCltAdResultsAction(adId, values);
+      const r = await updateCltAdResultsAction(adId, values, reference);
       if (r.error) toast.error(r.error);
       else { toast.success(r.success); close(); router.refresh(); }
     });
@@ -97,6 +140,11 @@ function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { 
     </DialogHeader>
     <form onSubmit={save} className="flex min-w-0 flex-col gap-4">
       <p className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">Informe os <b className="text-foreground">totais acumulados atuais</b> do anúncio (como aparecem no Gerenciador). Eles substituem os anteriores — nada é somado em dobro. Deixe vazio o que não quiser informar.</p>
+      <div className="rounded-md border border-border p-3">
+        <p className="mb-2 text-sm font-medium">Período dos resultados</p>
+        <ReferencePeriodFields idPrefix={`ad-${adId}-ref`} onChange={setReference} />
+        <p className="mt-2 text-[11px] text-muted-foreground">Quando os resultados aconteceram — é o que vale nos filtros e relatórios. A data do registro (hoje) fica no histórico.</p>
+      </div>
       <div className="grid grid-cols-2 gap-3">{primary.map(field)}</div>
       <button type="button" className="self-start text-xs text-primary" aria-expanded={showAll} onClick={() => setShowAll(!showAll)}>{showAll ? "Menos indicadores" : "Mais indicadores"}</button>
       {showAll && <div className="grid grid-cols-2 gap-3">{secondary.map(field)}</div>}
@@ -106,23 +154,56 @@ function AdResultsForm({ adId, adName, totals, type, campaignStatus, close }: { 
       </div>}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={pending} onClick={close}>Cancelar</Button>
-        <Button type="submit" disabled={pending || !changes.length || invalid.length > 0}>{pending ? "Salvando…" : "Salvar resultados"}</Button>
+        <Button type="submit" disabled={pending || !changes.length || invalid.length > 0 || !reference}>{pending ? "Salvando…" : "Salvar resultados"}</Button>
       </DialogFooter>
     </form>
   </DialogContent>;
 }
 
-/** Histórico de "Atualizar resultados" de um anúncio (mais recente primeiro). */
-export function AdResultsHistory({ updates, available }: { updates: AdResultUpdate[]; available: boolean }) {
+/**
+ * Histórico de "Atualizar resultados" de um anúncio (mais recente primeiro):
+ * data do REGISTRO, usuário, período de REFERÊNCIA, antes → depois, e as
+ * correções de período ("Editar período").
+ */
+export function AdResultsHistory({ updates, available, changes = [], editable = true }: { updates: AdResultUpdate[]; available: boolean; changes?: AdResultPeriodChange[]; editable?: boolean }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [ref, setRef] = useState<{ start: string; end: string } | null>(null);
   if (!available) return <p className="text-xs text-muted-foreground">Histórico de atualizações disponível após aplicar a migração 20261104110000_clt_ad_result_updates.sql.</p>;
   if (!updates.length) return <p className="text-sm text-muted-foreground">Nenhuma atualização de resultados ainda.</p>;
   const when = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  const br = (d: string) => d.slice(0, 10).split("-").reverse().join("/");
-  return <ul className="space-y-2">{updates.map((u) => <li key={u.id} className="rounded-lg border p-3 text-sm">
-    <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">{when(u.created_at)}</span>{u.updated_by_name && <span>· {u.updated_by_name}</span>}<span>· período {br(u.period_start)} a {br(u.period_end)}</span>{u.mode === "ajuste" && <span className="rounded bg-muted px-1.5">ajuste</span>}</p>
-    <ul className="mt-1 space-y-0.5">{AD_METRICS.filter((m) => u.updated[m.key] !== undefined).map((m) => {
-      const d = u.delta[m.key] ?? 0;
-      return <li key={m.key} className="break-words">{m.label.replace(" (R$)", "")}: {show(m.key, u.previous[m.key] ?? null)} → <b>{show(m.key, u.updated[m.key])}</b> <span className={d > 0 ? "text-success" : d < 0 ? "text-destructive" : "text-muted-foreground"}>({d > 0 ? "+" : d < 0 ? "−" : ""}{isMoney(m.key) ? money(Math.abs(d)) : Math.abs(d).toLocaleString("pt-BR")})</span></li>;
-    })}</ul>
-  </li>)}</ul>;
+  function save(u: AdResultUpdate) {
+    if (!ref) { toast.error("Escolha o novo período."); return; }
+    if (ref.start === u.period_start.slice(0, 10) && ref.end === u.period_end.slice(0, 10)) { toast.error("O novo período é igual ao atual."); return; }
+    start(async () => {
+      const r = await moveCltAdResultUpdatePeriodAction(u.id, ref);
+      if (r.error) toast.error(r.error);
+      else { toast.success(r.success); setEditing(null); router.refresh(); }
+    });
+  }
+  return <ul className="space-y-2">{updates.map((u) => {
+    const fixes = changes.filter((c) => c.update_id === u.id);
+    const current = { start: u.period_start.slice(0, 10), end: u.period_end.slice(0, 10) };
+    return <li key={u.id} className="min-w-0 rounded-lg border p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-0.5 text-xs text-muted-foreground">
+          <p><span className="font-medium text-foreground">Período dos resultados: {describeReference(current)}</span>{u.mode === "ajuste" && <span className="ml-2 rounded bg-muted px-1.5">ajuste</span>}</p>
+          <p>Registrado em {when(u.created_at)}{u.updated_by_name ? ` por ${u.updated_by_name}` : ""}</p>
+        </div>
+        {editable && editing !== u.id && <Button type="button" size="sm" variant="outline" className="h-8" disabled={pending} onClick={() => { setEditing(u.id); setRef(current); }}>Editar período</Button>}
+      </div>
+      <ul className="mt-1 space-y-0.5">{AD_METRICS.filter((m) => u.updated[m.key] !== undefined).map((m) => {
+        const d = u.delta[m.key] ?? 0;
+        return <li key={m.key} className="break-words">{m.label.replace(" (R$)", "")}: {show(m.key, u.previous[m.key] ?? null)} → <b>{show(m.key, u.updated[m.key])}</b> <span className={d > 0 ? "text-success" : d < 0 ? "text-destructive" : "text-muted-foreground"}>({d > 0 ? "+" : d < 0 ? "−" : ""}{isMoney(m.key) ? money(Math.abs(d)) : Math.abs(d).toLocaleString("pt-BR")})</span></li>;
+      })}</ul>
+      {fixes.length > 0 && <ul className="mt-2 space-y-0.5 border-t pt-2 text-[11px] text-muted-foreground">{fixes.map((c) => <li key={c.id}>Período corrigido de {describeReference({ start: c.old_start, end: c.old_end })} para <b className="text-foreground">{describeReference({ start: c.new_start, end: c.new_end })}</b> em {when(c.created_at)}{c.changed_by_name ? ` por ${c.changed_by_name}` : ""}.</li>)}</ul>}
+      {editing === u.id && <div className="mt-3 space-y-2 rounded-md border border-primary/40 p-3">
+        <p className="text-xs font-medium">Novo período destes resultados</p>
+        <ReferencePeriodFields idPrefix={`edit-${u.id}`} initial={current} onChange={setRef} />
+        <p className="text-[11px] text-muted-foreground">Só muda QUANDO estes resultados contam. O total do anúncio continua o mesmo e nada é somado de novo.</p>
+        <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={pending || !ref} onClick={() => save(u)}>{pending ? "Salvando…" : "Salvar período"}</Button><Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => setEditing(null)}>Cancelar</Button></div>
+      </div>}
+    </li>;
+  })}</ul>;
 }

@@ -29,9 +29,9 @@ describe("Atualizar resultados (tela)", () => {
       updated_by_name: "Dono", created_at: "2026-11-04T13:23:00Z",
     }]} />);
     const t = text(html);
-    expect(t).toContain("04/11/2026, 10:23");
-    expect(t).toContain("Dono");
-    expect(t).toContain("período 01/11/2026 a 04/11/2026");
+    expect(t).toContain("Período dos resultados: 01/11/2026 a 04/11/2026");
+    expect(t).toContain("Registrado em 04/11/2026, 10:23 por Dono");
+    expect(t).toContain("Editar período");
     expect(t).toMatch(/Investimento: R\$\s?100,00 → R\$\s?150,00 \(\+R\$\s?50,00\)/);
     expect(t).toContain("Conversas / mensagens: 10 → 15 (+5)");
     expect(t).toContain("ThruPlays: não informado → 300 (+300)");
