@@ -20,7 +20,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * Lembretes de tarefas. Disparado a cada minuto pelo Supabase Cron
- * (`pg_cron` + `pg_net`, ver supabase/cron/task_reminders.sql) e uma vez por
+ * (`pg_cron` + `pg_net`, migration 20261103100000_task_reminders_cron +
+ * segredos no Vault, ver supabase/cron/task_reminders.sql) e uma vez por
  * dia pelo cron da Vercel (fallback). O cron só AGENDA a verificação — quem
  * entrega é o Web Push (VAPID) para as inscrições do próprio dono da tarefa.
  *
@@ -234,6 +235,11 @@ export async function GET(request: Request) {
       candidates: tasks.length + sources.tasks.length + sources.subtasks.length + sources.activities.length,
       due: due.length, sent: 0, failed: 0, skipped: 0, noSubscription: 0,
     };
+
+    // Diagnóstico (`?dry=1`): mostra o que sairia agora, sem enviar nem gravar trava.
+    if (new URL(request.url).searchParams.get("dry") === "1") {
+      return NextResponse.json({ ...summary, dryRun: true, reminders: due.map(({ eventKey, title, body, url }) => ({ eventKey, title, body, url })) });
+    }
 
     for (const reminder of due) {
       const mode = await acquire(db, reminder);

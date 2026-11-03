@@ -2,10 +2,16 @@
 
 ## Arquitetura (o que já é automático)
 
-- **Agendamento no servidor**: o Supabase Cron (`pg_cron` + `pg_net`, ver
-  `supabase/cron/task_reminders.sql`) chama `/api/cron/task-reminders` a cada
-  minuto. O cron da Vercel (`vercel.json`, 12:00 UTC = 09:00 em São Paulo) é só
-  reserva. Nada depende de JavaScript rodando com a página aberta.
+- **Agendamento no servidor**: o Supabase Cron (`pg_cron` + `pg_net`) chama
+  `/api/cron/task-reminders` a cada minuto. O job é criado pela migration
+  `supabase/migrations/20261103100000_task_reminders_cron.sql`; a URL e o
+  `CRON_SECRET` ficam no Vault (passo a passo em
+  `supabase/cron/task_reminders.sql`). O cron da Vercel (`vercel.json`,
+  12:00 UTC = 09:00 em São Paulo) é só reserva: no plano Hobby ele roda 1x/dia
+  e, sozinho, quase nenhum lembrete cai na janela de 15 min. Nada depende de
+  JavaScript rodando com a página aberta.
+- **Financeiro**: contas vencidas aparecem no sino (não há push de
+  financeiro). A dívida com o ex-sócio não é conta a pagar e não gera alerta.
 - **Regras** em `lib/push/schedule-reminders.ts` (testadas em
   `lib/push/schedule-reminders.test.ts`):
   - execução: no horário e/ou 15 min, 30 min, 1 h, 1 dia antes;
