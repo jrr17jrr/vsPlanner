@@ -21,7 +21,7 @@ export default async function HojePage() {
 
   const [meetings, workItems, rotina, legacyWork, visionario] = await Promise.all([
     loadSection("meu-dia:compromissos", () => getTodayMeetingsForHoje()),
-    loadSection("meu-dia:trabalhos", () => getTodayWorkItemsForHoje()),
+    loadSection("meu-dia:trabalhos", () => getTodayWorkItemsForHoje({ includeDoneToday: true })),
     loadSection("meu-dia:rotina", () => Promise.all([listActivities(space.id), listActivityCompletions(profile.id, todayKey, todayKey)])),
     loadSection("meu-dia:clt", () => listPersonalWorkTasks(space.id)),
     findOrBootstrapSpace(VISIONARIO_DEV_SLUG, profile).catch(() => undefined),

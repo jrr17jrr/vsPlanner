@@ -298,7 +298,8 @@ export async function deleteWorkItemAction(workItemId: string): Promise<WorkItem
  * houver Visionário Dev/permissão, pra "Hoje" continuar funcionando pra
  * quem não usa o módulo.
  */
-export async function getTodayWorkItemsForHoje(): Promise<{
+/** `includeDoneToday` (Meu Dia): também os concluídos hoje, para a seção Concluídas. */
+export async function getTodayWorkItemsForHoje(options: { includeDoneToday?: boolean } = {}): Promise<{
   workItems: WorkItem[];
   assigneeNamesByWorkItem: Record<string, string[]>;
 }> {
@@ -313,12 +314,11 @@ export async function getTodayWorkItemsForHoje(): Promise<{
   const supabase = await createSupabaseServerClient();
   const todayKey = todayKeySaoPaulo();
 
-  const { data: dueTodayItems, error } = await supabase
-    .from("work_items")
-    .select("*")
-    .eq("space_id", space.id)
-    .eq("due_date", todayKey)
-    .neq("status", "concluido");
+  const base = supabase.from("work_items").select("*").eq("space_id", space.id).eq("due_date", todayKey);
+  // Meia-noite em São Paulo (UTC-3) para "concluído hoje".
+  const { data: dueTodayItems, error } = options.includeDoneToday
+    ? await base.or(`status.neq.concluido,updated_at.gte.${todayKey}T03:00:00Z`)
+    : await base.neq("status", "concluido");
 
   if (error) throw error;
   if (!dueTodayItems || dueTodayItems.length === 0) {
