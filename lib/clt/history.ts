@@ -21,7 +21,9 @@
  * ÷ conversas desses mesmos fatos. ThruPlay/engajamento/etc. nunca entram.
  */
 
-export type ResultType = "mensagens" | "visualizacoes" | "vendas" | "engajamento" | "alcance" | "trafego" | "leads" | "outro";
+import { effectivePeriodRows, isManualUpdate } from "@/lib/clt/ad-metrics";
+
+export type ResultType ="mensagens" | "visualizacoes" | "vendas" | "engajamento" | "alcance" | "trafego" | "leads" | "outro";
 export type FactType = ResultType | "misto" | null;
 
 export const RESULT_TYPES: { value: ResultType; label: string }[] = [
@@ -67,7 +69,7 @@ export type HistoryAdSet = { id: string; campaign_id: string; name: string; resu
 type Num = number | string | null | undefined;
 export type HistoryCampaignEntry = { campaign_id: string; entry_date: string; spent_amount: Num; messages: Num; sales: Num; generated_revenue: Num; views?: Num; impressions?: Num; reach?: Num; thruplays?: Num; link_clicks?: Num; leads?: Num; engagements?: Num };
 export type HistoryAdLevelEntry = HistoryCampaignEntry & { ad_set_id: string; creative_id: string | null };
-export type HistoryPeriodMetric = { campaign_id: string; ad_set_id: string; creative_id: string; period_start: string; period_end: string; spend: Num; conversations: Num; sales: Num; revenue: Num; impressions: Num; reach?: Num; link_clicks?: Num; leads?: Num };
+export type HistoryPeriodMetric = { campaign_id: string; ad_set_id: string; creative_id: string; period_start: string; period_end: string; spend: Num; conversations: Num; sales: Num; revenue: Num; impressions: Num; reach?: Num; link_clicks?: Num; leads?: Num; views?: Num; thruplays?: Num; engagements?: Num; source?: string | null };
 
 export type HistoryInput = {
   campaigns: HistoryCampaign[];
@@ -77,7 +79,8 @@ export type HistoryInput = {
   periodMetrics: HistoryPeriodMetric[];
 };
 
-export type FactSource = "importado" | "manual_conjunto" | "manual_campanha";
+/** "atualizacao" = "Atualizar resultados" do anúncio (diferença para o total anterior, por período). */
+export type FactSource = "importado" | "atualizacao" | "manual_conjunto" | "manual_campanha";
 export type TypeOrigin = "conjunto" | "campanha" | "misto" | "sem_classificacao";
 
 export type HistoryFact = {
@@ -118,12 +121,12 @@ function manualMetrics(r: HistoryCampaignEntry): Metrics {
   };
 }
 
-/** Importado: null continua "não informado"; visualizações/ThruPlays/interações não vêm na importação. */
+/** Por período: null continua "não informado" (a importação não traz visualizações/ThruPlays/interações; a atualização manual pode trazer). */
 function importedMetrics(m: HistoryPeriodMetric): Metrics {
   return {
     spend: toNum(m.spend), messages: toNum(m.conversations), sales: toNum(m.sales), revenue: toNum(m.revenue),
     impressions: toNum(m.impressions), reach: toNum(m.reach), link_clicks: toNum(m.link_clicks), leads: toNum(m.leads),
-    views: null, thruplays: null, engagements: null,
+    views: toNum(m.views), thruplays: toNum(m.thruplays), engagements: toNum(m.engagements),
   };
 }
 
@@ -162,12 +165,15 @@ export function buildHistoryFacts(input: HistoryInput): { facts: HistoryFact[]; 
   const facts: HistoryFact[] = [];
   const warnings: HistoryWarning[] = [];
 
-  // 1) Importados por período.
-  const imported = input.periodMetrics.filter(m => campaigns.has(m.campaign_id)).map(m => ({ ...m, period_start: day(m.period_start), period_end: day(m.period_end) }));
-  for (const m of imported) {
+  // 1) Por período: importados e atualizações manuais ("Atualizar resultados").
+  //    Só o IMPORTADO substitui outros dados; a atualização é um acréscimo (e deixa de contar se um importado do mesmo anúncio a cobre).
+  const periods = effectivePeriodRows(input.periodMetrics.filter(m => campaigns.has(m.campaign_id)).map(m => ({ ...m, period_start: day(m.period_start), period_end: day(m.period_end) })));
+  const imported = periods.filter(m => !isManualUpdate(m));
+  for (const m of periods) {
     const t = setType(m.ad_set_id);
-    const crossMonth = m.period_start.slice(0, 7) !== m.period_end.slice(0, 7);
-    facts.push({ campaign_id: m.campaign_id, company_id: companyOf(m.campaign_id), ad_set_id: m.ad_set_id, creative_id: m.creative_id, date: m.period_end, month: m.period_end.slice(0, 7), period_start: m.period_start, period_end: m.period_end, source: "importado", type: t.type, typeOrigin: t.origin, crossMonth, m: importedMetrics(m) });
+    const update = isManualUpdate(m);
+    const crossMonth = !update && m.period_start.slice(0, 7) !== m.period_end.slice(0, 7);
+    facts.push({ campaign_id: m.campaign_id, company_id: companyOf(m.campaign_id), ad_set_id: m.ad_set_id, creative_id: m.creative_id, date: m.period_end, month: m.period_end.slice(0, 7), period_start: m.period_start, period_end: m.period_end, source: update ? "atualizacao" : "importado", type: t.type, typeOrigin: t.origin, crossMonth, m: importedMetrics(m) });
   }
   // Períodos sobrepostos (diferentes) do mesmo anúncio — os dois continuam gravados; avisamos.
   const byCreative = new Map<string, typeof imported>();

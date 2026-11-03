@@ -4,6 +4,7 @@ import type { CltCampaign, CltCompany, CltResponsible, CltTask } from "@/types/d
 import { withImportedCampaignTotals } from "@/lib/clt/ad-metrics";
 import type { CltModule } from "@/lib/clt/module";
 import { getModuleScope, inList } from "@/lib/supabase/clt-scope";
+import { selectAdPeriodMetrics } from "@/lib/supabase/clt-period-select";
 
 export type CltDashboardData = {
   module: CltModule;
@@ -67,11 +68,12 @@ export async function getCltDashboardData(module: CltModule = "clt"): Promise<Cl
       : c
   );
   // Métricas importadas por anúncio (clt_ad_period_metrics) entram nos totais da campanha. Sem a migration, segue só com os campos antigos.
+  // creative/período/origem: atualização manual coberta por importado do mesmo anúncio não conta duas vezes.
   const imported = currentCampaigns.length
-    ? await db.from("clt_ad_period_metrics").select("campaign_id,spend,conversations,sales").in("campaign_id", currentCampaigns.map(c => c.id))
+    ? await selectAdPeriodMetrics(db, "campaign_id,spend,conversations,sales", "creative_id,period_start,period_end,source", (q) => q.in("campaign_id", currentCampaigns.map(c => c.id)))
     : { data: [], error: null };
   if (imported.error && !["42P01", "PGRST205"].includes(String(imported.error.code))) console.error("clt_ad_period_metrics", imported.error);
-  const campaignsWithImported = withImportedCampaignTotals(currentCampaigns, imported.error ? [] : imported.data ?? []);
+  const campaignsWithImported = withImportedCampaignTotals(currentCampaigns, (imported.error ? [] : imported.data ?? []) as unknown as Parameters<typeof withImportedCampaignTotals>[1]);
   return {
     module,
     moduleReady: scope.ready,

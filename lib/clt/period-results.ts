@@ -1,4 +1,5 @@
 import type { CltCampaignResultEntry } from "@/types/database.types";
+import { effectivePeriodRows, isManualUpdate } from "@/lib/clt/ad-metrics";
 
 /**
  * Consolida as métricas importadas por período (`clt_ad_period_metrics`,
@@ -24,6 +25,12 @@ export type PeriodMetricRow = {
   sales: number | null;
   revenue: number | string | null;
   impressions: number | null;
+  /** Migration 20261104110000 (opcionais: sem ela, seguem ausentes). */
+  creative_id?: string;
+  source?: string | null;
+  views?: number | null;
+  thruplays?: number | null;
+  engagements?: number | null;
 };
 
 export type LegacyResultRow = { campaign_id: string; entry_date: string };
@@ -40,61 +47,71 @@ export type PeriodResult = {
   impressions: number;
   views: number;
   thruplays: number;
-  source: "import";
+  engagements: number;
+  /** 'import' substitui lançamentos antigos no período; 'manual_update' só soma a diferença. */
+  source: "import" | "manual_update";
 };
 
 const n = (v: number | string | null | undefined) => (v === null || v === undefined || v === "" ? 0 : Number(v));
 
 export function mergePeriodResults<T extends LegacyResultRow>(legacy: T[], periodMetrics: PeriodMetricRow[]) {
   const groups = new Map<string, PeriodResult>();
-  for (const m of periodMetrics) {
+  // Atualização manual coberta por período importado do mesmo anúncio não conta (o importado prevalece).
+  const counted = periodMetrics.every(m => m.creative_id) ? effectivePeriodRows(periodMetrics as Array<PeriodMetricRow & { creative_id: string }>) : periodMetrics;
+  for (const m of counted) {
     const start = String(m.period_start).slice(0, 10), end = String(m.period_end).slice(0, 10);
-    const key = `${m.campaign_id}|${start}|${end}`;
-    const g = groups.get(key) ?? { campaign_id: m.campaign_id, entry_date: end, period_start: start, period_end: end, spent_amount: 0, messages: 0, sales: 0, generated_revenue: 0, impressions: 0, views: 0, thruplays: 0, source: "import" as const };
+    const source = isManualUpdate(m) ? "manual_update" as const : "import" as const;
+    const key = `${m.campaign_id}|${start}|${end}|${source}`;
+    const g = groups.get(key) ?? { campaign_id: m.campaign_id, entry_date: end, period_start: start, period_end: end, spent_amount: 0, messages: 0, sales: 0, generated_revenue: 0, impressions: 0, views: 0, thruplays: 0, engagements: 0, source };
     g.spent_amount = Math.round((g.spent_amount + n(m.spend)) * 100) / 100;
     g.messages += n(m.conversations);
     g.sales += n(m.sales);
     g.generated_revenue = Math.round((g.generated_revenue + n(m.revenue)) * 100) / 100;
     g.impressions += n(m.impressions);
+    g.views += n(m.views);
+    g.thruplays += n(m.thruplays);
+    g.engagements += n(m.engagements);
     groups.set(key, g);
   }
   const periods = [...groups.values()];
-  const covered = (r: LegacyResultRow) => periods.some(p => p.campaign_id === r.campaign_id && r.entry_date >= p.period_start && r.entry_date <= p.period_end);
+  const covered = (r: LegacyResultRow) => periods.some(p => p.source === "import" && p.campaign_id === r.campaign_id && r.entry_date >= p.period_start && r.entry_date <= p.period_end);
   const kept = legacy.filter(r => !covered(r));
   return {
     legacy: kept,
     imported: periods,
     excludedLegacy: legacy.length - kept.length,
-    crossMonthPeriods: periods.filter(p => p.period_start.slice(0, 7) !== p.period_end.slice(0, 7)).length,
+    crossMonthPeriods: periods.filter(p => p.source === "import" && p.period_start.slice(0, 7) !== p.period_end.slice(0, 7)).length,
   };
 }
 
-/** Início do período de um resultado importado (id `import:<campanha>:<início>:<fim>`); null para lançamentos de um dia. */
+/** Início do período de um resultado por período (id `import:`/`update:<campanha>:<início>:<fim>`); null para lançamentos de um dia. */
 export function importedPeriodStart(entry: { id?: string | null }): string | null {
-  const parts = entry.id?.startsWith("import:") ? entry.id.split(":") : null;
+  const parts = /^(import|update):/.test(entry.id ?? "") ? entry.id!.split(":") : null;
   return parts && parts.length === 4 ? parts[2] : null;
 }
 
 /** Períodos importados no formato de `clt_campaign_result_entries` (o que dashboards, análises e o PDF já usam). */
 export function periodResultsToEntries(imported: PeriodResult[]): CltCampaignResultEntry[] {
   return imported.map(p => ({
-    id: `import:${p.campaign_id}:${p.period_start}:${p.period_end}`,
+    id: `${p.source === "manual_update" ? "update" : "import"}:${p.campaign_id}:${p.period_start}:${p.period_end}`,
     user_id: "",
     campaign_id: p.campaign_id,
     entry_date: p.entry_date,
     spent_amount: p.spent_amount,
     messages: p.messages,
     sales: p.sales,
-    views: 0,
+    views: p.views ?? 0,
     appointments: 0,
     impressions: p.impressions,
     reach: 0,
     profile_visits: 0,
     link_clicks: 0,
-    engagements: 0,
-    thruplays: 0,
+    engagements: p.engagements ?? 0,
+    thruplays: p.thruplays ?? 0,
     leads: 0,
     generated_revenue: p.generated_revenue,
-    notes: `Importado por anúncio — período ${p.period_start} a ${p.period_end} (soma dos valores informados).`,
+    notes: p.source === "manual_update"
+      ? `Atualização manual dos anúncios — período ${p.period_start} a ${p.period_end} (diferença para o total anterior).`
+      : `Importado por anúncio — período ${p.period_start} a ${p.period_end} (soma dos valores informados).`,
   }));
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mergePeriodResults, periodResultsToEntries, type PeriodMetricRow } from "@/lib/clt/period-results";
+import { PERIOD_EXTRA_COLUMNS, selectAdPeriodMetrics } from "@/lib/supabase/clt-period-select";
 import type { CltCampaignResultEntry } from "@/types/database.types";
 
 /**
@@ -17,16 +18,13 @@ export async function withImportedPeriodResults(
 ): Promise<{ results: CltCampaignResultEntry[]; legacyKept: CltCampaignResultEntry[]; excludedLegacy: number; crossMonthPeriods: number }> {
   if (!campaignIds.length) return { results: legacy, legacyKept: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
   const db = supabase as SupabaseClient;
-  const { data, error } = await db
-    .from("clt_ad_period_metrics")
-    .select("campaign_id,period_start,period_end,spend,conversations,sales,revenue,impressions")
-    .in("campaign_id", campaignIds);
+  const { data, error } = await selectAdPeriodMetrics(db, "campaign_id,period_start,period_end,spend,conversations,sales,revenue,impressions", PERIOD_EXTRA_COLUMNS, (q) => q.in("campaign_id", campaignIds));
   if (error) {
     // 42P01/PGRST205: tabela ainda não existe (migration pendente) — segue sem importados.
     if (!["42P01", "PGRST205", "PGRST204", "42703"].includes(String(error.code))) console.error("clt_ad_period_metrics", error);
     return { results: legacy, legacyKept: legacy, excludedLegacy: 0, crossMonthPeriods: 0 };
   }
-  const merged = mergePeriodResults(legacy, (data ?? []) as PeriodMetricRow[]);
+  const merged = mergePeriodResults(legacy, (data ?? []) as unknown as PeriodMetricRow[]);
   const imported = periodResultsToEntries(merged.imported);
   return { results: [...merged.legacy, ...imported], legacyKept: merged.legacy, excludedLegacy: merged.excludedLegacy, crossMonthPeriods: merged.crossMonthPeriods };
 }

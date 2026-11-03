@@ -22,6 +22,8 @@ import { CompanyFinance, type AccountMovement } from "@/components/trabalho/comp
 import { MonthlyVideoPlanSeeder } from "@/components/trabalho/company/monthly-video-plan-seeder";
 import { InstagramFollowersCard } from "@/components/trabalho/company/instagram-followers-card";
 import type { FollowerRecord } from "@/lib/clt/followers";
+import { selectAdPeriodMetrics } from "@/lib/supabase/clt-period-select";
+import type { AdResultUpdate } from "@/components/trabalho/ad-results-update";
 import { loadHistoryInput } from "@/lib/supabase/clt-history-data";
 import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
@@ -48,7 +50,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  const campaigns=data.campaigns.filter(c=>c.company_id===id);
  const companyCampaignIds=campaigns.map(c=>c.id);
  const campaignFilter=companyCampaignIds.length?companyCampaignIds:["00000000-0000-0000-0000-000000000000"];
- const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery,levelResultsQuery,periodQuery,reconciliationQuery,movementsQuery,followersQuery]=await Promise.all([
+ const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery,levelResultsQuery,periodQuery,reconciliationQuery,movementsQuery,followersQuery,adUpdatesQuery]=await Promise.all([
  supabase.from("clt_monthly_budgets").select("*").eq("company_id",id).eq("month_key",month+"-01").maybeSingle(),
  supabase.from("clt_campaign_result_entries").select("*").in("campaign_id",campaignFilter),
  supabase.from("clt_ad_sets").select("*").in("campaign_id",campaignFilter),
@@ -56,10 +58,12 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  supabase.from("clt_audiences").select("*").eq("company_id",id).order("created_at",{ascending:false}),
  supabase.from("clt_ad_level_results").select("*").in("campaign_id",campaignFilter),
  // Métricas importadas por anúncio/período: alimentam campanha, conjunto e anúncio (o importado prevalece sobre lançamentos antigos do mesmo período).
- db.from("clt_ad_period_metrics").select("id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads").eq("company_id",id),
+ selectAdPeriodMetrics(db,"id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads","source,views,thruplays,engagements",q=>q.eq("company_id",id)),
  db.from("clt_campaign_reconciliations").select("campaign_id,period_start,period_end,reported_spend,reported_conversations,unallocated_spend,unallocated_conversations,notes").eq("company_id",id),
  db.from("clt_ad_account_movements").select("id,movement_date,kind,amount,notes").eq("company_id",id).order("movement_date",{ascending:false}).limit(50),
  db.from("clt_instagram_followers").select("id,company_id,followers,recorded_at").eq("company_id",id).order("recorded_at",{ascending:false}),
+ // Histórico de "Atualizar resultados" dos anúncios (migration 20261104110000; sem ela, vazio).
+ db.from("clt_ad_result_updates").select("id,creative_id,period_start,period_end,mode,previous,updated,delta,updated_by_name,created_at").eq("company_id",id).order("created_at",{ascending:false}).limit(500),
  ]);
  if(periodQuery.error&&!missingTable(periodQuery.error.code))throw periodQuery.error;
  // Seguidores: tabela nova — erro (ex.: migration pendente) só desativa o card, nunca derruba a página.
@@ -69,7 +73,10 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  const mergedResults=await withImportedPeriodResults(supabase,companyCampaignIds,(resultsQuery.data||[]) as CltCampaignResultEntry[]);
  // Custo por mensagem da visão geral: só investimento elegível (conjuntos/campanhas de mensagens).
  const messaging=messagingPoints(buildHistoryFacts(await loadHistoryInput(supabase,campaigns.map(c=>({id:c.id,company_id:c.company_id,name:c.name,objective:c.objective,starts_on:c.starts_on,ends_on:c.ends_on,campaign_status:c.campaign_status??null})))).facts);
- const levelRows=mergeAdLevelResults((levelResultsQuery.data||[]) as CltAdLevelResult[],(periodQuery.error?[]:periodQuery.data||[]) as PeriodMetricFullRow[]).rows;
+ const periodRows=(periodQuery.error?[]:periodQuery.data||[]) as unknown as PeriodMetricFullRow[];
+ const levelRows=mergeAdLevelResults((levelResultsQuery.data||[]) as CltAdLevelResult[],periodRows).rows;
+ const adUpdates=(adUpdatesQuery.error?[]:adUpdatesQuery.data||[]) as AdResultUpdate[];
+ const adUpdatesAvailable=!adUpdatesQuery.error;
  const audiences=(audiencesQuery.data||[]) as AudienceRecord[];
  const sets=(setsQuery.data||[]) as CltAdSet[];
  // Vínculos públicos ↔ conjuntos (somente leitura, por saved_audience_id).
@@ -110,7 +117,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  </div>
  <CompanyTabs initialTab={initialTab} panels={{
   "visao-geral":overview,
-  campanhas:<TrafficManager companyId={id} companyName={company.name} audiences={audiences} month={month} budget={budget} campaigns={campaigns} results={mergedResults.legacyKept} sets={sets} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null}/>,
+  campanhas:<TrafficManager companyId={id} companyName={company.name} audiences={audiences} month={month} budget={budget} campaigns={campaigns} results={mergedResults.legacyKept} sets={sets} creatives={(creativesQuery.data||[]) as CltAdCreative[]} levelResults={levelRows} comparison={comparisonQuery.data||null} adUpdates={adUpdates} adUpdatesAvailable={adUpdatesAvailable}/>,
   publicos:<AudienceManager companyId={id} companyName={company.name} audiences={audiences} usage={usage}/>,
   tarefas:<CompanyDetailTasks companyId={id} tasks={tasks} companies={data.companies} occurrences={occurrences}/>,
   financeiro:<CompanyFinance company={company} month={month} budget={budget} totalSpent={spent} monthSpent={monthSpent} movements={(movementsQuery.error?[]:movementsQuery.data||[]) as AccountMovement[]} movementsAvailable={!movementsQuery.error} basePath={base}/>,

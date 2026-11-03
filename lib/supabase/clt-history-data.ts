@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { selectAdPeriodMetrics } from "@/lib/supabase/clt-period-select";
 import type { HistoryAdLevelEntry, HistoryAdSet, HistoryCampaign, HistoryCampaignEntry, HistoryInput, HistoryPeriodMetric } from "@/lib/clt/history";
 
 const MISSING = ["42P01", "PGRST205", "PGRST204", "42703"];
@@ -21,7 +22,7 @@ export async function loadHistoryInput(supabase: unknown, campaigns: HistoryCamp
     db.from("clt_ad_sets").select("*").in("campaign_id", filter),
     db.from("clt_campaign_result_entries").select("campaign_id,entry_date,spent_amount,messages,sales,generated_revenue,views,impressions,reach,thruplays,link_clicks,leads,engagements").in("campaign_id", filter),
     db.from("clt_ad_level_results").select("campaign_id,ad_set_id,creative_id,entry_date,spent_amount,messages,sales,generated_revenue,views,impressions,reach,thruplays,link_clicks,leads,engagements").in("campaign_id", filter),
-    db.from("clt_ad_period_metrics").select("campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads").in("campaign_id", filter),
+    selectAdPeriodMetrics(db, "campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads", "source,views,thruplays,engagements", (q) => q.in("campaign_id", filter)),
   ]);
   const rows = <T,>(r: { data: unknown; error: { code?: string; message?: string } | null }, label: string): T[] => {
     if (r.error) {

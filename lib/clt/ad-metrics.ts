@@ -29,19 +29,38 @@ export type PeriodMetricFullRow = {
   reach: number | null;
   link_clicks: number | null;
   leads: number | null;
+  /** Colunas da migration 20261104110000 (ausentes antes dela = não informado). */
+  views?: number | null;
+  thruplays?: number | null;
+  engagements?: number | null;
+  /** 'import' (padrão) ou 'manual_update' ("Atualizar resultados"). */
+  source?: string | null;
 };
 
-/** Campos de `CltAdLevelResult` que a importação não traz (sempre "não informado"). */
-const NOT_IMPORTED = ["views", "engagements", "thruplays", "profile_visits", "appointments"] as const;
+/** Campos de `CltAdLevelResult` que o período nunca traz (sempre "não informado"). */
+const NOT_IMPORTED = ["profile_visits", "appointments"] as const;
 
 export type AdLevelRow = CltAdLevelResult & {
-  /** Presentes só nas linhas importadas por período. */
+  /** Presentes só nas linhas por período (importadas ou atualizações manuais). */
   period_start?: string;
   period_end?: string;
-  source?: "import";
+  source?: "import" | "manual_update";
   /** Campos não informados nesta linha. */
   unknown?: string[];
 };
+
+/** Atualização manual dos totais ("Atualizar resultados") — é só um acréscimo: nunca esconde outros dados. */
+export const isManualUpdate = (m: { source?: string | null }) => m.source === "manual_update";
+
+/**
+ * Períodos que CONTAM. O importado é a fonte oficial do período: uma
+ * atualização manual do mesmo anúncio totalmente dentro de um período
+ * importado deixa de contar (senão o mesmo resultado entraria duas vezes).
+ */
+export function effectivePeriodRows<T extends { creative_id: string; period_start: string; period_end: string; source?: string | null }>(rows: T[]): T[] {
+  const imports = rows.filter((r) => !isManualUpdate(r));
+  return rows.filter((r) => !isManualUpdate(r) || !imports.some((i) => i.creative_id === r.creative_id && day(i.period_start) <= day(r.period_start) && day(i.period_end) >= day(r.period_end)));
+}
 
 const num = (v: number | string | null | undefined) => (v === null || v === undefined || v === "" ? null : Number(v));
 const day = (d: string) => String(d).slice(0, 10);
@@ -56,6 +75,9 @@ export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
     ["reach", num(m.reach)],
     ["link_clicks", num(m.link_clicks)],
     ["leads", num(m.leads)],
+    ["views", num(m.views)],
+    ["thruplays", num(m.thruplays)],
+    ["engagements", num(m.engagements)],
   ];
   const row = {
     id: `period:${m.id}`,
@@ -66,8 +88,8 @@ export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
     entry_date: day(m.period_end),
     period_start: day(m.period_start),
     period_end: day(m.period_end),
-    source: "import" as const,
-    views: 0, engagements: 0, thruplays: 0, profile_visits: 0, appointments: 0,
+    source: isManualUpdate(m) ? ("manual_update" as const) : ("import" as const),
+    profile_visits: 0, appointments: 0,
     unknown: [...NOT_IMPORTED, ...fields.filter(([, v]) => v === null).map(([k]) => k)],
   } as AdLevelRow;
   for (const [k, v] of fields) (row as Record<string, unknown>)[k] = v ?? 0;
@@ -75,12 +97,14 @@ export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
 }
 
 export function mergeAdLevelResults(legacy: CltAdLevelResult[], period: PeriodMetricFullRow[]): { rows: AdLevelRow[]; excludedLegacy: number } {
-  const imported = period.map(periodRowToLevel);
+  const all = effectivePeriodRows(period).map(periodRowToLevel);
+  // Só o IMPORTADO substitui lançamentos antigos; a atualização manual soma a diferença por cima deles.
+  const imported = all.filter((p) => p.source === "import");
   const covered = (r: CltAdLevelResult) => imported.some(p =>
     r.entry_date >= p.period_start! && r.entry_date <= p.period_end! &&
     (r.creative_id ? r.creative_id === p.creative_id : r.ad_set_id === p.ad_set_id));
   const kept = legacy.filter(r => !covered(r));
-  return { rows: [...kept, ...imported], excludedLegacy: legacy.length - kept.length };
+  return { rows: [...kept, ...all], excludedLegacy: legacy.length - kept.length };
 }
 
 /** Um campo é "não informado" no total quando TODAS as linhas o deixaram sem valor. */
@@ -96,9 +120,10 @@ export function unknownFields(rows: object[]): Set<string> {
  * nesses campos (cria com 0 e não altera nos existentes), então o total é o
  * valor que já estava na campanha + a soma dos anúncios importados.
  */
-export function withImportedCampaignTotals<T extends { id: string; spent_amount: number | string; messages: number; sales: number }>(campaigns: T[], period: Array<Pick<PeriodMetricFullRow, "campaign_id" | "spend" | "conversations" | "sales">>): T[] {
+export function withImportedCampaignTotals<T extends { id: string; spent_amount: number | string; messages: number; sales: number }>(campaigns: T[], period: Array<Pick<PeriodMetricFullRow, "campaign_id" | "spend" | "conversations" | "sales"> & Partial<Pick<PeriodMetricFullRow, "creative_id" | "period_start" | "period_end" | "source">>>): T[] {
   const sums = new Map<string, { spend: number; conversations: number; sales: number }>();
-  for (const m of period) {
+  const counted = period.every((p) => p.creative_id && p.period_start && p.period_end) ? effectivePeriodRows(period as Array<PeriodMetricFullRow>) : period;
+  for (const m of counted) {
     const s = sums.get(m.campaign_id) ?? { spend: 0, conversations: 0, sales: 0 };
     s.spend = Math.round((s.spend + (num(m.spend) ?? 0)) * 100) / 100;
     s.conversations += num(m.conversations) ?? 0;
