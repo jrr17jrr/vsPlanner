@@ -18,8 +18,8 @@ export type CltModuleConfig = {
 };
 
 export const MODULES: Record<CltModule, CltModuleConfig> = {
-  clt: { id: "clt", basePath: "/trabalho", label: "Trabalho / CLT", generalLabel: "CLT", planningPath: "/planejamento?area=clt" },
-  mkt: { id: "mkt", basePath: "/visionario/mkt", label: "MKT", generalLabel: "MKT", planningPath: "/visionario/mkt/planejamento" },
+  clt: { id: "clt", basePath: "/trabalho", label: "Trabalho / CLT", generalLabel: "CLT", planningPath: "/importar?area=clt" },
+  mkt: { id: "mkt", basePath: "/visionario/mkt", label: "MKT", generalLabel: "MKT", planningPath: "/importar?area=mkt" },
 };
 
 /** MKT: identificação exibida onde o CLT mostra o responsável. Empresa própria nunca recebe cliente inventado. */

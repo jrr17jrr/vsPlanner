@@ -121,12 +121,17 @@ type LegacyHandler = { detect: (content: string) => boolean; render: (content: s
  * `legacy`: arquivos exatamente no formato antigo seguem no fluxo antigo,
  * que não depende da migration nova.
  */
-export function SmartImporter({ companies = [], fixedCompany, title, legacy, onImported }: { companies?: Company[]; fixedCompany?: Company; title?: string; legacy?: LegacyHandler; onImported?: () => void }) {
+/**
+ * `module` (Central de Importação): o servidor confere que a empresa é desse
+ * módulo. `example`/`exampleJson`: exemplos editáveis do tipo escolhido.
+ */
+export function SmartImporter({ companies = [], fixedCompany, title, legacy, onImported, module, example, exampleJson, initialMode = "json" }: { companies?: Company[]; fixedCompany?: Company; title?: string; legacy?: LegacyHandler; onImported?: () => void; module?: "clt" | "mkt"; example?: string; exampleJson?: string; initialMode?: Mode }) {
+  const textExample = example ?? TEXT_EXAMPLE;
   const [companyId, setCompanyId] = useState(fixedCompany?.id ?? "");
   const [schemaHint, setSchemaHint] = useState("");
   const uid = useId();
-  const [mode, setMode] = useState<Mode>("json");
-  const [content, setContent] = useState("");
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [content, setContent] = useState(initialMode === "text" && example ? example : "");
   const [fileName, setFileName] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
@@ -160,7 +165,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
     if ((periodStart && !periodEnd) || (!periodStart && periodEnd)) { setError("Informe início e fim do período (ou deixe os dois em branco para usar o do arquivo)."); return; }
     setError(""); setResult("");
     start(async () => {
-      const r = await previewSmartImportAction({ companyId, content, period });
+      const r = await previewSmartImportAction({ companyId, content, period, module });
       if (r.error || !r.preview) { setPreview(null); setError(r.error ?? "Falha ao validar."); return; }
       setPreview(r.preview);
       setSchemaHint(r.schemaReady === false ? r.migrationHint ?? "Migration pendente." : "");
@@ -172,7 +177,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
   function confirmImport() {
     if (!preview) return;
     start(async () => {
-      const r = await confirmSmartImportAction({ companyId, content, period: preview.period, confirmed: [...confirmed] });
+      const r = await confirmSmartImportAction({ companyId, content, period: preview.period, confirmed: [...confirmed], module });
       if (r.error) { setError(r.error); toast.error(r.error); return; }
       setResult(r.success ?? "Importação concluída.");
       toast.success("Importação concluída.");
@@ -198,7 +203,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
               <span className="text-sm font-medium">{step(2)}. Formato</span>
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Formato da importação">
                 <Button type="button" variant={mode === "json" ? "default" : "outline"} className="h-11" role="radio" aria-checked={mode === "json"} onClick={() => { setMode("json"); invalidate(); }}><FileJson className="h-4 w-4" />Arquivo JSON</Button>
-                <Button type="button" variant={mode === "text" ? "default" : "outline"} className="h-11" role="radio" aria-checked={mode === "text"} onClick={() => { setMode("text"); invalidate(); }}><PenLine className="h-4 w-4" />Escrever ou colar texto</Button>
+                <Button type="button" variant={mode === "text" ? "default" : "outline"} className="h-11" role="radio" aria-checked={mode === "text"} onClick={() => { setMode("text"); if (!content.trim() && example) setContent(example); invalidate(); }}><PenLine className="h-4 w-4" />Escrever ou colar texto</Button>
               </div>
             </div>
           </div>
@@ -207,12 +212,13 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
             <Label htmlFor={uid + "content"}>{step(3)}. {mode === "json" ? "Envie o arquivo (o conteúdo aparece abaixo para correções)" : "Escreva ou cole o texto (ou um JSON)"}</Label>
             {mode === "json" && <Input type="file" accept=".json,application/json" className="h-11" onChange={e => readFile(e.target.files?.[0])} />}
             {mode === "json" && fileName && <p className="text-xs text-muted-foreground">Arquivo: {fileName} — selecionar um arquivo NÃO importa nada.</p>}
-            <Textarea id={uid + "content"} value={content} onChange={e => { setContent(e.target.value); if (preview) invalidate(); }} rows={mode === "text" ? 14 : 8} spellCheck={false} placeholder={mode === "text" ? TEXT_EXAMPLE : "O conteúdo do JSON aparece aqui."} className="font-mono text-xs" />
+            {mode === "json" && exampleJson && <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => { setContent(exampleJson); setFileName(""); invalidate(); }}>Ver exemplo de JSON válido</Button>}
+            <Textarea id={uid + "content"} value={content} onChange={e => { setContent(e.target.value); if (preview) invalidate(); }} rows={mode === "text" ? 14 : 8} spellCheck={false} placeholder={mode === "text" ? textExample : "Cole o JSON aqui ou envie o arquivo acima."} className="font-mono text-xs" />
             {mode === "text" && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer py-2">Campos reconhecidos</summary>
                 <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Início, Fim, Status · Conjunto, ID do conjunto, Público, Chave do público · Anúncio, ID do anúncio, Formato · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques, Leads · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero).</p>
-                <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => { setContent(TEXT_EXAMPLE); invalidate(); }}>Inserir exemplo</Button>
+                <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => { setContent(textExample); invalidate(); }}>Inserir exemplo</Button>
               </details>
             )}
           </div>

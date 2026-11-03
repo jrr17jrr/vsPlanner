@@ -31,6 +31,7 @@ import {
 import { formatDate, formatDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Task, TaskOccurrence } from "@/types/database.types";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 type Tab = "dia" | "prazo" | "concluidas";
 const byPriority = <T extends {priority:string}>(a:T,b:T) => Number(b.priority === "importante") - Number(a.priority === "importante");
@@ -117,6 +118,7 @@ export function TarefasPageClient({
 
   return (
     <div className="flex flex-col gap-4">
+      <QuickCreateListener kinds={["tarefa"]} onOpen={() => { setTab("dia"); dialogs.openCreate("dia"); }} />
       <PageHeader
         title="Tarefas"
         description="Tarefas do dia (inclusive as que se repetem) e tarefas com prazo."

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Settings, Sparkles, UserCog } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,13 @@ export function Header() {
   // Identidade REAL (Supabase `profiles`) — menu usa o usuário real.
   const { profile, email } = useAuthProfile();
   const router = useRouter();
+  const pathname = usePathname();
+  const [seenPath, setSeenPath] = useState(pathname);
+  // Fecha o menu do celular sempre que a página muda (link, busca, + Novo, voltar).
+  if (seenPath !== pathname) {
+    setSeenPath(pathname);
+    if (mobileOpen) setMobileOpen(false);
+  }
 
   async function handleLogout() {
     // Para de enviar lembretes desta conta a este aparelho antes de sair.
@@ -43,8 +50,8 @@ export function Header() {
     // reserva a área do relógio/notch via safe-area; no navegador o inset é 0.
     <header className="sticky top-0 z-30 flex h-[calc(4rem+env(safe-area-inset-top))] w-full min-w-0 shrink-0 items-center gap-1.5 overflow-visible border-b border-border bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:h-[calc(3.5rem+env(safe-area-inset-top))] sm:gap-2 sm:px-4">
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-[min(88vw,340px)] max-w-full overflow-hidden p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] lg:hidden">
-          <SheetHeader className="border-b border-sidebar-border px-4 py-4">
+        <SheetContent side="left" className="w-[min(88vw,340px)] max-w-full gap-0 overflow-hidden bg-sidebar p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] lg:hidden">
+          <SheetHeader className="px-4 py-3.5">
             <SheetTitle className="flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
                 <Sparkles className="h-4 w-4 text-primary" />
@@ -52,7 +59,7 @@ export function Header() {
               VSPlanner
             </SheetTitle>
           </SheetHeader>
-          <div className="px-3 pt-3">
+          <div className="px-3 pb-2">
             <SpaceSwitcher />
           </div>
           <NavContent onNavigate={() => setMobileOpen(false)} />

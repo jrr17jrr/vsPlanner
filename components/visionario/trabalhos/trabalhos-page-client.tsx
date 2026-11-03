@@ -24,6 +24,7 @@ import type {
   WorkItemAssignee,
   WorkItemStatus,
 } from "@/types/database.types";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 type ResponsibleFilter = "todos" | "meus" | "outros" | "sem_responsavel";
 
@@ -252,6 +253,7 @@ export function TrabalhosPageClient({
         </div>
       )}
 
+      {permissions.canCreate && <QuickCreateListener kinds={["tarefa"]} onOpen={() => { setEditing(undefined); setFormOpen(true); }} />}
       {(permissions.canCreate || permissions.canEdit) && (
         <WorkItemFormDialog
           open={formOpen}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Search, Users, Briefcase, CalendarClock, Layers, Compass, Loader2 } from "lucide-react";
-import { useAuthProfile } from "@/components/providers/auth-profile-provider";
+import { useNavAccess } from "@/components/layout/use-nav-access";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { searchAction, type SearchResult, type SearchResultGroup } from "@/lib/supabase/search-actions";
-import { NAV_HOME, NAV_GROUPS, NAV_DEV_PANEL } from "@/lib/nav";
+import { flattenNav, searchNav } from "@/lib/nav";
 
 const GROUP_ICON: Record<SearchResultGroup | "Páginas", typeof Search> = {
   Clientes: Users,
@@ -24,7 +24,7 @@ const GROUP_ICON: Record<SearchResultGroup | "Páginas", typeof Search> = {
   Páginas: Compass,
 };
 
-type PageResult = { id: string; label: string; href: string; group: "Páginas" };
+type PageResult = { id: string; label: string; sub?: string; href: string; group: "Páginas" };
 
 /**
  * Busca real: clientes/serviços/reuniões/trabalhos vêm de
@@ -40,7 +40,7 @@ export function GlobalSearch() {
   const [dataResults, setDataResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { canAccessVisionario, canAccessTiktok, visionarioModulePermissions, tiktokModulePermissions, profile } = useAuthProfile();
+  const access = useNavAccess();
 
   useEffect(() => {
     const q = query.trim();
@@ -61,22 +61,11 @@ export function GlobalSearch() {
     return () => clearTimeout(timeout);
   }, [query]);
 
+  // Páginas: mesmas regras de permissão do menu (lib/nav.ts), com o caminho completo.
   const pageResults = useMemo<PageResult[]>(() => {
-    const q = query.trim().toLowerCase();
-    if (q.length < 2) return [];
-    const accessible = [NAV_HOME, ...NAV_GROUPS.flatMap((g) => {
-      if (g.requires === "visionario" && !canAccessVisionario) return [];
-      if (g.requires === "tiktok" && !canAccessTiktok) return [];
-      const permissions = g.requires === "visionario" ? visionarioModulePermissions : g.requires === "tiktok" ? tiktokModulePermissions : undefined;
-      const items = permissions ? g.items.filter((item) => !item.module || permissions[item.module]) : g.items;
-      // Submenus (ex.: Visionário Dev → MKT): as páginas filhas também são pesquisáveis, com o nome do pai.
-      return items.flatMap((item) => item.children?.length ? item.children.map((c) => ({ ...c, label: `${item.label} · ${c.label}` })) : [item]);
-    })];
-    if (profile.system_role === "super_admin") accessible.push(NAV_DEV_PANEL);
-    return accessible
-      .filter((item) => item.label.toLowerCase().includes(q))
-      .map((item) => ({ id: item.href, label: item.label, href: item.href, group: "Páginas" as const }));
-  }, [query, canAccessVisionario, canAccessTiktok, visionarioModulePermissions, tiktokModulePermissions, profile.system_role]);
+    if (query.trim().length < 2) return [];
+    return searchNav(flattenNav(access), query).map((e) => ({ id: e.key, label: e.label, sub: e.path.join(" → ") || undefined, href: e.href, group: "Páginas" as const }));
+  }, [query, access]);
 
   const hasQuery = query.trim().length >= 2;
   // `dataResults` pode ser resíduo de uma busca anterior mais longa — só

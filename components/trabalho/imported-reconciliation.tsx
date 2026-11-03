@@ -30,7 +30,7 @@ export function ImportedReconciliation({ rows, campaigns, excludedLegacy, basePa
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 text-amber-400" />Reconciliação dos resultados importados</h2>
-          <Link href={basePath+"/importar"} className="text-sm text-primary hover:underline">Importador</Link>
+          <Link href={"/importar?area="+(basePath==="/visionario/mkt"?"mkt":"clt")+"&tipo=resultados"} className="text-sm text-primary hover:underline">Central de Importação</Link>
         </div>
         {divergent.map(r => (
           <div key={`${r.campaign_id}-${r.period_start}`} className="rounded-lg border border-amber-500/30 p-3 text-sm">

@@ -64,6 +64,7 @@ import type {
 } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
 import type { FinanceTab } from "@/lib/finance-tabs";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 type Tab = FinanceTab;
 
@@ -197,6 +198,9 @@ export function FinanceiroPageClient({
 
   return (
     <div className="flex flex-col gap-6">
+      {permissions.canCreate && (
+        <QuickCreateListener kinds={["receita", "despesa"]} onOpen={(kind) => setDialog({ kind: kind === "receita" ? "entrada" : "saida", pending: false })} />
+      )}
       <PageHeader
         title={`Financeiro — ${SCOPE_TITLE[scope]}`}
         description="Caixa real, contas a receber e a pagar deste espaço."

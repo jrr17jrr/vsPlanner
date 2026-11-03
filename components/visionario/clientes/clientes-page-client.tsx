@@ -23,6 +23,7 @@ import type {
   Service,
   SpaceMemberProfile,
 } from "@/types/database.types";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 type FilterKey = "todos" | "ativos" | "inativos";
 type FinanceFilter = "todos" | "pagos" | "pendentes" | "atrasados";
@@ -173,7 +174,10 @@ export function ClientesPageClient({
       )}
 
       {permissions.canCreate && (
-        <ClientFormDialog open={formOpen} onOpenChange={setFormOpen} members={members} />
+        <>
+          <QuickCreateListener kinds={["cliente"]} onOpen={() => setFormOpen(true)} />
+          <ClientFormDialog open={formOpen} onOpenChange={setFormOpen} members={members} />
+        </>
       )}
       {paying && (
         <MarkPaymentDialog

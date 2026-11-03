@@ -17,6 +17,7 @@ import { toggleActivityCompletionAction, deleteActivityAction } from "@/lib/supa
 import { getRealOccurrences, getRealOccurrencesForDay, type RealActivityOccurrence } from "@/lib/routine-real";
 import { toDateKey, weekdayLabel, formatDateShort } from "@/lib/format";
 import type { Activity, ActivityCompletion, Task } from "@/types/database.types";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 export function RotinaPageClient({
   activities,
@@ -230,6 +231,7 @@ export function RotinaPageClient({
         </TabsContent>
       </Tabs>
 
+      <QuickCreateListener kinds={["atividade"]} onOpen={() => openCreate()} />
       <ActivityFormDialog open={formOpen} onOpenChange={setFormOpen} activity={editing} defaultWeekday={defaultWeekday} defaultDate={defaultDate} tasks={linkableTasks} />
 
       <ConfirmDialog

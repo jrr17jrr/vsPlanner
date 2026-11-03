@@ -8,6 +8,7 @@ import { parseImportInput } from "@/lib/import/parse";
 import { validateImport, type ImportPreview } from "@/lib/import/validate";
 import { buildImportPayload } from "@/lib/import/plan";
 import { buildSnapshot } from "@/lib/import/snapshot";
+import { assertCompanyInModule } from "@/lib/supabase/clt-scope";
 
 /**
  * Importador Inteligente (públicos + campanhas + conjuntos + anúncios +
@@ -17,7 +18,8 @@ import { buildSnapshot } from "@/lib/import/snapshot";
  */
 
 type Period = { start: string; end: string } | null;
-type Input = { companyId: string; content: string; period?: Period };
+/** `module`: quando informado (Central de Importação), a empresa precisa ser desse módulo — CLT e MKT nunca se misturam. */
+type Input = { companyId: string; content: string; period?: Period; module?: "clt" | "mkt" };
 
 const MIGRATION_HINT = "Aplique no Supabase a migration supabase/migrations/20261030110000_clt_smart_import.sql para habilitar o importador.";
 const isMissingSchema = (code?: string) => code === "42703" || code === "42P01" || code === "PGRST204" || code === "PGRST205" || code === "PGRST202" || code === "42883";
@@ -30,7 +32,7 @@ function validPeriod(period: Period | undefined): Period | undefined {
   return period;
 }
 
-async function context(companyId: string) {
+async function context(companyId: string, module?: "clt" | "mkt") {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão expirada. Entre novamente.");
@@ -38,6 +40,7 @@ async function context(companyId: string) {
   const { data: company, error } = await db.from("clt_companies").select("id,name").eq("id", companyId).eq("user_id", user.id).maybeSingle();
   if (error) throw error;
   if (!company) throw new Error("Empresa não encontrada.");
+  if (module && !(await assertCompanyInModule(supabase, user.id, companyId, module))) throw new Error("Empresa não encontrada neste módulo.");
   return { db, user, company: company as { id: string; name: string } };
 }
 
@@ -92,7 +95,8 @@ function describeError(e: unknown): string {
 async function buildPreview(input: Input) {
   const parsed = parseImportInput(input.content);
   if (!parsed.ok) return { error: parsed.error } as const;
-  const { db, user, company } = await context(input.companyId);
+  if (input.module !== undefined && input.module !== "clt" && input.module !== "mkt") return { error: "Módulo inválido." } as const;
+  const { db, user, company } = await context(input.companyId, input.module);
   const { snapshot, schemaReady } = await loadSnapshot(db, company);
   const preview = validateImport(parsed.bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) });
   return { preview, detected: parsed.detected, schemaReady, db, user } as const;
@@ -138,7 +142,7 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
         if (typeError) { typeWarning = " O tipo de resultado dos conjuntos não foi gravado (atualização do banco pendente: clt_ad_sets.result_type)."; break; }
       }
     }
-    ["/trabalho", "/trabalho/empresas", "/trabalho/campanhas", "/trabalho/relatorios", "/trabalho/analises", "/trabalho/importar"].forEach(p => revalidatePath(p));
+    ["/trabalho", "/trabalho/empresas", "/trabalho/campanhas", "/trabalho/relatorios", "/trabalho/analises", "/importar"].forEach(p => revalidatePath(p));
     revalidatePath("/trabalho/empresas/[id]", "page");
     revalidatePath("/visionario/mkt", "layout");
     const s = (data ?? {}) as Record<string, number | string>;

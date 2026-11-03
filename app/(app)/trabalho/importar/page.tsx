@@ -1,5 +1,6 @@
-import { CltImportPage } from "@/components/trabalho/pages/simple-pages";
+import { redirect } from "next/navigation";
 
-export default async function Page() {
-  return <CltImportPage module="clt" />;
+/** Importador do CLT → Central de Importação (mesmo motor, mesma transação). */
+export default function Page() {
+  redirect("/importar?area=clt&tipo=campanhas");
 }

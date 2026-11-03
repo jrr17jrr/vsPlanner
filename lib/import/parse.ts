@@ -21,7 +21,7 @@ export function parseImportInput(content: string): ParseResult {
     try { data = JSON.parse(trimmed); }
     catch (e) { return { ok: false, error: `JSON inválido: ${e instanceof Error ? e.message : "erro de sintaxe"}. Nenhum dado foi salvo.` }; }
     const detected = normalizeJson(data);
-    if (detected.kind === "planning") return { ok: false, planning: true, error: "Este JSON é de planejamento (items). Use o importador da página Planejamento." };
+    if (detected.kind === "planning") return { ok: false, planning: true, error: "Este JSON é de tarefas/planejamento (items). Na Central de Importação, escolha o tipo Tarefas e subtarefas." };
     if (detected.kind === "unknown") return { ok: false, error: detected.message };
     return { ok: true, bundle: detected.bundle, detected: "json" };
   }

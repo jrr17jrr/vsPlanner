@@ -26,6 +26,7 @@ import { toDateKey, formatDateShort, todayKeySaoPaulo } from "@/lib/format";
 import { startOfWeekMonday, addDays } from "@/lib/dates";
 import { isOpenMeeting, isOverdueMeeting } from "@/lib/meeting-status";
 import type { Client, Meeting, MeetingParticipant, SpaceMemberProfile } from "@/types/database.types";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 type FilterKey = "proximas" | "hoje" | "realizadas" | "canceladas" | "todas";
 
@@ -215,6 +216,7 @@ export function ReunioesPageClient({
         </div>
       )}
 
+      {permissions.canCreate && <QuickCreateListener kinds={["reuniao"]} onOpen={() => setFormOpen(true)} />}
       {permissions.canCreate && (
         <MeetingFormDialog
           open={formOpen}

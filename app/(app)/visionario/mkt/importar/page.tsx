@@ -1,5 +1,6 @@
-import { CltImportPage } from "@/components/trabalho/pages/simple-pages";
-export const dynamic = "force-dynamic";
-export default async function Page() {
-  return <CltImportPage module="mkt" />;
+import { redirect } from "next/navigation";
+
+/** Importador do MKT → Central de Importação (mesmo motor, só empresas do MKT). */
+export default function Page() {
+  redirect("/importar?area=mkt&tipo=campanhas");
 }

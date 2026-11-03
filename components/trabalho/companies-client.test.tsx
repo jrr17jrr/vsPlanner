@@ -50,11 +50,11 @@ describe("Empresas do CLT (sem mudança visual)", () => {
 });
 
 describe("menu", () => {
-  it("MKT fica logo abaixo de Clientes na Visionário Dev, com as 9 páginas", () => {
+  it("MKT fica logo abaixo de Clientes na Visionário Dev, com as 7 páginas (Planejamento e Importar foram para a Central de Importação)", () => {
     const g = NAV_GROUPS.find(x => x.label === "Visionário Dev")!;
     const labels = g.items.map(i => i.label);
     expect(labels.indexOf("MKT")).toBe(labels.indexOf("Clientes") + 1);
     expect(labels).toEqual(["Visão Geral", "Clientes", "MKT", "Serviços", "Trabalhos", "Reuniões", "Vendedores", "Financeiro", "Sites", "Domínios"]);
-    expect(g.items.find(i => i.label === "MKT")!.children!.map(c => c.label)).toEqual(["Visão Geral", "Empresas", "Planejamento", "Campanhas", "Importar", "Análises", "Tarefas", "Rotina", "Relatórios"]);
+    expect(g.items.find(i => i.label === "MKT")!.children!.map(c => c.label)).toEqual(["Visão Geral", "Empresas", "Campanhas", "Análises", "Tarefas", "Rotina", "Relatórios"]);
   });
 });

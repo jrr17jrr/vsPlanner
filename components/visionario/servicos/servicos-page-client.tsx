@@ -12,6 +12,7 @@ import { ServiceFormDialog } from "@/components/visionario/servicos/service-form
 import { deleteServiceAction } from "@/lib/supabase/services-actions";
 import { formatCurrency } from "@/lib/format";
 import type { ClientService, Service } from "@/types/database.types";
+import { QuickCreateListener } from "@/components/shared/quick-create-listener";
 
 const BILLING_LABEL: Record<string, string> = {
   unico: "Cobrança única",
@@ -114,7 +115,10 @@ export function ServicosPageClient({
       )}
 
       {(permissions.canCreate || permissions.canEdit) && (
-        <ServiceFormDialog open={formOpen} onOpenChange={setFormOpen} service={editing} />
+        <>
+          {permissions.canCreate && <QuickCreateListener kinds={["servico"]} onOpen={() => { setEditing(undefined); setFormOpen(true); }} />}
+          <ServiceFormDialog open={formOpen} onOpenChange={setFormOpen} service={editing} />
+        </>
       )}
     </div>
   );
