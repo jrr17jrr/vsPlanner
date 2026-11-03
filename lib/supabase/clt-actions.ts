@@ -1,11 +1,27 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { buildNewSubtaskRows, type NewSubtaskInput } from "@/lib/supabase/subtask-rows";
 type State={error?:string;success?:string};
 type Db=import("@supabase/supabase-js").SupabaseClient;
 /** Módulos (clt/mkt) das empresas informadas; null se a coluna ainda não existe (tudo é CLT). */
 async function companyModules(s:unknown,userId:string,ids:string[]):Promise<Set<string>|null>{if(!ids.length)return new Set();const r=await (s as Db).from("clt_companies").select("id,module").eq("user_id",userId).in("id",ids);if(r.error)return null;return new Set((r.data||[]).map((x:{module:string})=>x.module));}
 async function ctx(){const s=await createSupabaseServerClient();const {data,error}=await s.auth.getUser();if(error||!data.user)throw new Error("Sessão inválida.");return{s,user:data.user};}
+/**
+ * Subtarefas criadas junto com a(s) tarefa(s): UM insert (todas ou nenhuma).
+ * Se falhar, desfaz as tarefas recém-criadas — nunca fica tarefa pela metade.
+ */
+async function insertSubtasksOrRollback(s:unknown,userId:string,taskIds:string[],inputs:NewSubtaskInput[]):Promise<string|null>{
+ if(!inputs.length||!taskIds.length)return null;
+ const rows:Record<string,unknown>[]=[];
+ for(const id of taskIds){const built=buildNewSubtaskRows({parentType:"clt",parentId:id,userId},inputs);if("error" in built)return built.error;rows.push(...built.rows);}
+ const {error}=await (s as Db).from("task_subtasks").insert(rows);
+ if(!error)return null;
+ const undo=await (s as Db).from("clt_tasks").delete().in("id",taskIds).eq("user_id",userId);
+ return undo.error?"As subtarefas não foram salvas ("+error.message+") e a tarefa criada não pôde ser desfeita automaticamente. Confira a lista de tarefas.":"Nada foi salvo: erro ao gravar as subtarefas ("+error.message+"). Tente novamente.";
+}
+/** Valida as subtarefas ANTES de criar a tarefa. */
+function checkSubtasks(userId:string,inputs:NewSubtaskInput[]|undefined):string|null{if(!inputs?.length)return null;if(inputs.length>50)return "Máximo de 50 subtarefas por vez.";const r=buildNewSubtaskRows({parentType:"clt",parentId:"",userId},inputs);return "error" in r?r.error:null;}
 function refresh(){["/trabalho","/trabalho/empresas","/trabalho/campanhas","/trabalho/tarefas"].forEach((path) => revalidatePath(path));revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout")}
 export async function saveCltCompanyAction(input:{id?:string;name:string;responsibleId?:string;email?:string;instagram?:string;responsiblePhone?:string;companyPhone?:string;website?:string;notes?:string;currentAdBalance:number;module?:"clt"|"mkt";companyKind?:"propria"|"cliente";clientId?:string|null;clientName?:string|null}):Promise<State>{
  const{s,user}=await ctx();if(!input.name.trim())return{error:"Nome é obrigatório."};
@@ -65,16 +81,21 @@ export async function adjustCltCompanyBalancesAction(input: { companyIds: string
 }
 
 export async function saveCltCampaignAction(input:{companyId:string;name:string;objective?:string;description?:string;startsOn:string;endsOn:string;spentAmount:number;messages:number;sales:number;views:number;generatedRevenue?:number}):Promise<State>{const{s,user}=await ctx();if(!input.companyId||!input.name.trim()||!input.startsOn||!input.endsOn)return{error:"Preencha empresa, campanha, início e encerramento."};const{error}=await s.from("clt_campaigns").insert({user_id:user.id,company_id:input.companyId,name:input.name.trim(),objective:input.objective?.trim()||null,description:input.description?.trim()||null,starts_on:input.startsOn,ends_on:input.endsOn,spent_amount:Math.max(0,input.spentAmount||0),messages:Math.max(0,input.messages||0),sales:Math.max(0,input.sales||0),views:Math.max(0,input.views||0),generated_revenue:input.generatedRevenue||null});if(error)return{error:error.message};refresh();return{success:"Campanha cadastrada."}}
-export async function saveCltTaskAction(input:{id?:string;companyId?:string;module?:"clt"|"mkt";title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{const{s,user}=await ctx();if(!input.title.trim())return{error:"Título é obrigatório."};if(input.recurrence==="weekly"&&!input.weekdays.length)return{error:"Escolha pelo menos um dia da semana."};if(input.recurrence==="none"&&input.kind==="dia"&&!input.dueDate)return{error:"Informe o dia da tarefa."};const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});const values={company_id:input.companyId||null,title:input.title.trim(),description:input.description?.trim()||null,kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};const mod=input.module==="mkt"?"mkt":"clt";if(input.companyId){const mods=await companyModules(s,user.id,[input.companyId]);if(mods&&!mods.has(mod))return{error:"Empresa não encontrada neste módulo."};}
+export async function saveCltTaskAction(input:{id?:string;companyId?:string;module?:"clt"|"mkt";title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string;subtasks?:NewSubtaskInput[]}):Promise<State>{const{s,user}=await ctx();if(!input.title.trim())return{error:"Título é obrigatório."};const subtasks=input.id?[]:input.subtasks??[];const subError=checkSubtasks(user.id,subtasks);if(subError)return{error:subError};if(input.recurrence==="weekly"&&!input.weekdays.length)return{error:"Escolha pelo menos um dia da semana."};if(input.recurrence==="none"&&input.kind==="dia"&&!input.dueDate)return{error:"Informe o dia da tarefa."};const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});const values={company_id:input.companyId||null,title:input.title.trim(),description:input.description?.trim()||null,kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};const mod=input.module==="mkt"?"mkt":"clt";if(input.companyId){const mods=await companyModules(s,user.id,[input.companyId]);if(mods&&!mods.has(mod))return{error:"Empresa não encontrada neste módulo."};}
  // Tarefa geral (sem empresa) do MKT guarda o módulo; com empresa, o banco usa o módulo da empresa. CLT não envia a coluna.
  const withModule=mod==="mkt"?{...values,module:"mkt"}:values;
- const q=input.id?s.from("clt_tasks").update(withModule as never).eq("id",input.id).eq("user_id",user.id):s.from("clt_tasks").insert({...withModule,user_id:user.id} as never);const{error}=await q;if(error){if(mod==="mkt"&&["42703","PGRST204"].includes(String(error.code)))return{error:"O módulo MKT ainda não está ativo no banco (migração pendente)."};return{error:error.message};}refresh();revalidatePath("/trabalho/rotina");return{success:input.id?"Tarefa atualizada.":"Tarefa cadastrada."}}
+ const q=input.id?s.from("clt_tasks").update(withModule as never).eq("id",input.id).eq("user_id",user.id).select("id"):s.from("clt_tasks").insert({...withModule,user_id:user.id} as never).select("id");const{data:saved,error}=await q;if(error){if(mod==="mkt"&&["42703","PGRST204"].includes(String(error.code)))return{error:"O módulo MKT ainda não está ativo no banco (migração pendente)."};return{error:error.message};}
+ const failed=await insertSubtasksOrRollback(s,user.id,(saved||[]).map(r=>r.id as string),subtasks);if(failed){refresh();return{error:failed};}
+ refresh();revalidatePath("/trabalho/rotina");return{success:input.id?"Tarefa atualizada.":subtasks.length?`Tarefa cadastrada com ${subtasks.length} subtarefa(s).`:"Tarefa cadastrada."}}
 
-export async function saveCltTasksBatchAction(input:{companyIds:string[];module?:"clt"|"mkt";title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string}):Promise<State>{
+export async function saveCltTasksBatchAction(input:{companyIds:string[];module?:"clt"|"mkt";title:string;description?:string;kind:"prazo"|"dia";dueDate?:string;time?:string;priority:"normal"|"importante";notes?:string;recurrence:"none"|"weekly";weekdays:number[];recurrenceUntil?:string;subtasks?:NewSubtaskInput[]}):Promise<State>{
   const {s,user}=await ctx();
   const ids=[...new Set(input.companyIds)];
   if(!ids.length)return{error:"Selecione pelo menos uma empresa."};
   if(!input.title.trim())return{error:"Informe o título da tarefa."};
+  const subtasks=input.subtasks??[];
+  const subError=checkSubtasks(user.id,subtasks);
+  if(subError)return{error:subError};
   if(input.recurrence==="weekly"&&!input.weekdays.length)return{error:"Escolha os dias da semana."};
   if(input.recurrence==="none"&&input.kind==="dia"&&!input.dueDate)return{error:"Informe a data."};
   const {data:valid,error:checkError}=await s.from("clt_companies").select("id").eq("user_id",user.id).in("id",ids);
@@ -84,10 +105,13 @@ export async function saveCltTasksBatchAction(input:{companyIds:string[];module?
   if(mods&&(mods.size>1||!mods.has(input.module==="mkt"?"mkt":"clt")))return{error:"Selecione empresas deste módulo."};
   const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});
   const base={user_id:user.id,title:input.title.trim(),description:input.description?.trim()||null,kind:input.kind,due_date:input.recurrence==="weekly"?null:input.dueDate||null,scheduled_time:input.time||null,priority:input.priority,notes:input.notes?.trim()||null,recurrence:input.recurrence,weekdays:input.recurrence==="weekly"?input.weekdays:[],recurrence_start:input.recurrence==="weekly"?today:null,recurrence_until:input.recurrence==="weekly"&&input.recurrenceUntil?input.recurrenceUntil:null};
-  const {error}=await s.from("clt_tasks").insert(ids.map(company_id=>({...base,company_id})));
+  const {data:created,error}=await s.from("clt_tasks").insert(ids.map(company_id=>({...base,company_id}))).select("id");
   if(error)return{error:error.message};
+  // Cada empresa recebe a própria cópia das subtarefas (tarefas independentes).
+  const failed=await insertSubtasksOrRollback(s,user.id,(created||[]).map(r=>r.id as string),subtasks);
+  if(failed){refresh();return{error:failed};}
   refresh();revalidatePath("/trabalho/rotina");
-  return{success:`${ids.length} tarefas criadas. Cada empresa pode ser concluída separadamente.`};
+  return{success:`${ids.length} tarefas criadas${subtasks.length?`, cada uma com ${subtasks.length} subtarefa(s)`:""}. Cada empresa pode ser concluída separadamente.`};
 }
 
 export async function toggleCltTaskStatusAction(id:string,done:boolean):Promise<State>{const{s,user}=await ctx();const{error}=await s.from("clt_tasks").update({status:done?"concluida":"pendente",completed_at:done?new Date().toISOString():null}).eq("id",id).eq("user_id",user.id);if(error)return{error:error.message};refresh();return{success:"Tarefa atualizada."}}

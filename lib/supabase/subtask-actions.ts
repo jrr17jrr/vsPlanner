@@ -4,14 +4,14 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isMissingDescriptionColumn, MISSING_DESCRIPTION_WARNING, normalizeSubtaskDescription } from "@/lib/subtask-description";
-import { isMissingColumnError, MISSING_SCHEDULE_WARNING, normalizeReminderOffsets, stripScheduleColumns, SUBTASK_SCHEDULE_COLUMNS, type Subtask } from "@/lib/task-schedule";
+import { isMissingColumnError, MISSING_SCHEDULE_WARNING, stripScheduleColumns, SUBTASK_SCHEDULE_COLUMNS, type Subtask } from "@/lib/task-schedule";
+import { subtaskScheduleValues } from "@/lib/supabase/subtask-rows";
 
 export type SubtaskParent = Subtask["parent_type"];
 /** Linha de task_subtasks — definição única em lib/task-schedule.ts. */
 export type { Subtask };
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_KEY = /^\d{2}:\d{2}(:\d{2})?$/;
 type DbError = { code?: string; message: string } | null;
 
 /**
@@ -64,35 +64,11 @@ export type SubtaskInput = {
   reminderOffsets?: number[];
 };
 
-function scheduleValues(input: SubtaskInput): { error?: string; values: Record<string, unknown> } {
-  const values: Record<string, unknown> = {};
-  if (input.scheduledDate !== undefined) {
-    if (input.scheduledDate && !DATE_KEY.test(input.scheduledDate)) return { error: "Data de execução inválida.", values };
-    values.scheduled_date = input.scheduledDate || null;
-  }
-  for (const [key, col] of [["scheduledTime", "scheduled_time"], ["deadlineTime", "deadline_time"]] as const) {
-    const v = input[key];
-    if (v === undefined) continue;
-    if (v && !TIME_KEY.test(v)) return { error: "Horário inválido.", values };
-    values[col] = v || null;
-  }
-  if (input.priority !== undefined) {
-    if (input.priority !== "normal" && input.priority !== "importante") return { error: "Prioridade inválida.", values };
-    values.priority = input.priority;
-  }
-  if (input.reminderOffsets !== undefined) values.reminder_offsets = normalizeReminderOffsets(input.reminderOffsets);
-  if (values.scheduled_date && input.dueDate && input.dueDate < (values.scheduled_date as string)) {
-    return { error: "O prazo final não pode ser antes do dia de execução.", values };
-  }
-  return { values };
-}
-
 export async function saveSubtask(parentType: SubtaskParent, parentId: string, input: SubtaskInput): Promise<{ error?: string; success?: boolean; warning?: string }> {
   const { db, user } = await context(parentType, parentId);
   const title = input.title.trim();
   if (!title || title.length > 300) return { error: "Informe um título de até 300 caracteres." };
-  if (input.dueDate && !DATE_KEY.test(input.dueDate)) return { error: "Data inválida." };
-  const schedule = scheduleValues(input);
+  const schedule = subtaskScheduleValues(input);
   if (schedule.error) return { error: schedule.error };
   const description = normalizeSubtaskDescription(input.description);
   if (description.error) return { error: description.error };

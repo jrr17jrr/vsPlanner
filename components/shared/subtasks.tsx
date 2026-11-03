@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ExpandableDescription } from "@/components/shared/expandable-description";
-import { ReminderOffsetsPicker } from "@/components/shared/reminder-offsets-picker";
+import { SubtaskDescriptionField, SubtaskDetailsFields } from "@/components/shared/subtask-fields";
 import { listSubtasks, saveSubtask, setSubtaskDone, deleteSubtask, moveSubtask, type Subtask, type SubtaskParent } from "@/lib/supabase/subtask-actions";
-import { SUBTASK_DESCRIPTION_MAX } from "@/lib/subtask-description";
+import { EMPTY_SUBTASK_DRAFT, subtaskDraftToInput, validateSubtaskDraft, type SubtaskDraft } from "@/lib/subtask-draft";
 import { groupSubtasks, normalizeReminderOffsets, type SubtaskEntry } from "@/lib/task-schedule";
 import { nowTimeSaoPaulo, parseLocalDate, todayKeySaoPaulo, weekdayLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -23,20 +23,12 @@ function shortDay(dateKey: string) {
   return `${weekdayLabel(d.getDay()).slice(0, 3)} ${dateKey.slice(8, 10)}/${dateKey.slice(5, 7)}`;
 }
 
-type FormState = {
-  title: string;
-  description: string;
-  showDescription: boolean;
-  scheduledDate: string;
-  scheduledTime: string;
-  dueDate: string;
-  deadlineTime: string;
-  priority: "normal" | "importante";
-  reminders: number[];
-  showMore: boolean;
-};
+type FormState = SubtaskDraft & { showDescription: boolean; showMore: boolean };
 
-const EMPTY_FORM: FormState = { title: "", description: "", showDescription: false, scheduledDate: "", scheduledTime: "", dueDate: "", deadlineTime: "", priority: "normal", reminders: [], showMore: false };
+const EMPTY_FORM: FormState = { ...EMPTY_SUBTASK_DRAFT, showDescription: false, showMore: false };
+
+/** Celular (abaixo de `sm`): o formulário abre em diálogo próprio, com rolagem vertical. */
+const isPhone = () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches;
 
 /**
  * Subtarefas de UMA tarefa (pessoal, CLT ou Visionário) — o mesmo
@@ -72,6 +64,7 @@ export function Subtasks({
   const [expanded, setExpanded] = useState<string[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [showAll, setShowAll] = useState<boolean | null>(null);
+  const [phoneForm, setPhoneForm] = useState(false);
   const [pending, start] = useTransition();
 
   // Dados novos do servidor (outra tela concluiu/editou) substituem os locais.
@@ -102,6 +95,12 @@ export function Subtasks({
 
   function patch(values: Partial<FormState>) { setForm(f => ({ ...f, ...values })); }
   function resetForm() { setForm(EMPTY_FORM); setEditing(null); setParentForNew(null); }
+  /** Nova subtarefa (ou item do checklist de `parent`). No celular abre o diálogo. */
+  function startNew(parent: string | null = null) {
+    resetForm();
+    setParentForNew(parent);
+    if (isPhone()) { setForm({ ...EMPTY_FORM, showDescription: true, showMore: true }); setPhoneForm(true); }
+  }
   function startEdit(item: Subtask) {
     setEditing(item.id); setParentForNew(item.parent_subtask_id);
     const showMore = !!(item.scheduled_date || item.scheduled_time || item.deadline_time || item.priority === "importante" || item.reminder_offsets?.length);
@@ -117,6 +116,7 @@ export function Subtasks({
       reminders: normalizeReminderOffsets(item.reminder_offsets),
       showMore,
     });
+    if (isPhone()) setPhoneForm(true);
   }
   function toggleDone(item: Subtask, checked: boolean) {
     setItems(current => current.map(x => x.id === item.id ? {...x, is_done: checked} : x));
@@ -145,24 +145,15 @@ export function Subtasks({
   }
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (form.scheduledDate && form.dueDate && form.dueDate < form.scheduledDate) {
-      toast.error("O prazo final não pode ser antes do dia de execução.");
-      return;
-    }
+    const invalid = validateSubtaskDraft(form);
+    if (invalid) { toast.error(invalid); return; }
     run(async () => {
       const r = await saveSubtask(parentType, parentId, {
+        ...subtaskDraftToInput(form, form.showDescription || !!editing),
         id: editing ?? undefined,
-        title: form.title,
-        dueDate: form.dueDate,
         parentSubtaskId: parentForNew,
-        description: form.showDescription || editing ? form.description : undefined,
-        scheduledDate: form.scheduledDate || null,
-        scheduledTime: form.scheduledTime || null,
-        deadlineTime: form.dueDate ? form.deadlineTime || null : null,
-        priority: form.priority,
-        reminderOffsets: form.scheduledDate ? form.reminders : [],
       });
-      if (!r.error) resetForm();
+      if (!r.error) { resetForm(); setPhoneForm(false); }
       return r;
     });
   }
@@ -260,7 +251,7 @@ export function Subtasks({
               <div className="flex items-center">
                 {iconButton("Subir", () => run(() => moveSubtask(parentType,parentId,item.id,-1)), <ArrowUp className="h-4 w-4"/>, pending || i === 0)}
                 {iconButton("Descer", () => run(() => moveSubtask(parentType,parentId,item.id,1)), <ArrowDown className="h-4 w-4"/>, pending || i === roots.length-1)}
-                {iconButton("Adicionar checklist", () => {resetForm();setParentForNew(item.id);setExpanded(a=>a.includes(item.id)?a:[...a,item.id]);}, <Plus className="h-4 w-4"/>, pending)}
+                {iconButton("Adicionar checklist", () => {startNew(item.id);setExpanded(a=>a.includes(item.id)?a:[...a,item.id]);}, <Plus className="h-4 w-4"/>, pending)}
                 <button type="button" className="inline-flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs text-primary" aria-label={`Mostrar checklist de ${item.title}`} aria-expanded={expanded.includes(item.id)} onClick={()=>setExpanded(a=>a.includes(item.id)?a.filter(x=>x!==item.id):[...a,item.id])}>{expanded.includes(item.id)?<ChevronDown className="h-4 w-4"/>:<ChevronRight className="h-4 w-4"/>} Checklist ({children.length})</button>
                 {iconButton("Editar", () => startEdit(item), <Pencil className="h-4 w-4"/>, pending)}
                 {iconButton("Excluir", () => {if(confirm("Excluir esta subtarefa?"))run(() => deleteSubtask(parentType,parentId,item.id));}, <Trash2 className="h-4 w-4"/>, pending)}
@@ -274,33 +265,40 @@ export function Subtasks({
                 {iconButton("Editar item", ()=>startEdit(child), <Pencil className="h-4 w-4"/>)}
                 {iconButton("Excluir item", ()=>{if(confirm("Excluir este item?"))run(()=>deleteSubtask(parentType,parentId,child.id));}, <Trash2 className="h-4 w-4"/>)}
               </div><ExpandableDescription text={child.description} className="pl-7"/></div>)}
-              <button type="button" className="min-h-9 text-xs text-primary" onClick={()=>{resetForm();setParentForNew(item.id);}}>+ Novo item nesta etapa</button>
+              <button type="button" className="min-h-9 text-xs text-primary" onClick={()=>startNew(item.id)}>+ Novo item nesta etapa</button>
             </div>}
             </div>;
           })}
         </div>}
       </section>
 
-      {(parentForNew || editing) && <div className="flex items-center justify-between rounded-md bg-muted p-2 text-xs"><span>{editing ? `Editando: ${items.find(x=>x.id===editing)?.title ?? ""}` : `Adicionando item em: ${roots.find(x=>x.id===parentForNew)?.title}`}</span><button type="button" className="min-h-8 px-2" onClick={resetForm}>✕ Cancelar</button></div>}
-      <form className="flex flex-wrap gap-2" onSubmit={submit}>
+      {/* PC: criação/edição inline, como sempre foi. */}
+      {(parentForNew || editing) && !phoneForm && <div className="hidden items-center justify-between rounded-md bg-muted p-2 text-xs sm:flex"><span>{editing ? `Editando: ${items.find(x=>x.id===editing)?.title ?? ""}` : `Adicionando item em: ${roots.find(x=>x.id===parentForNew)?.title}`}</span><button type="button" className="min-h-8 px-2" onClick={resetForm}>✕ Cancelar</button></div>}
+      <form className="hidden min-w-0 flex-wrap gap-2 sm:flex" onSubmit={submit}>
         <Input className="min-w-40 flex-1" placeholder={parentForNew ? "Novo item do checklist" : "Nova subtarefa"} value={form.title} onChange={e=>patch({title:e.target.value})} required maxLength={300} aria-label="Título da subtarefa"/>
         <Button size="sm" type="submit" className="h-9" disabled={pending || !form.title.trim()}><Plus className="h-4 w-4"/>{editing ? "Salvar" : "Adicionar"}</Button>
         <div className="flex basis-full flex-wrap gap-3">
           <button type="button" className="inline-flex min-h-8 items-center gap-1 text-xs text-primary" aria-expanded={form.showMore} onClick={()=>patch({showMore:!form.showMore})}><SlidersHorizontal className="h-3 w-3"/>{form.showMore ? "Menos opções" : "Datas, prioridade e lembretes"}</button>
           {!form.showDescription && <button type="button" className="inline-flex min-h-8 items-center gap-1 text-xs text-primary" onClick={()=>patch({showDescription:true})}><AlignLeft className="h-3 w-3"/>Adicionar descrição</button>}
         </div>
-        {form.showMore && <div className="grid basis-full grid-cols-2 gap-2 rounded-md border border-border p-2">
-          <div className="flex flex-col gap-1"><Label className="text-xs" htmlFor={`sd-${parentId}`}>Fazer no dia</Label><Input id={`sd-${parentId}`} type="date" value={form.scheduledDate} onChange={e=>patch({scheduledDate:e.target.value})}/></div>
-          <div className="flex flex-col gap-1"><Label className="text-xs" htmlFor={`st-${parentId}`}>Horário</Label><Input id={`st-${parentId}`} type="time" value={form.scheduledTime} onChange={e=>patch({scheduledTime:e.target.value})} disabled={!form.scheduledDate}/></div>
-          <div className="flex flex-col gap-1"><Label className="text-xs" htmlFor={`dd-${parentId}`}>Prazo final</Label><Input id={`dd-${parentId}`} type="date" value={form.dueDate} min={form.scheduledDate || undefined} onChange={e=>patch({dueDate:e.target.value})}/></div>
-          <div className="flex flex-col gap-1"><Label className="text-xs" htmlFor={`dt-${parentId}`}>Horário limite</Label><Input id={`dt-${parentId}`} type="time" value={form.deadlineTime} onChange={e=>patch({deadlineTime:e.target.value})} disabled={!form.dueDate}/></div>
-          <div className="col-span-2 flex flex-col gap-1"><Label className="text-xs">Prioridade</Label><div className="grid grid-cols-2 gap-1.5">
-            {(["normal","importante"] as const).map(p => <Button key={p} type="button" size="sm" className="h-9" variant={form.priority===p?"default":"outline"} aria-pressed={form.priority===p} onClick={()=>patch({priority:p})}>{p==="normal"?"Normal":"Importante"}</Button>)}
-          </div></div>
-          {form.scheduledDate && <div className="col-span-2 flex flex-col gap-1"><Label className="text-xs">Lembretes</Label><ReminderOffsetsPicker value={form.reminders} onChange={r=>patch({reminders:r})} hasTime={!!form.scheduledTime}/></div>}
-        </div>}
-        {form.showDescription && <Textarea className="basis-full" rows={3} maxLength={SUBTASK_DESCRIPTION_MAX} placeholder="Descrição opcional (aparece recolhida)" value={form.description} onChange={e=>patch({description:e.target.value})} aria-label="Descrição opcional"/>}
+        {form.showMore && <SubtaskDetailsFields idPrefix={`inline-${parentId}`} value={form} onChange={patch} className="basis-full rounded-md border border-border p-2"/>}
+        {form.showDescription && <div className="basis-full"><SubtaskDescriptionField id={`inline-desc-${parentId}`} value={form.description} onChange={v=>patch({description:v})}/></div>}
       </form>
+      {/* Celular: botão grande que abre o formulário completo em diálogo. */}
+      <Button type="button" variant="outline" className="h-10 w-full sm:hidden" disabled={pending} onClick={()=>startNew()}><Plus className="h-4 w-4"/>Adicionar subtarefa</Button>
     </div>}
+    <Dialog open={phoneForm} onOpenChange={o=>{setPhoneForm(o); if(!o) resetForm();}}>
+      {phoneForm && <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>{editing ? "Editar subtarefa" : parentForNew ? "Novo item do checklist" : "Nova subtarefa"}</DialogTitle>
+          {parentForNew && !editing && <p className="text-xs text-muted-foreground">Em: {roots.find(x=>x.id===parentForNew)?.title}</p>}
+        </DialogHeader>
+        <form className="flex min-w-0 flex-col gap-4" onSubmit={submit}>
+          <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={`phone-title-${parentId}`}>Título *</Label><Input id={`phone-title-${parentId}`} value={form.title} onChange={e=>patch({title:e.target.value})} required maxLength={300} autoFocus={!editing}/></div>
+          <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={`phone-desc-${parentId}`}>Descrição</Label><SubtaskDescriptionField id={`phone-desc-${parentId}`} value={form.description} onChange={v=>patch({description:v, showDescription:true})}/></div>
+          <SubtaskDetailsFields idPrefix={`phone-${parentId}`} value={form} onChange={patch}/>
+          <DialogFooter><Button type="button" variant="outline" disabled={pending} onClick={()=>{setPhoneForm(false); resetForm();}}>Cancelar</Button><Button type="submit" disabled={pending || !form.title.trim()}>{pending ? "Salvando…" : editing ? "Salvar alterações" : "Adicionar subtarefa"}</Button></DialogFooter>
+        </form>
+      </DialogContent>}
+    </Dialog>
   </div>;
 }

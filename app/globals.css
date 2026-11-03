@@ -191,3 +191,24 @@ body { min-width: 0; }
     font-size: max(16px, 1em);
   }
 }
+
+/*
+ * iOS Safari: campos nativos de data/hora têm largura mínima própria e
+ * ignoram `w-full` — em grade de 2 colunas ou em diálogo, passavam da tela
+ * (campos cortados e rolagem horizontal). Só no iOS (-webkit-touch-callout).
+ */
+@supports (-webkit-touch-callout: none) {
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  input[type="month"] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+    max-width: 100%;
+  }
+  input::-webkit-date-and-time-value {
+    text-align: left;
+    min-height: 1.25em;
+  }
+}
