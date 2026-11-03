@@ -9,6 +9,7 @@ import { getModuleScope, inList } from "@/lib/supabase/clt-scope";
 import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltModule } from "@/lib/clt/module";
 import type { CltCampaignResultEntry } from "@/types/database.types";
+import type { FollowerRecord } from "@/lib/clt/followers";
 
 /**
  * Relatórios (PDF) do módulo. Empresas, campanhas, resultados, movimentações
@@ -22,10 +23,12 @@ export async function CltReportsPage({ module }: { module: CltModule }) {
   if (!user) return <p>Faça login.</p>;
   const scope = await getModuleScope(s, user.id, module);
   const ids = inList(scope.companyIds);
-  const [campaigns, movements, comparisons] = await Promise.all([
+  const [campaigns, movements, comparisons, followers] = await Promise.all([
     s.from("clt_campaigns").select("id,company_id,name,objective,starts_on,ends_on,planned_amount,campaign_status").eq("user_id", user.id).in("company_id", ids),
     db.from("clt_ad_account_movements").select("company_id,movement_date,kind,amount").eq("user_id", user.id).in("company_id", ids),
     db.from("clt_campaign_comparisons").select("company_id,old_campaign_ids,new_campaign_ids").eq("user_id", user.id).in("company_id", ids),
+    // Seguidores do Instagram (contagem manual) — sem a migration, o relatório segue sem essa seção.
+    db.from("clt_instagram_followers").select("id,company_id,followers,recorded_at").eq("user_id", user.id).in("company_id", ids),
   ]);
   const campaignIds = (campaigns.data || []).map(c => c.id);
   const results = campaignIds.length
@@ -40,5 +43,5 @@ export async function CltReportsPage({ module }: { module: CltModule }) {
   const note = merged.crossMonthPeriods ? " Resultados importados por período aparecem no mês em que o período termina." : "";
   const companies = scope.companies.filter(c => c.is_active).map(c => ({ id: c.id, name: c.name, current_ad_balance: c.current_ad_balance }));
   const title = module === "mkt" ? "Relatórios MKT" : "Relatórios CLT";
-  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e mês, registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={merged.results} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} /></div>;
+  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e mês, registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={merged.results} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} /></div>;
 }

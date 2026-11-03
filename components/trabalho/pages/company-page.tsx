@@ -20,6 +20,8 @@ import { CompanyTabs, type CompanyTabId } from "@/components/trabalho/company/co
 import { OverviewAudiences, OverviewCampaigns, OverviewTasks } from "@/components/trabalho/company/overview-sections";
 import { CompanyFinance, type AccountMovement } from "@/components/trabalho/company/company-finance";
 import { MonthlyVideoPlanSeeder } from "@/components/trabalho/company/monthly-video-plan-seeder";
+import { InstagramFollowersCard } from "@/components/trabalho/company/instagram-followers-card";
+import type { FollowerRecord } from "@/lib/clt/followers";
 import { loadHistoryInput } from "@/lib/supabase/clt-history-data";
 import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
@@ -46,7 +48,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  const campaigns=data.campaigns.filter(c=>c.company_id===id);
  const companyCampaignIds=campaigns.map(c=>c.id);
  const campaignFilter=companyCampaignIds.length?companyCampaignIds:["00000000-0000-0000-0000-000000000000"];
- const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery,levelResultsQuery,periodQuery,reconciliationQuery,movementsQuery]=await Promise.all([
+ const [budgetQuery,resultsQuery,setsQuery,comparisonQuery,audiencesQuery,levelResultsQuery,periodQuery,reconciliationQuery,movementsQuery,followersQuery]=await Promise.all([
  supabase.from("clt_monthly_budgets").select("*").eq("company_id",id).eq("month_key",month+"-01").maybeSingle(),
  supabase.from("clt_campaign_result_entries").select("*").in("campaign_id",campaignFilter),
  supabase.from("clt_ad_sets").select("*").in("campaign_id",campaignFilter),
@@ -57,8 +59,11 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  db.from("clt_ad_period_metrics").select("id,campaign_id,ad_set_id,creative_id,period_start,period_end,spend,conversations,sales,revenue,impressions,reach,link_clicks,leads").eq("company_id",id),
  db.from("clt_campaign_reconciliations").select("campaign_id,period_start,period_end,reported_spend,reported_conversations,unallocated_spend,unallocated_conversations,notes").eq("company_id",id),
  db.from("clt_ad_account_movements").select("id,movement_date,kind,amount,notes").eq("company_id",id).order("movement_date",{ascending:false}).limit(50),
+ db.from("clt_instagram_followers").select("id,company_id,followers,recorded_at").eq("company_id",id).order("recorded_at",{ascending:false}),
  ]);
  if(periodQuery.error&&!missingTable(periodQuery.error.code))throw periodQuery.error;
+ // Seguidores: tabela nova — erro (ex.: migration pendente) só desativa o card, nunca derruba a página.
+ if(followersQuery.error&&!missingTable(followersQuery.error.code))console.error("Instagram followers query failed",followersQuery.error);
  const setIds=(setsQuery.data||[]).map(s=>s.id);
  const creativesQuery=await supabase.from("clt_ad_creatives").select("*").in("ad_set_id",setIds.length?setIds:["00000000-0000-0000-0000-000000000000"]);
  const mergedResults=await withImportedPeriodResults(supabase,companyCampaignIds,(resultsQuery.data||[]) as CltCampaignResultEntry[]);
@@ -91,6 +96,7 @@ export async function CltCompanyPage({id,aba,module}:{id:string;aba?:string|stri
  <OverviewTasks tasks={tasks} occurrences={occurrences} pending={pending}/>
  </div>
  <CompanyDetailBalance company={company}/>
+ <InstagramFollowersCard companyId={id} records={(followersQuery.error?[]:followersQuery.data||[]) as FollowerRecord[]} available={!followersQuery.error}/>
  <Card><CardContent className="space-y-3 p-4"><h2 className="font-semibold">Dados e contatos</h2><div className="grid gap-3 text-sm sm:grid-cols-2">{module==="mkt"?<p><b>{company.company_kind==="cliente"?"Cliente:":"Tipo:"}</b> {mktOwnerLabel(company)}</p>:<p><b>Responsável:</b> {responsible?.name??"Não informado"}</p>}<p><b>Instagram:</b> {company.instagram||"Não informado"}</p>{company.email&&<a href={"mailto:"+company.email} className="inline-flex items-center gap-2 hover:underline"><Mail className="h-4 w-4"/>{company.email}</a>}{company.company_phone&&<p className="flex items-center gap-2"><Phone className="h-4 w-4"/>{company.company_phone}</p>}{company.responsible_phone&&<p><b>Telefone do responsável:</b> {company.responsible_phone}</p>}{company.website&&<a href={company.website.startsWith("http")?company.website:"https://"+company.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:underline"><ExternalLink className="h-4 w-4"/>Abrir site</a>}</div>{company.notes&&<p className="whitespace-pre-wrap rounded-md bg-muted p-3 text-sm">{company.notes}</p>}</CardContent></Card>
  </>;
 
