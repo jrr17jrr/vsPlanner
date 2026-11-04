@@ -18,9 +18,12 @@ export type RealActivityOccurrence = {
  */
 /**
  * Ocorrência única (`specific_date`, migration 20261102100000) aparece só
- * naquele dia; senão, nos `weekdays` (comportamento de sempre).
+ * naquele dia; senão, nos `weekdays` (comportamento de sempre). Dias em
+ * `skipped_dates` ("Excluir somente neste dia", migration 20261107100000)
+ * não contam — vale para Rotina, Meu Dia, Histórico e lembretes.
  */
-export function activityOccursOn(activity: Pick<Activity, "weekdays" | "specific_date">, dateKey: string, weekday: number): boolean {
+export function activityOccursOn(activity: Pick<Activity, "weekdays" | "specific_date" | "skipped_dates">, dateKey: string, weekday: number): boolean {
+  if (activity.skipped_dates?.includes(dateKey)) return false;
   if (activity.specific_date) return activity.specific_date === dateKey;
   return activity.weekdays.includes(weekday);
 }

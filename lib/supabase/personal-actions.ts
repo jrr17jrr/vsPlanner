@@ -13,7 +13,9 @@ import {
   stripScheduleColumns,
   TASK_SCHEDULE_COLUMNS,
 } from "@/lib/task-schedule";
+import { planRoutineDeletion, SKIP_NEEDS_MIGRATION, type DeleteRequest } from "@/lib/routine-delete";
 import type {
+  Activity,
   Database,
   GoalStatus,
   PersonalWorkTaskPriority,
@@ -823,4 +825,34 @@ export async function rescheduleTaskExecutionAction(taskId: string, date: string
   }
   revalidateTaskPaths();
   return { success: "Execução reprogramada. O prazo final não mudou." };
+}
+
+/**
+ * Minha Rotina — "Excluir selecionadas" (só depois da confirmação na tela).
+ * Regra em lib/routine-delete.ts: "dias" some só nos dias escolhidos
+ * (activities.skipped_dates); "toda" exclui a atividade inteira. Tudo
+ * restrito às atividades do próprio usuário.
+ */
+export async function deleteActivitiesAction(requests: DeleteRequest[]): Promise<ActionState> {
+  const { profile } = await requirePersonalSpace();
+  const supabase = await createSupabaseServerClient();
+  const ids = Array.isArray(requests) ? [...new Set(requests.map((r) => r?.activityId).filter((id): id is string => typeof id === "string"))] : [];
+  if (!ids.length) return { error: "Nenhuma atividade selecionada." };
+  const { data, error } = await supabase.from("activities").select("*").in("id", ids).eq("user_id", profile.id);
+  if (error) return { error: error.message };
+  const plan = planRoutineDeletion((data ?? []) as Activity[], requests);
+  if ("error" in plan) return { error: plan.error };
+
+  for (const skip of plan.skips) {
+    const r = await supabase.from("activities").update({ skipped_dates: skip.skipped_dates } as never).eq("id", skip.activityId).eq("user_id", profile.id);
+    if (r.error) return { error: isMissingColumnError(r.error) ? SKIP_NEEDS_MIGRATION : r.error.message };
+  }
+  if (plan.deleteIds.length) {
+    const r = await supabase.from("activities").delete().in("id", plan.deleteIds).eq("user_id", profile.id);
+    if (r.error) return { error: r.error.message };
+  }
+  revalidateRoutinePaths();
+  revalidatePath("/historico");
+  const n = plan.skips.length + plan.deleteIds.length;
+  return { success: n === 1 ? "Atividade excluída." : `${n} atividades excluídas.` };
 }

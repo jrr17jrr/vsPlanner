@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, ChevronLeft, ChevronRight, CalendarClock } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, CalendarClock, ListChecks, X } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -18,6 +18,8 @@ import { getRealOccurrences, getRealOccurrencesForDay, type RealActivityOccurren
 import { toDateKey, weekdayLabel, formatDateShort } from "@/lib/format";
 import type { Activity, ActivityCompletion, Task } from "@/types/database.types";
 import { QuickCreateListener } from "@/components/shared/quick-create-listener";
+import { DeleteSelectedDialog, occurrenceKey, SelectableOccurrence, SelectionBar } from "@/components/rotina/routine-selection";
+import { skipAvailable } from "@/lib/routine-delete";
 
 export function RotinaPageClient({
   activities,
@@ -52,6 +54,26 @@ export function RotinaPageClient({
   // Vinculáveis: pendentes ou recorrentes (as já vinculadas continuam na lista para a edição mostrar o nome).
   const linkableTasks = tasks.filter((t) => t.recurrence === "weekly" || t.status !== "concluida" || linkedIds.has(t.id));
   const [deleting, setDeleting] = useState<Activity | undefined>();
+  // Modo "Selecionar" (exclusão em lote). Seleção ≠ conclusão: aqui nada marca como feito.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Map<string, RealActivityOccurrence>>(() => new Map());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkKey, setBulkKey] = useState(0);
+  const titleOf = (occ: RealActivityOccurrence) => (occ.activity.task_id ? taskById.get(occ.activity.task_id)?.title : undefined) ?? occ.activity.title;
+  function toggleSelected(occ: RealActivityOccurrence) {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      const k = occurrenceKey(occ);
+      if (next.has(k)) next.delete(k);
+      else next.set(k, occ);
+      return next;
+    });
+  }
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected(new Map());
+    setBulkOpen(false);
+  }
 
   const today = new Date();
   const todayOcc = getRealOccurrencesForDay(activities, completions, today);
@@ -71,6 +93,9 @@ export function RotinaPageClient({
   }), [monday]);
 
   const weekOcc = useMemo(() => getRealOccurrences(activities, completions, weekDays[0], weekDays[6]), [activities, completions, weekDays]);
+  // "Selecionar todas" = o que está na tela agora (Hoje, ou a semana aberta). A seleção continua ao trocar de aba/semana.
+  const visibleOcc = tab === "hoje" ? todayOcc : weekOcc;
+  const selectedList = useMemo(() => [...selected.values()], [selected]);
 
   function openCreate(weekday?: number, date?: string) {
     setEditing(undefined);
@@ -114,6 +139,9 @@ export function RotinaPageClient({
   }
 
   function renderOcc(occ: RealActivityOccurrence) {
+    if (selecting) {
+      return <SelectableOccurrence key={occurrenceKey(occ)} occ={occ} title={titleOf(occ)} selected={selected.has(occurrenceKey(occ))} onToggle={() => toggleSelected(occ)} />;
+    }
     const linkedTask = occ.activity.task_id ? taskById.get(occ.activity.task_id) : undefined;
     if (linkedTask) {
       return (
@@ -151,9 +179,20 @@ export function RotinaPageClient({
         title="Minha Rotina"
         description="Organize seus horários, hábitos e compromissos do dia a dia."
         actions={
-          <Button size="sm" onClick={() => openCreate()}>
-            <Plus className="h-4 w-4" /> Nova atividade
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {selecting ? (
+              <Button size="sm" variant="outline" className="h-10 sm:h-8" onClick={stopSelecting}>
+                <X className="h-4 w-4" /> Cancelar seleção
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" className="h-10 sm:h-8" onClick={() => setSelecting(true)} disabled={activities.length === 0}>
+                <ListChecks className="h-4 w-4" /> Selecionar
+              </Button>
+            )}
+            <Button size="sm" className="h-10 sm:h-8" onClick={() => openCreate()} disabled={selecting}>
+              <Plus className="h-4 w-4" /> Nova atividade
+            </Button>
+          </div>
         }
       />
 
@@ -215,9 +254,11 @@ export function RotinaPageClient({
                     <p className={`text-sm font-semibold ${isToday ? "text-primary" : "text-foreground"}`}>{weekdayLabel(d.getDay())}</p>
                     <span className="text-xs text-muted-foreground">{formatDateShort(d)}</span>
                     {dayPct !== null && <span className="text-xs font-medium text-primary">{dayPct}%</span>}
-                    <button onClick={() => openCreate(d.getDay(), dateKey)} className="ml-auto min-h-9 px-1 text-xs text-primary hover:underline">
-                      + adicionar
-                    </button>
+                    {!selecting && (
+                      <button onClick={() => openCreate(d.getDay(), dateKey)} className="ml-auto min-h-9 px-1 text-xs text-primary hover:underline">
+                        + adicionar
+                      </button>
+                    )}
                   </div>
                   {occ.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">Sem atividades.</p>
@@ -230,6 +271,27 @@ export function RotinaPageClient({
           </div>
         </TabsContent>
       </Tabs>
+
+      {selecting && (
+        <SelectionBar
+          count={selected.size}
+          visibleCount={visibleOcc.length}
+          allVisibleSelected={visibleOcc.length > 0 && visibleOcc.every((o) => selected.has(occurrenceKey(o)))}
+          onSelectAll={() => setSelected((prev) => { const next = new Map(prev); for (const o of visibleOcc) next.set(occurrenceKey(o), o); return next; })}
+          onClear={() => setSelected(new Map())}
+          onCancel={stopSelecting}
+          onDelete={() => { setBulkKey((k) => k + 1); setBulkOpen(true); }}
+        />
+      )}
+      <DeleteSelectedDialog
+        key={bulkKey}
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        selected={selectedList}
+        titleOf={titleOf}
+        skipAvailable={skipAvailable(activities)}
+        onDeleted={stopSelecting}
+      />
 
       <QuickCreateListener kinds={["atividade"]} onOpen={() => openCreate()} />
       <ActivityFormDialog open={formOpen} onOpenChange={setFormOpen} activity={editing} defaultWeekday={defaultWeekday} defaultDate={defaultDate} tasks={linkableTasks} />

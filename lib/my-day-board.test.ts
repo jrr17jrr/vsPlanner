@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMyDayBoard, classifySchedule, spDateKey, type BoardInput, type BoardItem } from "./my-day-board";
+import { buildMyDayBoard, classifySchedule, groupSection, spDateKey, type BoardInput, type BoardItem, type SectionRow } from "./my-day-board";
 import type { Subtask } from "./task-schedule";
 import type { Activity, CltTask, Task, TaskOccurrence } from "@/types/database.types";
 
@@ -182,5 +182,54 @@ describe("CLT / MKT e outros", () => {
     });
     expect(b.hoje.map((i) => [i.title, i.areaLabel])).toEqual([["Relatório CLT", "CLT · SGIV"], ["Repetição CLT", "CLT · SGIV"]]);
     expect(b.atrasadas.map((i) => [i.title, i.status, i.areaLabel])).toEqual([["Prazo MKT", "prazo_vencido", "MKT"]]);
+  });
+});
+
+describe("agrupamento por tarefa principal (Meu Dia)", () => {
+  const shape = (rows: SectionRow[]) => rows.map((r) => (r.kind === "item" ? r.item.title : { grupo: r.parent.title, tarefaNaSecao: !!r.parentItem, subtarefas: r.children.map((c) => c.title) }));
+  const vs = task({ id: "vs", title: "VS Planner", due_date: "2026-11-20" }); // fora do horizonte: não aparece sozinha
+  const lanc = task({ id: "p", title: "Lançamento", due_date: TODAY });
+  const b = board({
+    tasks: [vs, lanc, task({ id: "solta", title: "Solta", due_date: TODAY, scheduled_time: "08:00" }), task({ id: "semdata", title: "Sem data" })],
+    subtasks: [
+      sub({ id: "m", parent_id: "vs", title: "Adicionar novos campos para métricas de campanha", scheduled_date: TODAY }),
+      sub({ id: "m2", parent_id: "vs", title: "Revisar relatório", due_date: "2026-10-30" }),
+      sub({ id: "m3", parent_id: "vs", title: "Publicar", scheduled_date: "2026-11-04" }),
+      sub({ id: "a", parent_id: "p", title: "Hoje sub", scheduled_date: TODAY }),
+      sub({ id: "x", parent_id: "semdata", title: "Sub de tarefa sem data", scheduled_date: TODAY }),
+    ],
+  });
+
+  it("subtarefa nunca solta: tarefa principal aparece como agrupamento em Hoje, Atrasadas e Próximas", () => {
+    expect(shape(groupSection(b.hoje))).toEqual([
+      "Solta",
+      { grupo: "VS Planner", tarefaNaSecao: false, subtarefas: ["Adicionar novos campos para métricas de campanha"] },
+      { grupo: "Lançamento", tarefaNaSecao: true, subtarefas: ["Hoje sub"] },
+      { grupo: "Sem data", tarefaNaSecao: false, subtarefas: ["Sub de tarefa sem data"] },
+    ]);
+    expect(shape(groupSection(b.atrasadas))).toEqual([{ grupo: "VS Planner", tarefaNaSecao: false, subtarefas: ["Revisar relatório"] }]);
+    expect(shape(groupSection(b.proximas))).toEqual([{ grupo: "VS Planner", tarefaNaSecao: false, subtarefas: ["Publicar"] }]);
+    for (const s of ["hoje", "atrasadas", "proximas", "concluidas"] as const) {
+      expect(groupSection(b[s]).some((r) => r.kind === "item" && r.item.source === "subtask")).toBe(false);
+    }
+  });
+
+  it("não duplica e não conta o agrupamento: cada item da seção aparece uma vez", () => {
+    for (const s of ["hoje", "atrasadas", "proximas", "concluidas"] as const) {
+      const flat = groupSection(b[s]).flatMap((r) => (r.kind === "item" ? [r.item.key] : [...(r.parentItem ? [r.parentItem.key] : []), ...r.children.map((c) => c.key)]));
+      expect(flat.sort()).toEqual(b[s].map((i) => i.key).sort());
+    }
+    // "VS Planner" e "Sem data" só agrupam: não entram na contagem do dia.
+    expect(b.hoje.map((i) => i.title)).not.toContain("VS Planner");
+    expect(b.hoje.map((i) => i.title)).not.toContain("Sem data");
+    expect(b.hoje).toHaveLength(5); // Solta, Lançamento e 3 subtarefas — os agrupamentos não contam
+  });
+
+  it("agrupar não altera datas, status nem conclusão", () => {
+    const before = JSON.stringify(b);
+    for (const s of ["hoje", "atrasadas", "proximas", "concluidas"] as const) groupSection(b[s]);
+    expect(JSON.stringify(b)).toBe(before);
+    const g = groupSection(b.atrasadas)[0];
+    expect(g.kind === "group" && g.children[0].status).toBe("prazo_vencido");
   });
 });

@@ -272,6 +272,50 @@ function nestUnderParents(items: BoardItem[]): BoardItem[] {
   return rest.flatMap((i) => (i.source === "task" ? [i, ...(children.get(i.task.id) ?? [])] : [i]));
 }
 
+export type SubtaskItem = Extract<BoardItem, { source: "subtask" }>;
+
+/**
+ * Uma linha de seção do Meu Dia:
+ * - "item": tarefa/atividade solta (sem subtarefas nesta seção);
+ * - "group": tarefa principal com as subtarefas da seção dentro.
+ *   `parentItem` = a própria tarefa quando ela também está nesta seção;
+ *   `null` = a tarefa principal aparece SÓ como agrupamento (não conta,
+ *   não tem caixa de concluir, não muda nada).
+ */
+export type SectionRow =
+  | { kind: "item"; item: BoardItem }
+  | { kind: "group"; key: string; parent: Task; parentItem: BoardItem | null; children: SubtaskItem[] };
+
+/**
+ * Agrupa as subtarefas de uma seção dentro da tarefa principal. Nunca
+ * duplica: cada item da seção aparece exatamente uma vez (como item, como
+ * tarefa do grupo ou como subtarefa do grupo). O grupo fica na posição da
+ * tarefa principal (se ela estiver na seção) ou da primeira subtarefa.
+ */
+export function groupSection(items: BoardItem[]): SectionRow[] {
+  const groups = new Map<string, Extract<SectionRow, { kind: "group" }>>();
+  const taskInSection = new Map<string, BoardItem>();
+  for (const i of items) if (i.source === "task") taskInSection.set(i.task.id, i);
+  const rows: SectionRow[] = [];
+  const ensure = (parent: Task) => {
+    let g = groups.get(parent.id);
+    if (!g) {
+      g = { kind: "group", key: `group:${parent.id}`, parent, parentItem: taskInSection.get(parent.id) ?? null, children: [] };
+      groups.set(parent.id, g);
+      rows.push(g);
+    }
+    return g;
+  };
+  const withChildren = new Set(items.filter((i): i is SubtaskItem => i.source === "subtask").map((i) => i.parent.id));
+  for (const i of items) {
+    if (i.source === "subtask") ensure(i.parent).children.push(i);
+    else if (i.source === "task" && withChildren.has(i.task.id)) ensure(i.task);
+    else rows.push({ kind: "item", item: i });
+  }
+  return rows;
+}
+
+
 export function buildMyDayBoard(input: BoardInput): MyDayBoard {
   const { todayKey } = input;
   const horizon = addDaysToKey(todayKey, UPCOMING_DAYS);

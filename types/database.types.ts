@@ -456,6 +456,8 @@ export type Activity = {
   /** Ocorrência única nesse dia (ignora `weekdays`). */
   specific_date?: string | null;
   reminder_offsets?: number[] | null;
+  /** Dias excluídos só naquele dia (migration 20261107100000). Ausente = migration não aplicada. */
+  skipped_dates?: string[] | null;
 };
 
 export type ActivityCompletion = {

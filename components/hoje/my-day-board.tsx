@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarClock, CheckCircle2, ChevronDown, ExternalLink, Pencil, Repeat } from "lucide-react";
+import { CalendarClock, CheckCircle2, ChevronDown, ExternalLink, ListTree, Pencil, Repeat } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { MoveDatePopover } from "@/components/shared/move-date-popover";
 import { Subtasks } from "@/components/shared/subtasks";
 import { ExpandableDescription } from "@/components/shared/expandable-description";
-import type { BoardItem, BoardSection, MyDayBoard } from "@/lib/my-day-board";
+import { groupSection, type BoardItem, type BoardSection, type MyDayBoard, type SectionRow } from "@/lib/my-day-board";
 import type { Subtask } from "@/lib/task-schedule";
 import { moveTaskDeadlineAction, rescheduleTaskExecutionAction, toggleTaskOccurrenceAction, toggleTaskStatusAction, togglePersonalWorkTaskStatusAction } from "@/lib/supabase/personal-actions";
 import { rescheduleSubtaskAction, setSubtaskDone } from "@/lib/supabase/subtask-actions";
@@ -60,7 +60,13 @@ function Row({
   subtasks,
   onEdit,
   onChanged,
+  inGroup = false,
+  group,
 }: {
+  /** Subtarefa dentro do agrupamento da tarefa principal (não repete o nome da tarefa). */
+  inGroup?: boolean;
+  /** Tarefa principal com subtarefas nesta seção: botão de mostrar/recolher. */
+  group?: { open: boolean; count: number; onToggle: () => void; controls: string };
   item: BoardItem;
   todayKey: string;
   done: boolean;
@@ -99,7 +105,7 @@ function Row({
           <Checkbox checked={done} disabled={!onToggle || busy} onCheckedChange={() => onToggle?.()} aria-label={`${done ? "Reabrir" : "Concluir"}: ${item.title}`} className="h-5 w-5" />
         </label>
         <button type="button" className="min-w-0 flex-1 text-left" onClick={() => canExpand && setOpen((v) => !v)} aria-expanded={canExpand ? open : undefined}>
-          {nested && <p className="truncate text-[11px] text-muted-foreground">↳ {item.parent.title}</p>}
+          {nested && !inGroup && <p className="truncate text-[11px] text-muted-foreground">↳ {item.parent.title}</p>}
           <p className={cn("break-words text-sm font-medium", done && "text-muted-foreground line-through")}>
             {item.title}
             {item.important && !done && <span className="ml-1.5 align-middle text-[11px] font-semibold text-destructive">Importante</span>}
@@ -137,6 +143,8 @@ function Row({
         </div>
       )}
 
+      {group && <GroupToggle {...group} className="px-3 pb-1.5 pl-12" />}
+
       {open && (
         <div className="space-y-2 border-t px-3 py-2.5 pl-14">
           {item.description && <ExpandableDescription text={item.description} />}
@@ -156,6 +164,43 @@ function Row({
   );
 }
 
+function GroupToggle({ open, count, onToggle, controls, className }: { open: boolean; count: number; onToggle: () => void; controls: string; className?: string }) {
+  return (
+    <div className={className}>
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={controls} className="flex min-h-9 items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground hover:text-foreground">
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
+        {open ? "Recolher" : "Mostrar"} {count} subtarefa{count > 1 ? "s" : ""}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Tarefa principal que aparece SÓ como agrupamento (não está programada
+ * para esta seção): sem caixa de concluir e fora da contagem.
+ */
+function GroupHeader({ parent, count, open, onToggle, controls, onEdit }: { parent: Task; count: number; open: boolean; onToggle: () => void; controls: string; onEdit?: (task: Task) => void }) {
+  return (
+    <li className="flex items-center gap-1 rounded-lg border border-dashed bg-secondary/30 pr-1">
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={controls} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left">
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+        <span className="min-w-0">
+          <span className="block break-words text-sm font-medium">{parent.title}</span>
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><ListTree className="h-3 w-3" />Tarefa principal · {count} subtarefa{count > 1 ? "s" : ""}</span>
+        </span>
+      </button>
+      {onEdit && !parent.archived_at && (
+        <button type="button" onClick={() => onEdit(parent)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary" aria-label={`Editar tarefa: ${parent.title}`}>
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      )}
+      <Link href="/tarefas" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary" aria-label={`Abrir na página: ${parent.title}`}>
+        <ExternalLink className="h-3.5 w-3.5" />
+      </Link>
+    </li>
+  );
+}
+
 /**
  * Meu Dia em quatro seções (regra em lib/my-day-board.ts). Concluir/reabrir
  * usa as ações de sempre de cada módulo; depois a página é recarregada do
@@ -166,6 +211,8 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [, start] = useTransition();
   const [showDone, setShowDone] = useState(true);
+  // Agrupamentos recolhidos (por seção + tarefa principal). Começam abertos; recolher não muda nada nos dados.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const refresh = () => router.refresh();
 
   function toggler(item: BoardItem): (() => void) | null {
@@ -222,18 +269,33 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
               </p>
             ) : visible ? (
               <ul className="flex flex-col gap-2">
-                {items.map((item) => (
-                  <Row
-                    key={item.key}
-                    item={item}
-                    todayKey={todayKey}
-                    done={overrides[item.key] ?? item.status === "concluida"}
-                    onToggle={toggler(item)}
-                    subtasks={item.source === "task" ? subtasksByTask[item.task.id] : undefined}
-                    onEdit={onEditTask}
-                    onChanged={refresh}
-                  />
-                ))}
+                {groupSection(items).map((row: SectionRow) => {
+                  const rowProps = (item: BoardItem) => ({
+                    item,
+                    todayKey,
+                    done: overrides[item.key] ?? item.status === "concluida",
+                    onToggle: toggler(item),
+                    subtasks: item.source === "task" ? subtasksByTask[item.task.id] : undefined,
+                    onEdit: onEditTask,
+                    onChanged: refresh,
+                  });
+                  if (row.kind === "item") return <Row key={row.item.key} {...rowProps(row.item)} />;
+                  const id = `${section.id}:${row.key}`;
+                  const open = !collapsed[id];
+                  const toggle = { open, count: row.children.length, controls: `meu-dia-${section.id}-${row.parent.id}`, onToggle: () => setCollapsed((c) => ({ ...c, [id]: open })) };
+                  return (
+                    <Fragment key={row.key}>
+                      {row.parentItem ? <Row {...rowProps(row.parentItem)} group={toggle} /> : <GroupHeader parent={row.parent} onEdit={onEditTask} {...toggle} />}
+                      {open && (
+                        <li id={toggle.controls} className="list-none">
+                          <ul className="flex flex-col gap-2" aria-label={`Subtarefas de ${row.parent.title}`}>
+                            {row.children.map((child) => <Row key={child.key} {...rowProps(child)} inGroup />)}
+                          </ul>
+                        </li>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </ul>
             ) : null}
             {section.id === "concluidas" && items.length > 0 && visible && (
