@@ -131,16 +131,18 @@ async function prepareMetricsUpdate(db: SupabaseClient, userId: string, preview:
   const changes: MetricChange[] = [];
   for (const c of preview.campaigns) for (const s of c.adSets) for (const ad of s.ads) {
     if (!ad.existingId || !ad.hasMetrics) continue;
-    const r = await prepareAdResultUpdate(db, userId, ad.existingId, adValues(ad), null);
+    const values = adValues(ad);
+    const r = await prepareAdResultUpdate(db, userId, ad.existingId, values, null);
     const base = { creativeId: ad.existingId, campaign: c.name, adSet: s.name, adSetAutoIdentified: !!s.autoIdentified, ad: ad.name };
+    const sameOf = (updated: Record<string, unknown>) => (Object.keys(values) as AdMetricKey[]).filter((k) => !(k in updated)).map((k) => ({ key: k, label: LABEL[k] ?? k, value: values[k]! }));
     if ("error" in r) {
-      if (r.error === "Nenhum valor mudou.") { changes.push({ ...base, periodStart: null, periodEnd: null, changes: [], unchanged: true }); continue; }
+      if (r.error === "Nenhum valor mudou.") { changes.push({ ...base, periodStart: null, periodEnd: null, changes: [], same: sameOf({}), unchanged: true }); continue; }
       preview.issues.push({ id: `metrics-plan:${ad.existingId}`, level: "error", path: `${c.name} › ${ad.name}`, message: r.error });
       continue;
     }
     prepared.push(r);
     changes.push({
-      ...base, periodStart: r.plan.periodStart, periodEnd: r.plan.periodEnd, unchanged: false,
+      ...base, periodStart: r.plan.periodStart, periodEnd: r.plan.periodEnd, unchanged: false, same: sameOf(r.plan.updated),
       changes: (Object.keys(r.plan.updated) as AdMetricKey[]).map((k) => ({ key: k, label: LABEL[k] ?? k, before: r.plan.previous[k] ?? null, after: r.plan.updated[k]! })),
     });
   }
@@ -182,8 +184,8 @@ async function preparePeriodUpdate(db: SupabaseClient, userId: string, preview: 
       continue;
     }
     const row = target.kind === "update_row" ? rows.find((r) => r.id === target.rowId)! : null;
-    const { changes, update } = planRowChanges(row, informed);
-    out.push({ ...base, kind: target.kind, message: null, target: { id: target.kind === "update_row" ? target.rowId : null, start: target.start, end: target.end, chosen: target.kind === "update_row" && target.chosen }, options: target.options, changes, unchanged: !changes.length });
+    const { changes, same, update } = planRowChanges(row, informed);
+    out.push({ ...base, kind: target.kind, message: null, target: { id: target.kind === "update_row" ? target.rowId : null, start: target.start, end: target.end, chosen: target.kind === "update_row" && target.chosen }, options: target.options, changes, same, unchanged: !changes.length });
     if (!changes.length) continue;
     if (target.kind === "update_row") ops.push({ kind: "update", rowId: target.rowId, values: update, label: a.name });
     else ops.push({ kind: "insert", label: a.name, row: { user_id: userId, company_id: preview.companyId, campaign_id: c.existingId, ad_set_id: s.existingId, creative_id: id, period_start: target.start, period_end: target.end, source: preview.sourceFormat, ...update } });

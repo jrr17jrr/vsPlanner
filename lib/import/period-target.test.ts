@@ -80,7 +80,10 @@ Visualizações de 100%: 863`;
   });
   it("reimportar os mesmos valores não muda nada (sem duplicar)", () => {
     const filled = row("r1", P.start, P.end, informedColumns(ad));
-    expect(planRowChanges(filled, informedColumns(ad))).toEqual({ changes: [], update: {} });
+    const r = planRowChanges(filled, informedColumns(ad));
+    expect(r.changes).toEqual([]);
+    expect(r.update).toEqual({});
+    expect(r.same.map((s) => s.key)).toHaveLength(9);
   });
   it("validação: modo de atualização do registro; o alerta antigo de sobreposição some", () => {
     const snap: ExistingSnapshot = {

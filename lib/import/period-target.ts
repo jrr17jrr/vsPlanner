@@ -85,13 +85,15 @@ export const columnLabel = (col: string) => COLUMN_LABEL[col] ?? col;
  */
 export function planRowChanges(row: Record<string, unknown> | null, informed: Record<string, number>) {
   const changes: Array<{ key: string; label: string; before: number | null; after: number }> = [];
+  /** Informadas mas já iguais no registro (aparecem na prévia, não são gravadas). */
+  const same: Array<{ key: string; label: string; value: number }> = [];
   const update: Record<string, number> = {};
   for (const [col, after] of Object.entries(informed)) {
     const raw = row?.[col];
     const before = raw === null || raw === undefined || raw === "" ? null : Number(raw);
-    if (before === after) continue;
+    if (before === after) { same.push({ key: col, label: columnLabel(col), value: after }); continue; }
     changes.push({ key: col, label: columnLabel(col), before, after });
     update[col] = after;
   }
-  return { changes, update };
+  return { changes, same, update };
 }

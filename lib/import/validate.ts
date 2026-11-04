@@ -85,6 +85,8 @@ export type PeriodTargetPreview = {
   target: { id: string | null; start: string; end: string; chosen: boolean } | null;
   options: Array<{ id: string; start: string; end: string; source: string | null; selectable: boolean; reason: string | null }>;
   changes: Array<{ key: string; label: string; before: number | null; after: number }>;
+  /** Informadas no texto mas já com o mesmo valor (mostradas, não gravadas). */
+  same?: Array<{ key: string; label: string; value: number }>;
   unchanged: boolean;
 };
 
@@ -98,6 +100,8 @@ export type MetricChange = {
   periodStart: string | null;
   periodEnd: string | null;
   changes: Array<{ key: string; label: string; before: number | null; after: number }>;
+  /** Informadas no texto mas já com o mesmo valor (mostradas, não gravadas). */
+  same?: Array<{ key: string; label: string; value: number }>;
   unchanged: boolean;
 };
 
@@ -109,6 +113,22 @@ export type ValidateOptions = {
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Nome sem pontuação/espaços ("AIV - Engajamento" = "AIV | Engajamento"). */
+const looseKey = (s: string) => normalizeKey(s).replace(/[^a-z0-9%]/g, "");
+/** Registro com o MESMO nome a menos de pontuação/espaços (só se houver exatamente um). */
+function looseMatch<T extends { name: string }>(list: T[], name: string): T | undefined {
+  if (!name) return undefined;
+  const k = looseKey(name);
+  const found = list.filter(e => looseKey(e.name) === k);
+  return found.length === 1 ? found[0] : undefined;
+}
+/** Nomes parecidos (um contém o outro) — para avisar antes de criar algo novo. */
+function similarNames<T extends { name: string }>(list: T[], name: string): T[] {
+  const k = looseKey(name);
+  if (k.length < 6) return [];
+  return list.filter(e => { const o = looseKey(e.name); return o.length >= 6 && o !== k && (o.includes(k) || k.includes(o)); }).slice(0, 3);
+}
 const money = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 const OBJECTIVE_LABELS: Record<string, string> = {
@@ -288,6 +308,16 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
         add("info", "cmp-name-match", cpath, `Atualiza a campanha existente com o mesmo nome${c.metaId ? " (o ID do Meta será gravado nela)" : ""}.`);
       }
     }
+    if (!match && c.name && !issues.some(x => x.id === `cmp-ambiguous:${cpath}`)) {
+      const loose = looseMatch(existing.campaigns.filter(e => !c.metaId || !e.meta_campaign_id || e.meta_campaign_id === c.metaId), c.name);
+      if (loose) {
+        match = loose; matchedBy = "name";
+        add("info", "cmp-loose-match", cpath, `Campanha identificada: "${loose.name}" (o nome no texto difere só em pontuação ou espaços). Nada será duplicado.`);
+      } else {
+        const similar = similarNames(existing.campaigns, c.name);
+        if (similar.length) add("warning", "cmp-similar", cpath, `Nenhuma campanha cadastrada com este nome. Parecida(s): ${similar.map(s => `"${s.name}"`).join(", ")}. Se for a mesma, corrija o nome no texto e valide de novo — confirmando, será criada uma campanha NOVA (com conjunto e anúncios novos).`, true);
+      }
+    }
     if (match && existing.legacyResultCampaignIds.includes(match.id)) {
       add("warning", "cmp-legacy", cpath, "Esta campanha já tem resultados lançados no formato antigo (por campanha/data). Nos relatórios, os lançamentos antigos dentro do período importado deixam de ser somados para não contar duas vezes.", true);
     }
@@ -350,9 +380,14 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
         s.ads.forEach((ad, k) => {
           const apath = `${cpath} › Anúncio ${k + 1}${ad.name ? ` (${ad.name})` : ""}`;
           if (ad.metaId) { if (seenAdIds.has(ad.metaId)) add("error", "ad-dup-id", apath, `ID do anúncio ${ad.metaId} repetido.`); seenAdIds.add(ad.metaId); }
-          const candidates = ad.metaId
+          const inCampaign = existing.ads.filter(e => campaignSetIds.has(e.ad_set_id));
+          let candidates = ad.metaId
             ? existing.ads.filter(e => e.meta_ad_id === ad.metaId && campaignSetIds.has(e.ad_set_id))
-            : existing.ads.filter(e => campaignSetIds.has(e.ad_set_id) && sameName(e.name, ad.name));
+            : inCampaign.filter(e => sameName(e.name, ad.name));
+          if (!candidates.length && !ad.metaId) {
+            const loose = looseMatch(inCampaign, ad.name);
+            if (loose) { candidates = [loose]; add("info", "ad-loose-match", apath, `Anúncio identificado: "${loose.name}" (o nome no texto difere só em pontuação ou espaços).`); }
+          }
           if (candidates.length === 1) {
             const found = candidates[0];
             if (!bySet.has(found.ad_set_id)) bySet.set(found.ad_set_id, []);
@@ -364,7 +399,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
           } else {
             add("error", "ad-404", apath, ad.metaId
               ? `Nenhum anúncio com ID ${ad.metaId} nesta campanha.`
-              : `Anúncio "${ad.name}" não encontrado na campanha "${match!.name}". Nada será criado: confira o nome ou, para cadastrar um anúncio novo, informe "Conjunto:".`);
+              : `Anúncio "${ad.name}" não encontrado na campanha "${match!.name}".${similarNames(inCampaign, ad.name).map(s => ` Parecido: "${s.name}".`).join("")} Nada será criado: confira o nome ou, para cadastrar um anúncio novo, informe "Conjunto:".`);
           }
           unresolved.push(buildAd(ad, apath, undefined));
         });
@@ -418,6 +453,15 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
           const byNames = existing.ads.filter(e => e.ad_set_id === setMatch!.id && sameName(e.name, ad.name) && (!e.meta_ad_id || !ad.metaId || e.meta_ad_id === ad.metaId));
           if (byNames.length > 1) add("error", "ad-ambiguous", apath, `Há ${byNames.length} anúncios chamados "${ad.name}" neste conjunto. Informe "ID do anúncio:" — nada foi alterado.`);
           else adMatch = byNames[0];
+          if (!adMatch && !ad.metaId) {
+            const setAds = existing.ads.filter(e => e.ad_set_id === setMatch!.id);
+            adMatch = looseMatch(setAds, ad.name);
+            if (adMatch) add("info", "ad-loose-match", apath, `Anúncio identificado: "${adMatch.name}" (o nome no texto difere só em pontuação ou espaços).`);
+            else {
+              const similar = similarNames(setAds, ad.name);
+              if (similar.length) add("warning", "ad-similar", apath, `Nenhum anúncio com este nome no conjunto. Parecido(s): ${similar.map(s => `"${s.name}"`).join(", ")}. Se for o mesmo, corrija o nome — confirmando, será criado um anúncio NOVO.`, true);
+            }
+          }
         }
         return buildAd(ad, apath, adMatch);
       });

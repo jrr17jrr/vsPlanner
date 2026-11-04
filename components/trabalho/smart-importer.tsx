@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmSmartImportAction, previewSmartImportAction } from "@/lib/supabase/clt-import-actions";
 import type { ImportIssue, ImportPreview, PreviewAd, PreviewCampaign } from "@/lib/import/validate";
-import { EXTRA_IMPORT_KEYS, EXTRA_IMPORT_LABEL, METRIC_KEYS, METRIC_LABEL, MONEY_METRICS, type Metrics } from "@/lib/import/types";
+import { MONEY_METRICS, type Metrics } from "@/lib/import/types";
+import { columnLabel, informedColumns } from "@/lib/import/period-target";
 
 type Company = { id: string; name: string };
 type Mode = "json" | "text";
@@ -61,18 +62,47 @@ function IssueRow({ issue, checked, onCheck }: { issue: ImportIssue; checked?: b
   );
 }
 
-function MetricsLine({ ad }: { ad: PreviewAd }) {
-  if (!ad.hasMetrics) return <p className="text-xs text-muted-foreground">Sem métricas informadas.</p>;
-  const extras = EXTRA_IMPORT_KEYS.filter(k => ad.extraMetrics?.[k] !== null && ad.extraMetrics?.[k] !== undefined);
+/** Métricas informadas no texto (principais + engajamento + vídeo), na ordem; ausentes não aparecem. */
+const informedList = (ad: Pick<PreviewAd, "metrics" | "extraMetrics">) => Object.entries(informedColumns(ad)).map(([key, value]) => ({ key, label: columnLabel(key), value }));
+
+/**
+ * TODAS as métricas informadas do anúncio — nunca campos ausentes. Para
+ * anúncio já cadastrado, deixa claro que são só esses campos que mudam.
+ */
+export function MetricsLine({ ad }: { ad: Pick<PreviewAd, "metrics" | "extraMetrics" | "action" | "hasMetrics"> }) {
+  const list = informedList(ad);
+  if (!list.length) return <p className="text-xs text-muted-foreground">Sem métricas informadas.</p>;
   return (
-    <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs sm:grid-cols-4">
-      {METRIC_KEYS.filter(k => ad.metrics[k] !== null || k === "spend" || k === "conversations").map(k => (
-        <div key={k} className="flex justify-between gap-2 sm:block"><dt className="text-muted-foreground">{METRIC_LABEL[k]}</dt><dd className={ad.metrics[k] === null ? "text-muted-foreground" : "font-medium"}>{ad.metrics[k] === null ? "não informado" : fmtMetric(k, ad.metrics[k])}</dd></div>
+    <div className="mt-1">
+      <p className="text-[11px] text-muted-foreground">{ad.action === "update" ? `Campos que serão atualizados neste anúncio (${list.length}) — os demais não mudam:` : `Métricas informadas (${list.length}):`}</p>
+      <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs sm:grid-cols-3 lg:grid-cols-4">
+        {list.map(m => (
+          <div key={m.key} className="flex justify-between gap-2 sm:block"><dt className="text-muted-foreground">{m.label}</dt><dd className="font-medium tabular-nums">{fmtChange(m.key, m.value)}</dd></div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function SameList({ same }: { same?: Array<{ key: string; label: string; value: number }> }) {
+  if (!same?.length) return null;
+  return <p className="mt-1 text-[11px] text-muted-foreground">Informadas e já iguais (não mudam): {same.map(s => `${s.label} ${fmtChange(s.key, s.value)}`).join(" · ")}</p>;
+}
+
+/** Enquanto há erros, os painéis de atualização mostram ao menos o que foi informado em cada anúncio. */
+function InformedFallback({ preview }: { preview: ImportPreview }) {
+  const ads = preview.campaigns.flatMap(c => c.adSets.flatMap(s => s.ads.map(a => ({ c, s, a }))));
+  if (!ads.length) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-muted-foreground">Corrija os erros para ver o registro e os valores atuais. Métricas informadas no texto:</p>
+      {ads.map(({ c, s, a }, i) => (
+        <div key={i} className="rounded-md border bg-background/60 p-3 text-sm">
+          <p className="break-words"><span className="text-muted-foreground">{c.name} › {s.name} ›</span> <span className="font-medium">{a.name}</span></p>
+          <MetricsLine ad={a} />
+        </div>
       ))}
-      {extras.map(k => (
-        <div key={k} className="flex justify-between gap-2 sm:block"><dt className="text-muted-foreground">{EXTRA_IMPORT_LABEL[k]}</dt><dd className="font-medium">{ad.extraMetrics![k]!.toLocaleString("pt-BR")}</dd></div>
-      ))}
-    </dl>
+    </div>
   );
 }
 
@@ -90,7 +120,7 @@ function MetricsUpdatePanel({ preview }: { preview: ImportPreview }) {
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
         <dt className="text-muted-foreground">Empresa identificada</dt><dd className="font-medium">{preview.companyName}</dd>
       </dl>
-      {changes.length === 0 && <p className="text-sm text-muted-foreground">Os detalhes aparecem quando não houver erros na validação.</p>}
+      {changes.length === 0 && <InformedFallback preview={preview} />}
       {changes.map(m => (
         <div key={m.creativeId} className="rounded-md border bg-background/60 p-3 text-sm">
           <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
@@ -113,6 +143,7 @@ function MetricsUpdatePanel({ preview }: { preview: ImportPreview }) {
               {m.periodStart && <p className="mt-1 text-[11px] text-muted-foreground">A diferença conta nos relatórios no período {fmtDate(m.periodStart)} a {fmtDate(m.periodEnd)}.</p>}
             </>
           )}
+          <SameList same={m.same} />
         </div>
       ))}
       <p className="flex items-start gap-1.5 text-xs text-emerald-400"><CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0" />Nenhuma outra informação será alterada: nada é criado, e orçamento, investimento, alcance, impressões, datas, status, conjuntos e os demais anúncios ficam como estão (exceto o que estiver na lista acima).</p>
@@ -169,7 +200,7 @@ const SOURCE_LABEL = (s: string | null) => s === "manual_update" ? "Atualizar re
  * atualizado (ou criado), o que muda nele e — se houver sobreposição — a
  * escolha do registro ou a correção do período.
  */
-function PeriodUpdatePanel({ preview, targets, onChoose, onUsePeriod, busy }: {
+export function PeriodUpdatePanel({ preview, targets, onChoose, onUsePeriod, busy }: {
   preview: ImportPreview;
   targets: Record<string, string>;
   onChoose: (creativeId: string, rowId: string) => void;
@@ -187,7 +218,7 @@ function PeriodUpdatePanel({ preview, targets, onChoose, onUsePeriod, busy }: {
         <dt className="text-muted-foreground">Empresa identificada</dt><dd className="font-medium">{preview.companyName}</dd>
         <dt className="text-muted-foreground">Período informado</dt><dd>{preview.period ? `${fmtDate(preview.period.start)} a ${fmtDate(preview.period.end)}` : "—"}</dd>
       </dl>
-      {items.length === 0 && <p className="text-sm text-muted-foreground">Os detalhes aparecem quando não houver erros na validação.</p>}
+      {items.length === 0 && <InformedFallback preview={preview} />}
       {items.map(t => (
         <div key={t.creativeId} className={"rounded-md border bg-background/60 p-3 text-sm " + (t.kind === "choose" || t.kind === "blocked" ? "border-amber-500/50" : "")}>
           <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
@@ -229,6 +260,8 @@ function PeriodUpdatePanel({ preview, targets, onChoose, onUsePeriod, busy }: {
               </tbody>
             </table>
           )}
+          <SameList same={t.same} />
+          {(t.kind === "choose" || t.kind === "blocked") && (() => { const ad = preview.campaigns.flatMap(c => c.adSets.flatMap(s => s.ads)).find(a => a.existingId === t.creativeId); return ad ? <MetricsLine ad={ad} /> : null; })()}
         </div>
       ))}
       <p className="flex items-start gap-1.5 text-xs text-emerald-400"><CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0" />Nada mais é alterado: campanha, conjunto, anúncio, status, datas e as métricas que não estão na lista ficam como estão. Nenhum registro é duplicado.</p>

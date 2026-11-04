@@ -147,6 +147,21 @@ describe("Central de Importação — atualização parcial (AIV)", () => {
     expect(rpcCalls).toEqual([]);
   });
 
+  it("depois de salvar, os relatórios somam as métricas novas e mantêm investimento/impressões/alcance", async () => {
+    const period = { start: "2026-10-14", end: "2026-10-31" };
+    const r = await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [] });
+    expect(r.error).toBeUndefined();
+    const { mergePeriodResults, periodResultsToEntries } = await import("@/lib/clt/period-results");
+    const { periodMetrics } = await import("@/lib/clt/report-period");
+    const merged = mergePeriodResults([], tables.clt_ad_period_metrics as never);
+    const results = periodResultsToEntries(merged.imported);
+    const m = periodMetrics({ period: { kind: "month", month: "2026-10" }, campaignIds: new Set(["cmp-1"]), results: results as never, messaging: [] });
+    expect(m).toMatchObject({
+      engagements: 2580, reactions: 2543, comments: 5, shares: 13, newFollowers: 1, linkClicks: 16, thruplays: 1679, video75: 1180, video100: 863,
+      gasto: 150, impressions: 40000, reach: 21000, messages: 0,
+    });
+  });
+
   it("período sobreposto e diferente (caso real 14/10 a 30/10): bloqueia, mostra os registros e não cria nada", async () => {
     const period = { start: "2026-10-14", end: "2026-10-30" };
     const p = await previewSmartImportAction({ companyId: "co", content: TEXT, period });
