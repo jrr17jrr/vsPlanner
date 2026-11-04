@@ -1,12 +1,14 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CalendarClock, CheckCircle2, ChevronDown, ExternalLink, ListTree, Pencil, Repeat } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { CARD_ACCENT, EmptySection, TaskSection, type SectionTone } from "@/components/shared/task-section";
 import { MoveDatePopover } from "@/components/shared/move-date-popover";
 import { Subtasks } from "@/components/shared/subtasks";
 import { ExpandableDescription } from "@/components/shared/expandable-description";
@@ -21,26 +23,29 @@ import type { Task } from "@/types/database.types";
 
 const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 
-const SECTIONS: { id: BoardSection; title: string; empty: string; dot: string }[] = [
-  { id: "hoje", title: "Hoje", empty: "Nada programado para hoje.", dot: "bg-primary" },
-  { id: "atrasadas", title: "Atrasadas", empty: "Nenhuma tarefa atrasada.", dot: "bg-destructive" },
-  { id: "proximas", title: "Próximas", empty: "Nada nos próximos 7 dias.", dot: "bg-muted-foreground" },
-  { id: "concluidas", title: "Concluídas", empty: "Nada concluído hoje ainda.", dot: "bg-emerald-500" },
+const SECTIONS: { id: BoardSection; title: string; empty: string; tone: SectionTone }[] = [
+  { id: "hoje", title: "Hoje", empty: "Nada programado para hoje.", tone: "primary" },
+  { id: "atrasadas", title: "Atrasadas", empty: "Nenhuma tarefa atrasada.", tone: "danger" },
+  { id: "proximas", title: "Próximas", empty: "Nada nos próximos 7 dias.", tone: "muted" },
+  { id: "concluidas", title: "Concluídas", empty: "Nada concluído hoje ainda.", tone: "success" },
 ];
 
 /** Cor da borda: vermelho = prazo vencido, amarelo = execução atrasada, verde = concluída, neutro = hoje/próxima. */
 const ACCENT: Record<BoardItem["status"], string> = {
-  prazo_vencido: "border-l-destructive",
-  execucao_atrasada: "border-l-amber-400",
-  concluida: "border-l-emerald-500",
-  hoje: "border-l-border",
-  proxima: "border-l-border",
+  prazo_vencido: CARD_ACCENT.danger,
+  execucao_atrasada: CARD_ACCENT.warning,
+  concluida: CARD_ACCENT.success,
+  hoje: CARD_ACCENT.default,
+  proxima: CARD_ACCENT.default,
 };
+/** Card padrão (mesmo visual da página Tarefas). */
+const CARD = "rounded-xl border border-l-[3px] border-border/70 bg-card shadow-sm shadow-black/10";
 
 function dateLine(item: BoardItem, todayKey: string): string {
   if (item.status === "concluida") return item.completedOn === todayKey ? "Concluída hoje" : item.completedOn ? `Concluída em ${ddmm(item.completedOn)}` : "Concluída";
   const parts: string[] = [];
-  if (item.executionDate) parts.push(`Execução: ${item.executionDate === todayKey ? "hoje" : ddmm(item.executionDate)}${item.executionTime ? ` · ${item.executionTime}` : ""}`);
+  // O horário da execução aparece no destaque ao lado do título.
+  if (item.executionDate) parts.push(`Execução: ${item.executionDate === todayKey ? "hoje" : ddmm(item.executionDate)}`);
   if (item.deadlineDate) parts.push(`Prazo final: ${item.deadlineDate === todayKey ? "hoje" : ddmm(item.deadlineDate)}${item.deadlineTime ? ` · ${item.deadlineTime}` : ""}`);
   return parts.join("  ·  ");
 }
@@ -62,9 +67,12 @@ function Row({
   onChanged,
   inGroup = false,
   group,
+  flat = false,
 }: {
   /** Subtarefa dentro do agrupamento da tarefa principal (não repete o nome da tarefa). */
   inGroup?: boolean;
+  /** Dentro do card do grupo: sem caixa própria (o card é do grupo). */
+  flat?: boolean;
   /** Tarefa principal com subtarefas nesta seção: botão de mostrar/recolher. */
   group?: { open: boolean; count: number; onToggle: () => void; controls: string };
   item: BoardItem;
@@ -97,28 +105,38 @@ function Row({
     : null;
   const changeDeadline = item.source === "task" && !item.recurring && item.status === "prazo_vencido" ? (d: string) => run(() => moveTaskDeadlineAction(item.task.id, d)) : null;
 
+  const Root = flat && !inGroup ? "div" : "li";
   return (
-    <li className={cn("rounded-lg border border-l-4 bg-card", ACCENT[item.status], nested && "ml-5 sm:ml-7", done && "opacity-80")}>
-      <div className="flex items-start gap-3 px-3 py-2.5">
+    <Root
+      className={cn(
+        flat ? (inGroup ? cn("border-l-2 pl-1", ACCENT[item.status] === CARD_ACCENT.default ? "border-l-border/80" : ACCENT[item.status]) : "") : cn(CARD, ACCENT[item.status]),
+        nested && !inGroup && !flat && "ml-5 sm:ml-7",
+        done && "opacity-75"
+      )}
+    >
+      <div className={cn("flex items-start gap-2", inGroup ? "py-1.5 pr-1" : "px-3 py-2.5")}>
         {/* Área de toque de 44px em volta do checkbox (iPhone). */}
-        <label className="-my-2.5 -ml-3 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
+        <label className={cn("flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center", inGroup ? "-my-2" : "-my-2 -ml-2")}>
           <Checkbox checked={done} disabled={!onToggle || busy} onCheckedChange={() => onToggle?.()} aria-label={`${done ? "Reabrir" : "Concluir"}: ${item.title}`} className="h-5 w-5" />
         </label>
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => canExpand && setOpen((v) => !v)} aria-expanded={canExpand ? open : undefined}>
+        <button type="button" className="min-w-0 flex-1 pt-0.5 text-left" onClick={() => canExpand && setOpen((v) => !v)} aria-expanded={canExpand ? open : undefined}>
           {nested && !inGroup && <p className="truncate text-[11px] text-muted-foreground">↳ {item.parent.title}</p>}
-          <p className={cn("break-words text-sm font-medium", done && "text-muted-foreground line-through")}>
-            {item.title}
-            {item.important && !done && <span className="ml-1.5 align-middle text-[11px] font-semibold text-destructive">Importante</span>}
+          <p className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-0.5 break-words font-medium leading-snug", inGroup ? "text-[13px]" : "text-sm", done && "text-muted-foreground")}>
+            {item.executionTime && item.status !== "concluida" && (
+              <span className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-xs font-semibold tabular-nums text-primary">{item.executionTime}</span>
+            )}
+            <span className={cn("min-w-0", done && "line-through")}>{item.title}</span>
+            {item.important && !done && <Badge variant="destructive" className="h-5 border-0 px-1.5 text-[10px]">Importante</Badge>}
           </p>
-          <p className={cn("mt-0.5 text-xs", item.status === "concluida" ? "text-emerald-500" : "text-muted-foreground")}>
-            {item.areaLabel && <span className="mr-1.5 rounded bg-secondary px-1.5 py-0.5 text-[11px] text-foreground/80">{item.areaLabel}</span>}
-            {dateLine(item, todayKey)}
-          </p>
-          {overdue && (
-            <span className={cn("mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-medium", item.status === "prazo_vencido" ? "bg-destructive/15 text-destructive" : "bg-amber-400/15 text-amber-300")}>
-              {item.status === "prazo_vencido" ? "Prazo vencido" : "Execução atrasada"}
-            </span>
-          )}
+          <div className={cn("mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]", item.status === "concluida" ? "text-emerald-500" : "text-muted-foreground")}>
+            {item.areaLabel && <span className="rounded bg-secondary px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-foreground/70">{item.areaLabel}</span>}
+            <span>{dateLine(item, todayKey)}</span>
+            {overdue && (
+              <Badge variant={item.status === "prazo_vencido" ? "destructive" : "warning"} className="h-5 border-0 px-1.5 text-[10px]">
+                {item.status === "prazo_vencido" ? "Prazo vencido" : "Execução atrasada"}
+              </Badge>
+            )}
+          </div>
           {item.note && <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground"><Repeat className="h-3 w-3" />{item.note}</p>}
         </button>
         {canExpand && (
@@ -129,7 +147,7 @@ function Row({
       </div>
 
       {(overdue && (reschedule || changeDeadline)) && !done && (
-        <div className="flex flex-wrap gap-2 px-3 pb-2.5 pl-14">
+        <div className={cn("flex flex-wrap gap-2 pb-2.5", inGroup ? "pl-11 pr-1" : "px-3 pl-12")}>
           {reschedule && (
             <MoveDatePopover onMove={reschedule}>
               <Button type="button" variant="outline" size="sm" className="h-9" disabled={busy}><CalendarClock className="h-3.5 w-3.5" /> Reprogramar{item.source === "clt" && item.cltTask.kind === "prazo" ? "" : " execução"}</Button>
@@ -143,15 +161,15 @@ function Row({
         </div>
       )}
 
-      {group && <GroupToggle {...group} className="px-3 pb-1.5 pl-12" />}
+      {group && <GroupToggle {...group} className="px-3 pb-1 pl-11" />}
 
       {open && (
-        <div className="space-y-2 border-t px-3 py-2.5 pl-14">
+        <div className={cn("space-y-2 border-t border-border/60 py-2.5", inGroup ? "pl-11 pr-1" : "px-3 sm:pl-12")}>
           {item.description && <ExpandableDescription text={item.description} />}
           {item.source === "task" && (
-            <Subtasks parentType="pessoal" parentId={item.task.id} initialItems={subtasks ?? []} initialOpen={!!subtasks?.length} onChanged={onChanged} />
+            <Subtasks embedded parentType="pessoal" parentId={item.task.id} initialItems={subtasks ?? []} initialOpen={!!subtasks?.length} onChanged={onChanged} />
           )}
-          {item.source === "clt" && <Subtasks parentType="clt" parentId={item.cltTask.id} onChanged={onChanged} />}
+          {item.source === "clt" && <Subtasks embedded parentType="clt" parentId={item.cltTask.id} onChanged={onChanged} />}
           <div className="flex flex-wrap gap-2">
             {item.source === "task" && onEdit && !item.task.archived_at && (
               <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => onEdit(item.task)}><Pencil className="h-3.5 w-3.5" /> Editar</Button>
@@ -160,7 +178,7 @@ function Row({
           </div>
         </div>
       )}
-    </li>
+    </Root>
   );
 }
 
@@ -181,12 +199,12 @@ function GroupToggle({ open, count, onToggle, controls, className }: { open: boo
  */
 function GroupHeader({ parent, count, open, onToggle, controls, onEdit }: { parent: Task; count: number; open: boolean; onToggle: () => void; controls: string; onEdit?: (task: Task) => void }) {
   return (
-    <li className="flex items-center gap-1 rounded-lg border border-dashed bg-secondary/30 pr-1">
+    <div className={cn("flex items-center gap-1 rounded-t-xl bg-secondary/40 pr-1", !open && "rounded-b-xl")}>
       <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={controls} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left">
         <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
         <span className="min-w-0">
-          <span className="block break-words text-sm font-medium">{parent.title}</span>
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><ListTree className="h-3 w-3" />Tarefa principal · {count} subtarefa{count > 1 ? "s" : ""}</span>
+          <span className="block break-words text-sm font-medium text-foreground/85">{parent.title}</span>
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><ListTree className="h-3 w-3" />Contexto · tarefa principal · {count} subtarefa{count > 1 ? "s" : ""} nesta seção</span>
         </span>
       </button>
       {onEdit && !parent.archived_at && (
@@ -197,7 +215,7 @@ function GroupHeader({ parent, count, open, onToggle, controls, onEdit }: { pare
       <Link href="/tarefas" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary" aria-label={`Abrir na página: ${parent.title}`}>
         <ExternalLink className="h-3.5 w-3.5" />
       </Link>
-    </li>
+    </div>
   );
 }
 
@@ -241,34 +259,35 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
   const counts = { hoje: board.hoje.length, atrasadas: board.atrasadas.length, proximas: board.proximas.length, concluidas: board.concluidas.length };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {SECTIONS.map((section) => {
         const items = board[section.id];
         const collapsible = section.id === "concluidas";
         const visible = !collapsible || showDone;
         return (
-          <section key={section.id} aria-labelledby={`meu-dia-${section.id}`}>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 id={`meu-dia-${section.id}`} className="flex items-center gap-2 text-sm font-semibold">
-                <span className={cn("h-2 w-2 rounded-full", section.dot)} aria-hidden="true" />
-                {section.title}
-                <span className="text-xs font-normal text-muted-foreground">{counts[section.id]}</span>
-              </h2>
-              {collapsible && items.length > 0 ? (
+          <TaskSection
+            key={section.id}
+            id={`meu-dia-${section.id}`}
+            title={section.title}
+            count={counts[section.id]}
+            tone={section.tone}
+            action={
+              collapsible && items.length > 0 ? (
                 <button type="button" onClick={() => setShowDone((v) => !v)} className="min-h-9 px-1 text-xs text-primary hover:underline" aria-expanded={showDone}>
                   {showDone ? "Recolher" : "Mostrar"}
                 </button>
               ) : section.id === "concluidas" ? (
-                <Link href="/historico" className="min-h-9 px-1 text-xs text-primary hover:underline">Histórico</Link>
-              ) : null}
-            </div>
+                <Link href="/historico" className="flex min-h-9 items-center px-1 text-xs text-primary hover:underline">Histórico</Link>
+              ) : null
+            }
+          >
             {items.length === 0 ? (
-              <p className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-3 text-sm text-muted-foreground">
+              <EmptySection>
                 {section.id === "atrasadas" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
                 {section.empty}
-              </p>
+              </EmptySection>
             ) : visible ? (
-              <ul className="flex flex-col gap-2">
+              <ul className="flex flex-col gap-3">
                 {groupSection(items).map((row: SectionRow) => {
                   const rowProps = (item: BoardItem) => ({
                     item,
@@ -283,17 +302,17 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
                   const id = `${section.id}:${row.key}`;
                   const open = !collapsed[id];
                   const toggle = { open, count: row.children.length, controls: `meu-dia-${section.id}-${row.parent.id}`, onToggle: () => setCollapsed((c) => ({ ...c, [id]: open })) };
+                  // Tarefa principal + subtarefas = UM card; contexto (pai fora desta seção) com borda tracejada.
+                  const accent = row.parentItem ? ACCENT[row.parentItem.status] : CARD_ACCENT.default;
                   return (
-                    <Fragment key={row.key}>
-                      {row.parentItem ? <Row {...rowProps(row.parentItem)} group={toggle} /> : <GroupHeader parent={row.parent} onEdit={onEditTask} {...toggle} />}
+                    <li key={row.key} className={cn(CARD, accent, !row.parentItem && "border-dashed")}>
+                      {row.parentItem ? <Row {...rowProps(row.parentItem)} group={toggle} flat /> : <GroupHeader parent={row.parent} onEdit={onEditTask} {...toggle} />}
                       {open && (
-                        <li id={toggle.controls} className="list-none">
-                          <ul className="flex flex-col gap-2" aria-label={`Subtarefas de ${row.parent.title}`}>
-                            {row.children.map((child) => <Row key={child.key} {...rowProps(child)} inGroup />)}
-                          </ul>
-                        </li>
+                        <ul id={toggle.controls} className="flex flex-col gap-1 pb-2 pl-4 pr-2 sm:pl-6" aria-label={`Subtarefas de ${row.parent.title}`}>
+                          {row.children.map((child) => <Row key={child.key} {...rowProps(child)} inGroup flat />)}
+                        </ul>
                       )}
-                    </Fragment>
+                    </li>
                   );
                 })}
               </ul>
@@ -301,7 +320,7 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
             {section.id === "concluidas" && items.length > 0 && visible && (
               <p className="mt-2 text-right text-xs"><Link href="/historico" className="text-primary hover:underline">Ver histórico</Link></p>
             )}
-          </section>
+          </TaskSection>
         );
       })}
     </div>

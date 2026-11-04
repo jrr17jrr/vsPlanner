@@ -4,14 +4,16 @@ import { Subtasks } from "@/components/shared/subtasks";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, ListChecks, Repeat, MapPin, MoreVertical, Pencil, Trash2, CircleStop, CalendarDays } from "lucide-react";
+import { Plus, ListChecks, Repeat, MapPin, MoreVertical, Pencil, Trash2, CircleStop, CalendarDays, Flag } from "lucide-react";
+import { TaskCard } from "@/components/tarefas/task-card";
+import { EmptySection, TaskList, TaskSection, type SectionTone } from "@/components/shared/task-section";
+import { ExpandableDescription } from "@/components/shared/expandable-description";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shared/empty-state";
-import { ChecklistItem } from "@/components/shared/checklist-item";
 import { DayTaskItem } from "@/components/tarefas/day-task-item";
 import { useTaskToggle } from "@/components/tarefas/use-task-toggle";
 import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
@@ -89,30 +91,36 @@ export function TarefasPageClient({
     );
   }
 
-  function renderDeadline(task: Task, overdue = false) {
+  /** Tarefa com prazo: UM card (cabeçalho + subtarefas dentro). */
+  function renderDeadline(task: Task, overdue = false, dueToday = false) {
     const schedule = taskSchedule(task);
+    const done = toggle.isTaskDone(task);
+    const subtasks = subtasksByTask[task.id] ?? [];
     return (
-      <div key={task.id}><ChecklistItem
+      <TaskCard
         key={task.id}
         title={task.title}
-        description={task.description}
-        done={toggle.isTaskDone(task)}
+        done={done}
         time={schedule.executionTime ?? schedule.deadlineTime ?? undefined}
+        accent={overdue && !done ? "danger" : dueToday && !done ? "primary" : "default"}
+        important={task.priority === "importante"}
         onToggle={() => toggle.toggleTask(task)}
         onEdit={() => dialogs.openEdit(task)}
         onDelete={() => dialogs.askDelete(task)}
         onMove={(d) => moveTaskDeadlineAction(task.id, d).then((r) => r.error && toast.error(r.error))}
-        className={cn(overdue && "border-destructive/40")}
-        badges={
+        moveLabel="Alterar prazo"
+        meta={
           <>
-            {overdue && <Badge variant="destructive" className="border-0">Prazo vencido</Badge>}
-            {task.priority === "importante" && <Badge variant="destructive" className="border-0">Importante</Badge>}
-            {schedule.deadlineDate && <span className="text-[11px] text-muted-foreground">prazo {formatDate(schedule.deadlineDate)}{schedule.deadlineTime && ` · ${schedule.deadlineTime}`}</span>}
-            {schedule.executionDate && <span className="text-[11px] text-muted-foreground">fazer {formatDate(schedule.executionDate)}{schedule.executionTime && ` · ${schedule.executionTime}`}</span>}
-            {task.category && <span className="text-[11px] text-muted-foreground">{task.category}</span>}
+            {overdue && <Badge variant="destructive" className="h-5 border-0 px-1.5 text-[10px]">Prazo vencido</Badge>}
+            {schedule.deadlineDate && <span className={cn("inline-flex items-center gap-1", overdue && "font-medium text-destructive")}><Flag className="h-3 w-3" />Prazo {formatDate(schedule.deadlineDate)}{schedule.deadlineTime && ` · ${schedule.deadlineTime}`}</span>}
+            {schedule.executionDate && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" />Fazer {formatDate(schedule.executionDate)}{schedule.executionTime && ` · ${schedule.executionTime}`}</span>}
+            {task.category && <span>{task.category}</span>}
           </>
         }
-      /><Subtasks parentType="pessoal" parentId={task.id} initialItems={subtasksByTask[task.id] ?? []} onChanged={refresh}/></div>
+      >
+        <ExpandableDescription text={task.description} className="mt-1" />
+        <Subtasks embedded parentType="pessoal" parentId={task.id} initialItems={subtasks} onChanged={refresh} />
+      </TaskCard>
     );
   }
 
@@ -138,7 +146,7 @@ export function TarefasPageClient({
           <TabsTrigger value="concluidas" className="flex-1 sm:flex-none">Concluídas</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="dia" className="mt-4 flex flex-col gap-6">
+        <TabsContent value="dia" className="mt-5 flex flex-col gap-8">
           {dayTabEmpty ? (
             <EmptyState
               icon={CalendarDays}
@@ -153,24 +161,24 @@ export function TarefasPageClient({
           ) : (
             <>
               {missed.length > 0 && (
-                <Section title="Ficou pendente" hint={`${missed.length}`}>
+                <Section title="Atrasadas" tone="danger" count={missed.length}>
                   {missed.map((e) => renderEntry(e))}
                 </Section>
               )}
 
-              <Section title="Hoje">
+              <Section title="Hoje" tone="primary" count={todayEntries.length}>
                 {todayEntries.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">Nada marcado para hoje.</p>
+                  <EmptySection>Nada marcado para hoje.</EmptySection>
                 ) : (
                   todayEntries.map((e) => renderEntry(e))
                 )}
               </Section>
 
               {upcoming.length > 0 && (
-                <Section title="Próximos dias">
+                <Section title="Próximos dias" count={upcoming.length}>
                   {upcoming.map((e) => (
-                    <div key={e.key} className="flex flex-col gap-1">
-                      <span className="px-1 text-[11px] font-medium text-muted-foreground">{formatDate(e.date)}</span>
+                    <div key={e.key} className="flex flex-col gap-1.5">
+                      <span className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{formatDate(e.date)}</span>
                       {renderEntry(e)}
                     </div>
                   ))}
@@ -178,7 +186,7 @@ export function TarefasPageClient({
               )}
 
               {recurring.length > 0 && (
-                <Section title="Repetições">
+                <Section title="Repetições" count={recurring.length}>
                   {activeRecurring.map((t) => (
                     <RecurringRow
                       key={t.id}
@@ -197,7 +205,7 @@ export function TarefasPageClient({
           )}
         </TabsContent>
 
-        <TabsContent value="prazo" className="mt-4 flex flex-col gap-6">
+        <TabsContent value="prazo" className="mt-5 flex flex-col gap-8">
           {pendingDeadlineCount === 0 ? (
             <EmptyState
               icon={ListChecks}
@@ -211,35 +219,39 @@ export function TarefasPageClient({
             />
           ) : (
             <>
-              {deadlines.overdue.length > 0 && <Section title="Atrasadas">{deadlines.overdue.map((t) => renderDeadline(t, true))}</Section>}
-              {deadlines.dueToday.length > 0 && <Section title="Vence hoje">{deadlines.dueToday.map((t) => renderDeadline(t))}</Section>}
-              {deadlines.upcoming.length > 0 && <Section title="Próximas">{deadlines.upcoming.map((t) => renderDeadline(t))}</Section>}
-              {deadlines.noDate.length > 0 && <Section title="Sem prazo">{deadlines.noDate.map((t) => renderDeadline(t))}</Section>}
+              {deadlines.overdue.length > 0 && <Section title="Atrasadas" tone="danger" count={deadlines.overdue.length}>{deadlines.overdue.map((t) => renderDeadline(t, true))}</Section>}
+              {deadlines.dueToday.length > 0 && <Section title="Vence hoje" tone="primary" count={deadlines.dueToday.length}>{deadlines.dueToday.map((t) => renderDeadline(t, false, true))}</Section>}
+              {deadlines.upcoming.length > 0 && <Section title="Próximas" count={deadlines.upcoming.length}>{deadlines.upcoming.map((t) => renderDeadline(t))}</Section>}
+              {deadlines.noDate.length > 0 && <Section title="Sem prazo" count={deadlines.noDate.length}>{deadlines.noDate.map((t) => renderDeadline(t))}</Section>}
             </>
           )}
         </TabsContent>
 
-        <TabsContent value="concluidas" className="mt-4 flex flex-col gap-2">
+        <TabsContent value="concluidas" className="mt-5 flex flex-col gap-8">
           {completed.length === 0 ? (
             <EmptyState icon={ListChecks} title="Nenhuma tarefa concluída ainda" description="Dias concluídos de tarefas recorrentes ficam no Histórico." />
           ) : (
-            completed.map((task) => (
-              <ChecklistItem
-                key={task.id}
-                title={task.title}
-                description={task.description}
-                done={toggle.isTaskDone(task)}
-                time={task.scheduled_time?.slice(0, 5)}
-                onToggle={() => toggle.toggleTask(task)}
-                onDelete={() => dialogs.askDelete(task)}
-                badges={
-                  <>
-                    <span className="text-[11px] text-muted-foreground">{task.kind === "dia" ? "Do dia" : "Com prazo"}</span>
-                    {task.due_date && <span className="text-[11px] text-muted-foreground">{formatDate(task.due_date)}</span>}
-                  </>
-                }
-              />
-            ))
+            <Section title="Concluídas" tone="success" count={completed.length}>
+              {completed.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  title={task.title}
+                  done={toggle.isTaskDone(task)}
+                  time={task.scheduled_time?.slice(0, 5)}
+                  accent="success"
+                  onToggle={() => toggle.toggleTask(task)}
+                  onDelete={() => dialogs.askDelete(task)}
+                  meta={
+                    <>
+                      <span>{task.kind === "dia" ? "Do dia" : "Com prazo"}</span>
+                      {task.due_date && <span>{formatDate(task.due_date)}</span>}
+                    </>
+                  }
+                >
+                  <ExpandableDescription text={task.description} className="mt-1" />
+                </TaskCard>
+              ))}
+            </Section>
           )}
         </TabsContent>
       </Tabs>
@@ -249,15 +261,11 @@ export function TarefasPageClient({
   );
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function Section({ title, count, tone, children }: { title: string; count?: number; tone?: SectionTone; children: React.ReactNode }) {
   return (
-    <section>
-      <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-        {hint && <span className="text-xs text-muted-foreground">({hint})</span>}
-      </div>
-      <div className="flex flex-col gap-2">{children}</div>
-    </section>
+    <TaskSection title={title} count={count} tone={tone}>
+      <TaskList>{children}</TaskList>
+    </TaskSection>
   );
 }
 
@@ -276,7 +284,7 @@ function RecurringRow({
   onDelete: () => void;
 }) {
   return (
-    <div className={cn("flex items-start gap-3 rounded-lg border border-border bg-card px-3 py-2.5", ended && "opacity-60")}>
+    <div className={cn("flex items-start gap-3 rounded-xl border border-border/70 bg-card px-3 py-2.5 shadow-sm shadow-black/10", ended && "opacity-60")}>
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
         <Repeat className="h-4 w-4" />
       </span>

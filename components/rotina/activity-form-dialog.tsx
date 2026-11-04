@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ReminderOffsetsPicker } from "@/components/shared/reminder-offsets-picker";
 import { createActivityAction, updateActivityAction, type ActivityFormInput } from "@/lib/supabase/personal-actions";
-import { normalizeReminderOffsets } from "@/lib/task-schedule";
+import { PushDeviceNotice } from "@/components/shared/push-device";
+import { normalizeReminderOffsets, REMINDER_OFFSET_LABELS, type ReminderOffset } from "@/lib/task-schedule";
 import { formatDate, weekdayLabel } from "@/lib/format";
 import { WEEKDAY_ORDER } from "@/lib/tasks";
 import type { Activity, Task } from "@/types/database.types";
@@ -78,7 +79,7 @@ function ActivityForm({
   const [weekdays, setWeekdays] = useState<number[]>(activity?.weekdays?.length ? activity.weekdays : defaultWeekday !== undefined ? [defaultWeekday] : []);
   const [startTime, setStartTime] = useState(activity?.start_time?.slice(0, 5) ?? "08:00");
   const [endTime, setEndTime] = useState(activity?.end_time?.slice(0, 5) ?? "");
-  const [reminders, setReminders] = useState<number[]>(normalizeReminderOffsets(activity?.reminder_offsets));
+  const [reminders, setReminders] = useState<ReminderOffset[]>(normalizeReminderOffsets(activity?.reminder_offsets));
   const [notes, setNotes] = useState(activity?.notes ?? "");
   const [pending, setPending] = useState(false);
 
@@ -212,6 +213,12 @@ function ActivityForm({
         <div className="flex flex-col gap-1.5">
           <Label>Notificações</Label>
           <ReminderOffsetsPicker value={reminders} onChange={setReminders} disabled={pending} hasTime />
+          <p className="text-[11px] text-muted-foreground">
+            {reminders.length === 0
+              ? "Nenhum aviso escolhido. Toque em uma ou mais opções."
+              : `${reminders.length === 1 ? "1 aviso" : `${reminders.length} avisos`} por ocorrência: ${reminders.map((r) => REMINDER_OFFSET_LABELS[r].toLowerCase()).join(", ")} (horário de Brasília).`}
+          </p>
+          <PushDeviceNotice hasReminders={reminders.length > 0} />
         </div>
 
         <div className="flex flex-col gap-1.5">

@@ -36,6 +36,11 @@ export type ScheduledReminder = {
   url: string;
   /** yyyy-MM-ddTHH:mm (São Paulo) */
   fireAt: string;
+  /** Antecedência (min) e início do evento (yyyy-MM-ddTHH:mm) — aviso antecipado não sai depois do início. */
+  offset?: number;
+  startsAt?: string;
+  /** Avisos com `fireAt` anterior a isto não saem (registro criado/editado depois do horário). */
+  notBefore?: string;
 };
 
 export type ReminderTaskRow = Pick<Task, "id" | "user_id" | "title" | "kind" | "due_date" | "scheduled_time" | "status" | "archived_at" | "recurrence" | "weekdays" | "recurrence_start" | "recurrence_until"> &
@@ -77,9 +82,23 @@ const addDays = (date: string, n: number) => shiftLocal(date, "12:00", n * 1440)
 const ddmm = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
 const weekdayOf = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
 const hhmm = (t: string | null | undefined) => (t ? t.slice(0, 5) : null);
+/** Timestamp ISO → yyyy-MM-ddTHH:mm em São Paulo (null se inválido). */
+function localKey(iso: string | null | undefined): string | null {
+  const ms = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(ms)) return null;
+  const p = localDateTimeParts(new Date(ms));
+  return `${p.date}T${p.time}`;
+}
 
 function isClosedStatus(status: string | null | undefined) {
   return status === "concluida" || status === "concluido" || status === "completed" || status === "cancelada" || status === "cancelado";
+}
+
+/** Texto dos avisos da Minha Rotina ("Hora de começar…", "…começa em 15 minutos"). */
+export function routineBody(label: string, time: string, offset: number): string {
+  if (offset === 0) return `Hora de começar ${label}.`;
+  if (offset === 1440) return `Amanhã às ${time}: ${label}.`;
+  return `${label} começa em ${offset === 60 ? "1 hora" : `${offset} minutos`} (às ${time}).`;
 }
 
 /** Avisos "1 dia antes" e "no horário" de uma execução. Sem horário: no dia às 08:00 (e véspera no horário do resumo). */
@@ -98,8 +117,9 @@ function executionPlans(base: {
     if (seen.has(`${effective}`)) continue;
     seen.add(`${effective}`);
     const at = base.time ? ` às ${base.time}` : "";
-    const body =
-      effective === 0 ? `${base.label} está programado para hoje${at}.`
+    const body = base.category === "routine" && base.time
+      ? routineBody(base.label, base.time, effective)
+      : effective === 0 ? `${base.label} está programado para hoje${at}.`
       : effective === 1440 ? `Amanhã${at}: ${base.label}.`
       : `Em ${effective === 60 ? "1 hora" : `${effective} min`}: ${base.label}${at}.`;
     const eventKey = effective === 0 && base.time && base.legacyKey
@@ -107,7 +127,9 @@ function executionPlans(base: {
       : `exec:${base.src}:${base.id}:${base.date}:${base.time ?? "dia"}:${effective}`;
     out.push({
       userId: base.userId, eventKey, dedupeKey: `${base.userId}|${base.entity}|${fire.date}T${fire.time}`,
-      type: "execution", category: base.category, title: "VS Planner • Lembrete", body, url: base.url, fireAt: `${fire.date}T${fire.time}`,
+      type: "execution", category: base.category, title: base.category === "routine" ? "VS Planner • Minha Rotina" : "VS Planner • Lembrete",
+      body, url: base.url, fireAt: `${fire.date}T${fire.time}`,
+      ...(base.time ? { offset: effective, startsAt: `${base.date}T${base.time}` } : {}),
     });
   }
   return out;
@@ -209,13 +231,17 @@ export function planReminders(input: Omit<ScheduleReminderInput, "now" | "catchU
     if (!offsets.length) continue;
     const label = activity.linkedTask?.title ?? activity.title;
     const time = activity.start_time.slice(0, 5);
+    const notBefore = localKey(activity.updated_at);
     for (const date of [today, tomorrow]) {
       if (!activityOccursOn(activity, date, weekdayOf(date))) continue;
       if (completed.has(`${activity.id}:${date}`)) continue;
+      // Tarefa recorrente vinculada já concluída naquele dia → a rotina também não avisa.
+      const linkedOcc = activity.task_id ? occByKey.get(`${activity.task_id}:${date}`) : undefined;
+      if (linkedOcc && isClosedStatus(linkedOcc.status)) continue;
       plans.push(...executionPlans({
         userId: activity.user_id, src: "routine", id: activity.id, entity: activity.task_id ? `task:${activity.task_id}` : `act:${activity.id}`,
         label, url: "/rotina", category: "routine", date, time, offsets, digestTime: prefs.digestTime,
-      }).map((p) => ({ ...p, type: "routine" as const })));
+      }).map((p) => ({ ...p, type: "routine" as const, ...(notBefore ? { notBefore } : {}) })));
     }
   }
   return plans;
@@ -228,7 +254,12 @@ export function selectScheduledReminders(input: ScheduleReminderInput): Schedule
   const earliest = localDateTimeParts(new Date(input.now.getTime() - catchUp * 60_000));
   const nowKey = `${now.date}T${now.time}`;
   const fromKey = `${earliest.date}T${earliest.time}`;
-  const due = planReminders(input, now.date).filter((p) => p.fireAt >= fromKey && p.fireAt <= nowKey);
+  const due = planReminders(input, now.date).filter((p) =>
+    p.fireAt >= fromKey && p.fireAt <= nowKey
+    // Aviso antecipado atrasado (cron falhou) não sai depois que o evento já começou.
+    && !(p.offset && p.startsAt && nowKey >= p.startsAt)
+    // Criado/editado depois do horário do aviso: não manda aviso "atrasado" logo após salvar.
+    && !(p.notBefore && p.fireAt < p.notBefore));
   const seen = new Set<string>();
   const out: ScheduledReminder[] = [];
   // Execução da própria tarefa vence a da rotina no mesmo minuto (mensagem mais completa).

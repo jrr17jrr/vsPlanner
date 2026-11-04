@@ -1,27 +1,24 @@
 "use client";
-import { Subtasks } from "@/components/shared/subtasks";
-import { ExpandableDescription } from "@/components/shared/expandable-description";
 
 import { useRouter } from "next/navigation";
-import { Check, Flag, MapPin, MoreVertical, Pencil, Repeat, Square, Trash2, CircleStop } from "lucide-react";
+import { Flag, MapPin, Repeat } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { formatDateShort, weekdayLabel } from "@/lib/format";
+import { Subtasks } from "@/components/shared/subtasks";
+import { ExpandableDescription } from "@/components/shared/expandable-description";
+import { TaskCard } from "@/components/tarefas/task-card";
+import { formatDateShort, todayKeySaoPaulo, weekdayLabel } from "@/lib/format";
 import { formatWeekdays, weekdayOfKey, type DayTaskEntry } from "@/lib/tasks";
 import { groupSubtasks, type Subtask } from "@/lib/task-schedule";
-import { todayKeySaoPaulo } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 function hasHighlights(subtasks: Subtask[]) {
   const g = groupSubtasks(subtasks, { todayKey: todayKeySaoPaulo() });
   return g.today.some((e) => !e.subtask.is_done) || g.overdue.length > 0;
 }
-import { cn } from "@/lib/utils";
 
 /**
- * Uma tarefa do dia (ou um dia de uma recorrente) — usado no Meu Dia e em
- * Tarefas. Campos vazios (horário, local) simplesmente não aparecem.
- * Botão grande de concluir pensando no uso pelo celular.
+ * Uma tarefa do dia (ou um dia de uma recorrente) — card ÚNICO com a tarefa
+ * e as subtarefas dentro. Campos vazios (horário, local) não aparecem.
  */
 export function DayTaskItem({
   entry,
@@ -33,7 +30,7 @@ export function DayTaskItem({
   onEndRecurrence,
 }: {
   entry: DayTaskEntry;
-  /** Subtarefas já carregadas no servidor (Meu Dia) — abre direto se houver algo para hoje/atrasado. */
+  /** Subtarefas já carregadas no servidor — abre direto se houver algo para hoje/atrasado. */
   subtasks?: Subtask[];
   done: boolean;
   onToggle: () => void;
@@ -44,101 +41,48 @@ export function DayTaskItem({
   const router = useRouter();
   const overdue = entry.overdue && !done;
   const deadlineOverdue = entry.deadlineOverdue && !done;
-  const hasMenu = onEdit || onDelete || onEndRecurrence;
+  const day = (key: string) => `${weekdayLabel(weekdayOfKey(key)).slice(0, 3)} ${formatDateShort(key)}`;
 
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-lg border bg-card px-3 py-2.5",
-        deadlineOverdue ? "border-destructive/40" : overdue ? "border-warning/40" : entry.important && !done ? "border-destructive/40" : "border-border",
-        done && "opacity-60"
-      )}
+    <TaskCard
+      title={entry.title}
+      done={done}
+      onToggle={onToggle}
+      time={entry.time ?? undefined}
+      accent={deadlineOverdue ? "danger" : overdue ? "warning" : done ? "success" : "default"}
+      important={entry.important}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onEndRecurrence={onEndRecurrence}
+      meta={
+        <>
+          {overdue && <Badge variant="warning" className="border-0">Execução pendente · {day(entry.date)}</Badge>}
+          {entry.deadlineDate && (deadlineOverdue ? (
+            <Badge variant="destructive" className="border-0">Prazo vencido · {formatDateShort(entry.deadlineDate)}</Badge>
+          ) : (
+            <span className={cn("inline-flex items-center gap-1", done && "line-through")}>
+              <Flag className="h-3 w-3" /> Prazo {day(entry.deadlineDate)}{entry.deadlineTime && ` · ${entry.deadlineTime}`}
+            </span>
+          ))}
+          {entry.recurring && (
+            <span className="inline-flex items-center gap-1"><Repeat className="h-3 w-3" /> {overdue ? "Recorrente" : formatWeekdays(entry.task.weekdays)}</span>
+          )}
+          {entry.location && (
+            <span className="inline-flex min-w-0 items-center gap-1"><MapPin className="h-3 w-3 shrink-0" /><span className="break-words">{entry.location}</span></span>
+          )}
+        </>
+      }
     >
-      {entry.time ? (
-        <span className="w-11 shrink-0 pt-0.5 text-sm font-semibold tabular-nums text-foreground">{entry.time}</span>
-      ) : null}
-
-      <div className="min-w-0 flex-1">
-        <p className={cn("break-words text-sm font-medium text-foreground", done && "line-through")}>{entry.title}</p>
-        <ExpandableDescription text={entry.task.description} className="mt-0.5" />
-        <Subtasks
-          parentType="pessoal"
-          parentId={entry.task.id}
-          initialItems={subtasks}
-          initialOpen={!!subtasks && hasHighlights(subtasks)}
-          onChanged={() => router.refresh()}
-        />
-        {entry.location && (
-          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="h-3 w-3 shrink-0" />
-            <span className="break-words">{entry.location}</span>
-          </p>
-        )}
-        {(entry.important || entry.recurring || overdue || entry.deadlineDate) && (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {overdue && (
-              <Badge variant="warning" className="border-0">
-                Execução pendente · {weekdayLabel(weekdayOfKey(entry.date)).slice(0, 3)} {formatDateShort(entry.date)}
-              </Badge>
-            )}
-            {entry.deadlineDate && (deadlineOverdue ? (
-              <Badge variant="destructive" className="border-0">Prazo vencido · {formatDateShort(entry.deadlineDate)}</Badge>
-            ) : (
-              <span className={cn("flex items-center gap-1 text-[11px] text-muted-foreground", done && "line-through")}>
-                <Flag className="h-3 w-3" /> Prazo {weekdayLabel(weekdayOfKey(entry.deadlineDate)).slice(0, 3)} {formatDateShort(entry.deadlineDate)}{entry.deadlineTime && ` · ${entry.deadlineTime}`}
-              </span>
-            ))}
-            {entry.important && <Badge variant="destructive" className="border-0">Importante</Badge>}
-            {entry.recurring && (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Repeat className="h-3 w-3" /> {overdue ? "Recorrente" : formatWeekdays(entry.task.weekdays)}
-              </span>
-            )}
-          </div>
-        )}
-        {entry.notes && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.notes}</p>}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          type="button"
-          size="sm"
-          variant={done ? "secondary" : "outline"}
-          onClick={onToggle}
-          className="h-9 gap-1.5 px-3"
-          aria-label={done ? "Marcar como não concluída" : "Concluir"}
-        >
-          {done ? <Check className="h-4 w-4 text-success" /> : <Square className="h-4 w-4" />}
-          <span className="hidden min-[380px]:inline">{done ? "Feita" : "Concluir"}</span>
-        </Button>
-
-        {hasMenu && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Mais ações">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {onEdit && (
-                <DropdownMenuItem onClick={onEdit}>
-                  <Pencil className="h-4 w-4" /> Editar
-                </DropdownMenuItem>
-              )}
-              {onEndRecurrence && (
-                <DropdownMenuItem onClick={onEndRecurrence}>
-                  <CircleStop className="h-4 w-4" /> Encerrar repetição
-                </DropdownMenuItem>
-              )}
-              {onDelete && (
-                <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
-                  <Trash2 className="h-4 w-4" /> Excluir
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-    </div>
+      <ExpandableDescription text={entry.task.description} className="mt-1" />
+      {entry.notes && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.notes}</p>}
+      <Subtasks
+        embedded
+        parentType="pessoal"
+        parentId={entry.task.id}
+        initialItems={subtasks}
+        initialOpen={!!subtasks && hasHighlights(subtasks)}
+        onChanged={() => router.refresh()}
+      />
+    </TaskCard>
   );
 }

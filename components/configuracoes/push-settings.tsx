@@ -1,62 +1,30 @@
 "use client";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { registerServiceWorker } from "@/lib/push/client";
+import { activatePush, sendTestPush } from "@/lib/push/client";
 import { PushDiagnostics } from "@/components/configuracoes/push-diagnostics";
-function decodeKey(key: string) {
-  const pad = "=".repeat((4 - key.length % 4) % 4);
-  const raw = atob((key + pad).replace(/-/g, "+").replace(/_/g, "/"));
-  return Uint8Array.from(raw, c => c.charCodeAt(0));
-}
-type DeviceInfo = { ios: boolean; standalone: boolean; permission: string; supported: boolean };
-const SERVER_INFO: DeviceInfo = { ios: false, standalone: true, permission: "default", supported: true };
-let cached: DeviceInfo | null = null;
-function readDevice(): DeviceInfo {
-  const nav = navigator as Navigator & { standalone?: boolean };
-  const next: DeviceInfo = {
-    ios: /iPhone|iPad|iPod/.test(nav.userAgent) || (nav.platform === "MacIntel" && nav.maxTouchPoints > 1),
-    standalone: nav.standalone === true || window.matchMedia("(display-mode: standalone)").matches,
-    permission: "Notification" in window ? Notification.permission : "unsupported",
-    supported: "serviceWorker" in nav && "PushManager" in window && "Notification" in window,
-  };
-  if (!cached || JSON.stringify(cached) !== JSON.stringify(next)) cached = next;
-  return cached;
-}
-const noopSubscribe = () => () => {};
+import { notifyPushChange, usePushDevice } from "@/components/shared/push-device";
 
 export function PushSettings() {
-  const device = useSyncExternalStore(noopSubscribe, readDevice, () => SERVER_INFO);
+  const { device } = usePushDevice();
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const supported = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window;
   async function activate() {
     setBusy(true); setStatus("");
     try {
-      if (!supported) throw new Error("Este navegador não suporta push. No iPhone, abra o app instalado na Tela de Início.");
-      const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!key) throw new Error("Falta configurar a chave pública VAPID na Vercel.");
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") throw new Error("Permissão não concedida nas configurações do iPhone.");
-      await registerServiceWorker();
-      const sw = await navigator.serviceWorker.ready;
-      const existing = await sw.pushManager.getSubscription();
-      const subscription = existing || await sw.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeKey(key) });
-      const res = await fetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Falha ao registrar");
+      await activatePush();
       setStatus("Notificações ativadas neste aparelho.");
     } catch (e) { setStatus(e instanceof Error ? e.message : "Erro ao ativar"); }
-    finally { setBusy(false); }
+    finally { notifyPushChange(); setBusy(false); }
   }
   async function test() {
     setBusy(true);
     try {
-      const res = await fetch("/api/push/test", { method: "POST" });
-      const result = await res.json();
-      const schedule = result.schedule as { ok?: boolean; skipped?: string; error?: string } | undefined;
+      const result = await sendTestPush(5);
+      const schedule = result.schedule;
       const scheduleText = schedule?.error ? ` Agendador automático: ${schedule.error}.` : schedule?.ok ? " Agendador automático verificado." : "";
-      setStatus((res.ok && result.sent ? "Teste enviado! Confira as notificações do iPhone." : result.error || "Nenhuma notificação entregue.") + scheduleText);
+      setStatus(result.message + scheduleText);
     } catch { setStatus("Falha ao testar notificações."); }
     finally { setBusy(false); }
   }

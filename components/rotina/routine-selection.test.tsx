@@ -47,7 +47,7 @@ describe("Meu Dia — agrupamento na tela", () => {
 
   it("tarefa principal acima da subtarefa, como agrupamento recolhível", () => {
     expect(t.indexOf("VS Planner")).toBeLessThan(t.indexOf("Adicionar novos campos"));
-    expect(t).toContain("Tarefa principal · 1 subtarefa");
+    expect(t).toContain("Contexto · tarefa principal · 1 subtarefa");
     expect(html).toMatch(/aria-expanded="true" aria-controls="meu-dia-hoje-vs"/);
     expect(html).toContain('id="meu-dia-hoje-vs"');
     expect(t).not.toContain("↳ VS Planner"); // dentro do grupo, sem a linha solta

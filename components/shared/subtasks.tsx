@@ -45,7 +45,10 @@ export function Subtasks({
   initialItems,
   dateKey,
   onChanged,
+  embedded = false,
 }: {
+  /** Dentro do card da tarefa (Tarefas/Meu Dia): sem caixa própria, separador no topo e linha lateral nas subtarefas. */
+  embedded?: boolean;
   parentType: SubtaskParent;
   parentId: string;
   initialOpen?: boolean;
@@ -190,7 +193,8 @@ export function Subtasks({
   /** Card de destaque (hoje/atrasadas): concluir, ver datas e editar sem sair da tela. */
   function highlightRow(entry: SubtaskEntry, overdue?: boolean) {
     const item = entry.subtask;
-    return <div key={entry.subtask.id} className={cn("rounded-md border p-2", overdue ? (entry.state.deadlineOverdue ? "border-destructive/40" : "border-warning/40") : "border-border", item.is_done && "opacity-60")}>
+    const tone = overdue ? (entry.state.deadlineOverdue ? "border-destructive/60" : "border-amber-400/60") : embedded ? "border-primary/50" : "border-border";
+    return <div key={entry.subtask.id} className={cn(embedded ? "border-l-2 py-1 pl-2.5 pr-1" : "rounded-md border p-2", tone, item.is_done && "opacity-60")}>
       <div className="flex min-h-10 items-center gap-2">
         {checkbox(item)}
         <div className="min-w-0 flex-1">
@@ -211,17 +215,22 @@ export function Subtasks({
     return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", h === "hoje" ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive")}>{h === "hoje" ? (viewingToday ? "↑ Hoje" : "↑ Neste dia") : "↑ Atrasada"}</span>;
   }
 
-  return <div className="mt-2 rounded-lg border border-border/70 p-2 text-sm">
-    <button type="button" className="flex min-h-9 w-full items-center justify-between gap-2 text-left" aria-expanded={open} onClick={() => setOpen(!open)}>
-      <span className="flex items-center gap-1 font-medium">{open ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>} Subtarefas {loaded ? `(${sections.done}/${sections.total})` : ""}</span>
+  const hasItems = loaded && items.length > 0;
+  return <div className={cn("text-sm", embedded ? "mt-2.5 border-t border-border/60 pt-1.5" : "mt-2 rounded-lg border border-border/70 p-2")}>
+    <button type="button" className={cn("flex w-full items-center justify-between gap-2 text-left", embedded ? "min-h-9 text-xs" : "min-h-9")} aria-expanded={open} onClick={() => setOpen(!open)}>
+      <span className={cn("flex items-center gap-1", embedded ? "font-medium text-muted-foreground" : "font-medium")}>
+        {open ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>}
+        {embedded ? (hasItems ? <>Subtarefas <span className="tabular-nums text-foreground">{sections.done}/{sections.total}</span></> : loaded ? "Adicionar subtarefas" : "Subtarefas") : <>Subtarefas {loaded ? `(${sections.done}/${sections.total})` : ""}</>}
+      </span>
       <span className="flex items-center gap-2 text-xs text-muted-foreground">
         {loaded && sections.overdue.length > 0 && <span className="font-medium text-destructive">{sections.overdue.length} atrasada{sections.overdue.length > 1 ? "s" : ""}</span>}
         {loaded && sections.today.some(e => !e.subtask.is_done) && <span className="font-medium text-primary">{sections.today.filter(e => !e.subtask.is_done).length} {viewingToday ? "hoje" : "no dia"}</span>}
-        {loaded && items.length > 0 && <span>{sections.progress}%</span>}
+        {hasItems && embedded && <span className="hidden h-1 w-16 overflow-hidden rounded-full bg-secondary min-[400px]:block" role="progressbar" aria-valuenow={sections.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso das subtarefas"><span className="block h-full bg-primary/80 transition-all" style={{width: `${sections.progress}%`}}/></span>}
+        {hasItems && <span className="tabular-nums">{sections.progress}%</span>}
       </span>
     </button>
-    {loaded && items.length > 0 && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={sections.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso das subtarefas"><div className="h-full bg-primary transition-all" style={{width: `${sections.progress}%`}}/></div>}
-    {open && <div className="mt-3 space-y-4">
+    {hasItems && !embedded && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={sections.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso das subtarefas"><div className="h-full bg-primary transition-all" style={{width: `${sections.progress}%`}}/></div>}
+    {open && <div className={cn("space-y-4", embedded ? "mt-2 pl-1" : "mt-3")}>
       {sections.today.length > 0 && <section aria-label="Para fazer hoje">
         <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-primary">{viewingToday ? "Para fazer hoje" : `Para fazer em ${shortDay(dateKey!)}`} ({sections.today.length})</h4>
         <div className="space-y-2">{sections.today.map(e => highlightRow(e))}</div>
@@ -237,12 +246,12 @@ export function Subtasks({
           {allOpen ? <ChevronDown className="h-4 w-4"/> : <ChevronRight className="h-4 w-4"/>} Todas as subtarefas ({items.length})
           {hasHighlights && <span className="ml-1 font-normal normal-case tracking-normal">· {highlighted.size} destacada{highlighted.size > 1 ? "s" : ""} acima</span>}
         </button>
-        {allOpen && <div className="space-y-2">
+        {allOpen && <div className={embedded ? "space-y-1.5" : "space-y-2"}>
           {roots.length === 0 && <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">Nenhuma subtarefa ainda.</p>}
           {roots.map((item, i) => {
             const entry = entryById.get(item.id)!;
             const children = items.filter(x => x.parent_subtask_id === item.id);
-            return <div key={item.id} className="rounded-md border p-2"><div className="flex min-h-10 flex-wrap items-center gap-1 sm:flex-nowrap">
+            return <div key={item.id} className={embedded ? "border-l-2 border-border/80 py-0.5 pl-2" : "rounded-md border p-2"}><div className="flex min-h-10 flex-wrap items-center gap-1 sm:flex-nowrap">
               {checkbox(item)}
               <div className="min-w-0 flex-1 basis-40 pl-1">
                 <span className={"break-words " + (item.is_done ? "line-through text-muted-foreground" : "")}>{item.title}</span> {tag(item.id)}

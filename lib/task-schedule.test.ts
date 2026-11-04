@@ -216,6 +216,19 @@ describe("migration 20261102100000 (Postgres embutido)", () => {
     await db.close();
   });
 
+  it("Rotina: várias antecedências são gravadas e lidas de volta; o filtro do cron acha só as com lembrete", async () => {
+    const db = await setup();
+    await db.exec(sql);
+    await db.query("insert into activities (user_id, title, start_time, weekdays, reminder_offsets) values ('00000000-0000-0000-0000-00000000000a', 'SaaS Barbearia', '18:30', '{1,3,5}', '{0,15}')");
+    await db.query("insert into activities (user_id, title, start_time, weekdays) values ('00000000-0000-0000-0000-00000000000a', 'Sem aviso', '09:00', '{1}')");
+    await expect(db.query("insert into activities (user_id, title, start_time, weekdays, reminder_offsets) values ('00000000-0000-0000-0000-00000000000a', 'x', '09:00', '{1}', '{45}')")).rejects.toThrow();
+    // Mesmo filtro que o PostgREST gera para .not("reminder_offsets", "eq", "{}").
+    const rows = (await db.query<{ title: string; reminder_offsets: number[] }>("select title, reminder_offsets from activities where not (reminder_offsets = '{}') order by title")).rows;
+    expect(rows).toEqual([{ title: "SaaS Barbearia", reminder_offsets: [0, 15] }]);
+    expect(normalizeReminderOffsets(rows[0].reminder_offsets)).toEqual([0, 15]);
+    await db.close();
+  });
+
   it("RLS: usuário não vincula tarefa de outra pessoa à própria rotina; excluir a tarefa remove só o vínculo da rotina", async () => {
     const db = await setup();
     await db.exec(sql);

@@ -18,12 +18,17 @@ export async function POST(request: Request) {
     if (error) throw error;
     const subscriptions = (data ?? []) as unknown as Array<{ subscription: webpush.PushSubscription; endpoint: string }>;
     if (!subscriptions.length) return NextResponse.json({ error: "Ative as notificações neste aparelho primeiro." }, { status: 400 });
+    // Configurações manda 5 (teste de rajada); o formulário da Rotina manda 1.
+    const body = await request.json().catch(() => ({})) as { count?: unknown };
+    const count = Math.min(5, Math.max(1, Math.trunc(Number(body?.count) || 5)));
     let sent = 0;
     for (const row of subscriptions) {
       try {
-        for (let i = 1; i <= 5; i++) {
-          await webpush.sendNotification(row.subscription as webpush.PushSubscription, JSON.stringify({
-            title: "VS Planner • Teste " + i + "/5", body: "Notificação de teste número " + i + ".", url: "/hoje",
+        for (let i = 1; i <= count; i++) {
+          await webpush.sendNotification(row.subscription as webpush.PushSubscription, JSON.stringify(count === 1
+            ? { title: "VS Planner • Teste", body: "As notificações estão funcionando neste aparelho.", url: "/rotina", tag: "vs-test-" + Date.now() }
+            : {
+            title: "VS Planner • Teste " + i + "/" + count, body: "Notificação de teste número " + i + ".", url: "/hoje",
             tag: "vs-test-" + i + "-" + Date.now()
           }));
           sent++;

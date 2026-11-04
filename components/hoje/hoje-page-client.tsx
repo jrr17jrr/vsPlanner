@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { TodayMeetingItem } from "@/components/visionario/reunioes/today-meeting-item";
 import { LinkedRoutineItem } from "@/components/rotina/linked-routine-item";
 import { MyDayBoardView } from "@/components/hoje/my-day-board";
+import { TaskList, TaskSection } from "@/components/shared/task-section";
 import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
 import { toggleActivityCompletionAction } from "@/lib/supabase/personal-actions";
 import { getRealOccurrencesForDay } from "@/lib/routine-real";
@@ -69,7 +70,7 @@ export function HojePageClient({
     board.hoje.length + board.atrasadas.length + board.proximas.length + board.concluidas.length === 0;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <PageHeader
         title={`Meu Dia — ${weekdayLabel(today.getDay())}`}
         description={counts ? `${formatDateLong(today)} · ${counts.hoje} para hoje${counts.atrasadas ? ` · ${counts.atrasadas} atrasada${counts.atrasadas > 1 ? "s" : ""}` : ""}` : formatDateLong(today)}
@@ -80,7 +81,7 @@ export function HojePageClient({
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-8 lg:grid-cols-2 lg:gap-6">
         <Block title="Rotina" href="/rotina">
           {errors.rotina ? (
             <SectionError title="Não foi possível carregar a Rotina" error={errors.rotina} />
@@ -150,14 +151,15 @@ export function HojePageClient({
 
 function Block({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
   return (
-    <section>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+    <TaskSection
+      title={title}
+      action={
         <Link href={href} className="flex min-h-9 shrink-0 items-center gap-1 px-1 text-xs text-primary hover:underline">
           Ver tudo <ArrowRight className="h-3 w-3" />
         </Link>
-      </div>
-      <div className="flex flex-col gap-2">{children}</div>
-    </section>
+      }
+    >
+      <TaskList>{children}</TaskList>
+    </TaskSection>
   );
 }

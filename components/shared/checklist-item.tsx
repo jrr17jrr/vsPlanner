@@ -42,7 +42,7 @@ export function ChecklistItem({
   return (
     <div
       className={cn(
-        "flex min-h-14 items-center gap-3 rounded-lg border border-border bg-card px-3 py-3 sm:py-2.5",
+        "flex min-h-14 items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-3 shadow-sm shadow-black/10 sm:py-2.5",
         done && "opacity-60",
         className
       )}

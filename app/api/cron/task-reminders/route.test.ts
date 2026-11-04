@@ -250,6 +250,51 @@ describe("confiabilidade da entrega", () => {
   });
 });
 
+describe("Minha Rotina pela rota do cron", () => {
+  const act = (over: Row = {}): Row => ({
+    id: "barbearia", space_id: "s", user_id: A, title: "SaaS Barbearia", category: null, weekdays: [1, 3, 5], start_time: "18:30:00", end_time: null,
+    is_active: true, sort_order: 0, notes: null, created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T10:00:00Z",
+    task_id: null, specific_date: null, skipped_dates: [], reminder_offsets: [0, 15], ...over,
+  });
+  it("seg 18:15 e 18:30: dois pushes independentes, sem duplicar em execuções repetidas", async () => {
+    tables.activities = [act()];
+    at("2026-11-02T18:15"); await call(); await call();
+    at("2026-11-02T18:30"); await call();
+    at("2026-11-02T18:31"); await call();
+    expect(sentTo().map((p) => [p.title, p.body, p.url])).toEqual([
+      ["VS Planner • Minha Rotina", "SaaS Barbearia começa em 15 minutos (às 18:30).", "/rotina"],
+      ["VS Planner • Minha Rotina", "Hora de começar SaaS Barbearia.", "/rotina"],
+    ]);
+    expect(log().map((l) => [l.event_key, l.status])).toEqual([
+      ["exec:routine:barbearia:2026-11-02:18:30:15", "sent"],
+      ["exec:routine:barbearia:2026-11-02:18:30:0", "sent"],
+    ]);
+  });
+  it("terça (fora dos dias escolhidos): nada", async () => {
+    tables.activities = [act()]; at("2026-11-03T18:30");
+    expect((await (await call()).json()).due).toBe(0);
+  });
+  it("concluída no dia, excluída só naquele dia ou desativada: nada", async () => {
+    tables.activities = [act()]; tables.activity_completions = [{ activity_id: "barbearia", user_id: A, occurrence_date: "2026-11-02" }];
+    at("2026-11-02T18:30"); expect((await (await call()).json()).due).toBe(0);
+    tables.activity_completions = []; tables.activities = [act({ skipped_dates: ["2026-11-02"] })];
+    expect((await (await call()).json()).due).toBe(0);
+    tables.activities = [act({ is_active: false })];
+    expect((await (await call()).json()).due).toBe(0);
+    expect(sendNotification).not.toHaveBeenCalled();
+  });
+  it("falha temporária (503) → nova tentativa no minuto seguinte, uma entrega só", async () => {
+    tables.activities = [act({ reminder_offsets: [0] })]; at("2026-11-02T18:30");
+    sendNotification.mockRejectedValueOnce(Object.assign(new Error("x"), { statusCode: 503 }));
+    expect(await (await call()).json()).toMatchObject({ failed: 1 });
+    at("2026-11-02T18:31");
+    expect(await (await call()).json()).toMatchObject({ sent: 1, retried: 1 });
+    at("2026-11-02T18:32");
+    expect(await (await call()).json()).toMatchObject({ sent: 0, skipped: 1 });
+    expect(log()[0]).toMatchObject({ status: "sent", attempts: 2 });
+  });
+});
+
 describe("diagnóstico do usuário (/api/push/status)", () => {
   const status = async () => (await STATUS(new Request("https://app.exemplo.com/api/push/status"))).json();
   it("exige login", async () => {
