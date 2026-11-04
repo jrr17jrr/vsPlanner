@@ -1,6 +1,8 @@
 import { normalizeObjective } from "@/lib/clt/history";
 import { parseRate } from "@/lib/clt/video-rates";
 import { parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
+import { readJsonInfo } from "./info-fields";
+import { normalizeMetaId } from "@/lib/clt/registered-info";
 import {
   EXTRA_IMPORT_KEYS,
   emptyMetrics,
@@ -175,16 +177,30 @@ function readAudience(a: Obj, i: number, problems: ParseProblem[]): ImportAudien
   };
 }
 
+/** ID do Meta como TEXTO (números grandes chegam como string — ver protectBigIds em parse.ts). */
+function metaId(raw: unknown, path: string, problems: ParseProblem[]): string | null {
+  const r = normalizeMetaId(raw === undefined || raw === null ? null : raw);
+  if (r.error) problems.push({ path, message: r.error });
+  return r.value;
+}
+
+const AD_KNOWN = new Set(["meta_ad_id", "id", "ad_id", "id_do_anuncio", "name", "nome", "post_id", "notes", "observacoes", "metrics", "metricas", "resultados", "format", "formato", "external_key"]);
+const SET_KNOWN = new Set(["meta_adset_id", "id", "adset_id", "name", "nome", "audience_external_key", "publico", "público", "audience_name", "audience", "daily_budget_brl", "daily_budget", "orcamento_diario", "start_at_local", "inicio", "start", "scheduled_end_at_local", "end_at_local", "fim", "end", "reported_status", "status", "notes", "observacoes", "result_type", "tipo_resultado", "objective", "objetivo", "ads", "anuncios", "anúncios", "external_key", "metrics", "metricas", "resultados"]);
+const CAMPAIGN_KNOWN = new Set(["meta_campaign_id", "id", "campaign_id", "name", "nome", "objective", "objetivo", "daily_budget_brl", "daily_budget", "orcamento_diario", "start_date", "starts_on", "inicio", "data_inicio", "end_date", "ends_on", "fim", "data_fim", "status", "reported_status", "notes", "observacoes", "ad_sets", "conjuntos", "adsets", "campaign_reported_totals_for_reconciliation_only", "publicos", "públicos", "external_key", "company_key", "metrics", "metricas", "resultados",
+  ...Object.values(METRIC_ALIASES).flat()]);
+
 function readAd(ad: Obj, path: string, problems: ParseProblem[]): ImportAd {
   const name = str(pick(ad, ["name", "nome"])) ?? "";
   const metricSource = pick(ad, ["metrics", "metricas", "resultados"]);
   const extra: Obj = {};
   for (const [k, v] of Object.entries(ad)) if (!["meta_ad_id", "name", "nome", "post_id", "notes", "observacoes", "metrics", "metricas", "resultados", "format", "formato"].includes(k)) extra[k] = v;
+  const { info, details } = readJsonInfo("ad", ad, AD_KNOWN, path, problems);
   return {
-    metaId: str(ad.meta_ad_id),
+    info, details,
+    metaId: metaId(pick(ad, ["meta_ad_id", "ad_id", "id_do_anuncio"]), `${path}.meta_ad_id`, problems),
     name,
     format: inferAdFormat(str(pick(ad, ["format", "formato"])), name),
-    postId: str(ad.post_id),
+    postId: info.post_id !== undefined ? String(info.post_id) : str(ad.post_id),
     notes: str(pick(ad, ["notes", "observacoes"])),
     metrics: readMetrics(isObj(metricSource) ? metricSource : null, `${path}.metrics`, problems),
     extraMetrics: readExtraMetrics(isObj(metricSource) ? metricSource : null, `${path}.metrics`, problems),
@@ -194,8 +210,10 @@ function readAd(ad: Obj, path: string, problems: ParseProblem[]): ImportAd {
 
 function readAdSet(set: Obj, path: string, problems: ParseProblem[]): ImportAdSet {
   const ads = arr(set, ["ads", "anuncios", "anúncios"]) ?? [];
+  const { info, details } = readJsonInfo("adSet", set, SET_KNOWN, path, problems);
   return {
-    metaId: str(set.meta_adset_id),
+    info, details,
+    metaId: metaId(pick(set, ["meta_adset_id", "adset_id"]), `${path}.meta_adset_id`, problems),
     name: str(pick(set, ["name", "nome"])) ?? "",
     audienceKey: str(set.audience_external_key),
     audienceName: str(pick(set, ["publico", "público", "audience_name"])),
@@ -203,7 +221,7 @@ function readAdSet(set: Obj, path: string, problems: ParseProblem[]): ImportAdSe
     startAt: dateOrProblem(pick(set, ["start_at_local", "inicio", "start"]), `${path}.start_at_local`, problems, true),
     endAt: dateOrProblem(pick(set, ["scheduled_end_at_local", "end_at_local", "fim", "end"]), `${path}.scheduled_end_at_local`, problems, true),
     status: str(pick(set, ["reported_status", "status"])),
-    placements: str(set.placements),
+    placements: info.placements !== undefined ? String(info.placements) : str(set.placements),
     notes: str(pick(set, ["notes", "observacoes"])),
     // Opcional: objetivo/otimização do conjunto (arquivos antigos seguem sem ele).
     resultType: normalizeObjective(str(pick(set, ["result_type", "tipo_resultado", "optimization_goal", "otimizacao", "objective", "objetivo"]))),
@@ -229,8 +247,10 @@ function readCampaign(c: Obj, i: number, problems: ParseProblem[]): ImportCampai
     const m = readMetrics(c, path, problems);
     if (Object.values(m).some(v => v !== null)) reportedTotals = { spend: m.spend, conversations: m.conversations, impressions: m.impressions, unallocatedSpend: null, unallocatedConversations: null };
   }
+  const { info, details } = readJsonInfo("campaign", c, CAMPAIGN_KNOWN, path, problems);
   return {
-    metaId: str(c.meta_campaign_id),
+    info, details,
+    metaId: metaId(pick(c, ["meta_campaign_id", "campaign_id"]), `${path}.meta_campaign_id`, problems),
     name: str(pick(c, ["name", "nome"])) ?? "",
     objective: str(pick(c, ["objective", "objetivo"])),
     dailyBudget: numOrProblem(pick(c, ["daily_budget_brl", "daily_budget", "orcamento_diario"]), `${path}.daily_budget_brl`, problems),

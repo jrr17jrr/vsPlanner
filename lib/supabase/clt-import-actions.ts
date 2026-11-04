@@ -14,6 +14,8 @@ import { AD_RATES_MIGRATION, AD_RESULTS_MIGRATION_EXTRA, prepareAdResultUpdate, 
 /** Coluna ausente no banco: qual migration falta (taxas → 20261108100000; engajamento/vídeo → 20261106100000). */
 const migrationHint = (cols: Record<string, unknown>) => ("hook_rate" in cols || "hold_rate" in cols ? `${AD_RATES_MIGRATION} ${AD_RESULTS_MIGRATION_EXTRA}` : AD_RESULTS_MIGRATION_EXTRA);
 import { buildImportPayload } from "@/lib/import/plan";
+import { collectInfoTargets, countInfoChanges, INFO_TABLE, planInfoChanges, withoutNewColumns, type InfoTarget } from "@/lib/import/info-plan";
+import { INFO_MIGRATION } from "@/lib/clt/registered-info";
 import { buildSnapshot } from "@/lib/import/snapshot";
 import { assertCompanyInModule } from "@/lib/supabase/clt-scope";
 
@@ -201,6 +203,58 @@ async function preparePeriodUpdate(db: SupabaseClient, userId: string, preview: 
   return ops;
 }
 
+/** Linhas atuais (todas as colunas) das campanhas/conjuntos/anúncios com informações na importação. */
+async function loadInfoRows(db: SupabaseClient, userId: string, targets: InfoTarget[]) {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const level of ["campaign", "adSet", "ad"] as const) {
+    const ids = [...new Set(targets.filter((t) => t.level === level && t.id).map((t) => t.id!))];
+    if (!ids.length) continue;
+    const { data, error } = await db.from(INFO_TABLE[level]).select("*").in("id", ids).eq("user_id", userId);
+    if (error) throw error;
+    for (const r of (data ?? []) as Array<Record<string, unknown>>) out[String(r.id)] = r;
+  }
+  return out;
+}
+
+/**
+ * Prévia das informações cadastradas (atual → novo). Se só elas mudam numa
+ * atualização de anúncios existentes, "nenhuma métrica mudou" deixa de ser erro.
+ */
+async function prepareInfo(db: SupabaseClient, userId: string, preview: ImportPreview) {
+  const targets = collectInfoTargets(preview);
+  preview.infoChanges = targets.length ? planInfoChanges(targets, await loadInfoRows(db, userId, targets)).changes : [];
+  if (countInfoChanges(preview.infoChanges)) {
+    preview.issues = preview.issues.filter((i) => i.id !== "metrics-nothing" && i.id !== "period-nothing");
+    preview.canImport = !preview.issues.some((i) => i.level === "error");
+  }
+}
+
+/**
+ * Depois de gravar a estrutura/métricas: grava as informações cadastradas
+ * informadas (só as colunas informadas e diferentes; `details` mesclado).
+ * Sem a migration 20261109100000, grava as colunas antigas e avisa.
+ */
+async function saveInfo(db: SupabaseClient, userId: string, input: Input, bundle: ImportBundle, company: { id: string; name: string }, period: Period): Promise<{ saved: number; warning: string }> {
+  const { snapshot } = await loadSnapshot(db, company);
+  const fresh = validateImport(bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) ?? period });
+  const targets = collectInfoTargets(fresh).filter((t) => t.id);
+  if (!targets.length) return { saved: 0, warning: "" };
+  const { ops } = planInfoChanges(targets, await loadInfoRows(db, userId, targets));
+  let saved = 0, warning = "";
+  for (const op of ops) {
+    const table = INFO_TABLE[op.level];
+    let { error } = await db.from(table).update(op.update).eq("id", op.id).eq("user_id", userId);
+    if (error && isMissingSchema(error.code)) {
+      warning = ` Parte das informações cadastradas não foi gravada: ${INFO_MIGRATION}`;
+      const legacy = withoutNewColumns(op.level, op.update);
+      error = Object.keys(legacy).length ? (await db.from(table).update(legacy).eq("id", op.id).eq("user_id", userId)).error : null;
+    }
+    if (error) return { saved, warning: `${warning} Informações cadastradas de "${op.name}" não foram gravadas: ${error.code === "23505" ? "valor já usado em outro registro" : error.message}.` };
+    saved++;
+  }
+  return { saved, warning };
+}
+
 async function buildPreview(input: Input) {
   const parsed = parseImportInput(input.content);
   if (!parsed.ok) return { error: parsed.error } as const;
@@ -210,6 +264,8 @@ async function buildPreview(input: Input) {
   const preview = validateImport(parsed.bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) });
   const prepared = preview.mode === "metrics_update" && preview.canImport && schemaReady ? await prepareMetricsUpdate(db, user.id, preview) : [];
   const periodOps = preview.mode === "period_update" && preview.canImport && schemaReady ? await preparePeriodUpdate(db, user.id, preview, validTargets(input.targets)) : [];
+  // A prévia das informações nunca derruba a validação (sem ela, só não há "atual → novo").
+  if (schemaReady) await prepareInfo(db, user.id, preview).catch(() => { preview.infoChanges = []; });
   return { preview, detected: parsed.detected, schemaReady, db, user, prepared, periodOps, bundle: parsed.bundle, company } as const;
 }
 
@@ -263,9 +319,10 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
         }
         done++;
       }
+      const info = await saveInfo(db, r.user.id, input, r.bundle, r.company, null);
       refreshImportViews();
       const unchanged = (preview.metricChanges ?? []).filter(m => m.unchanged).length;
-      return { success: `Atualização concluída: ${done} anúncio(s) com métricas atualizadas${unchanged ? `, ${unchanged} sem mudanças` : ""}. Nenhuma campanha, conjunto ou anúncio foi criado; orçamento, datas, status e as métricas não informadas ficaram como estavam.`, summary: { ads_updated: done } };
+      return { success: `Atualização concluída: ${done} anúncio(s) com métricas atualizadas${unchanged ? `, ${unchanged} sem mudanças` : ""}${info.saved ? `; informações cadastradas atualizadas em ${info.saved} registro(s)` : ""}. Nenhuma campanha, conjunto ou anúncio foi criado; orçamento, datas, status e as métricas não informadas ficaram como estavam.${info.warning}`, summary: { ads_updated: done, info_saved: info.saved } };
     }
 
     // Com período, só itens já cadastrados: atualiza o registro do período (só as colunas informadas).
@@ -284,9 +341,10 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
       }
       // Registro da execução (auditoria; não interfere nos resultados).
       await db.from("clt_import_runs").insert({ user_id: r.user.id, company_id: preview.companyId, source_format: preview.sourceFormat, period_start: preview.period!.start, period_end: preview.period!.end, summary: { mode: "period_update", targets: (preview.periodTargets ?? []).map((t) => ({ ad: t.ad, record: t.target, changes: t.changes })) } });
+      const info = await saveInfo(db, r.user.id, input, r.bundle, r.company, preview.period);
       refreshImportViews();
       const updated = r.periodOps.filter((o) => o.kind === "update").length, created = done - updated;
-      return { success: `Atualização concluída: ${updated} registro(s) de resultados atualizado(s)${created ? ` e ${created} criado(s) (sem sobreposição)` : ""}. Só as métricas informadas mudaram; campanha, conjunto, anúncio, status, datas e as demais métricas ficaram como estavam.`, summary: { records_updated: updated, records_created: created } };
+      return { success: `Atualização concluída: ${updated} registro(s) de resultados atualizado(s)${created ? ` e ${created} criado(s) (sem sobreposição)` : ""}${info.saved ? `; informações cadastradas atualizadas em ${info.saved} registro(s)` : ""}. Só as métricas e informações informadas mudaram; status, datas, orçamento e as demais métricas ficaram como estavam.${info.warning}`, summary: { records_updated: updated, records_created: created, info_saved: info.saved } };
     }
 
     const { data, error } = await db.rpc("clt_import_bundle", { p_company_id: preview.companyId, p_payload: buildImportPayload(preview) });
@@ -309,11 +367,12 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
         if (typeError) { typeWarning = " O tipo de resultado dos conjuntos não foi gravado (atualização do banco pendente: clt_ad_sets.result_type)."; break; }
       }
     }
+    const info = await saveInfo(db, r.user.id, input, r.bundle, r.company, preview.period);
     refreshImportViews();
     const s = (data ?? {}) as Record<string, number | string>;
     return {
-      success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas.${typeWarning}${extraWarning}`,
-      summary: s,
+      success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas${info.saved ? `; informações cadastradas gravadas em ${info.saved} registro(s)` : ""}.${typeWarning}${extraWarning}${info.warning}`,
+      summary: { ...s, info_saved: info.saved },
     };
   } catch (e) {
     return { error: describeError(e) };

@@ -72,7 +72,18 @@ export type ImportAudience = {
   extra: Record<string, unknown>;
 };
 
+/**
+ * Informações cadastradas informadas na importação (coluna do banco → valor;
+ * lib/clt/registered-info.ts). Só o que veio no arquivo — campo omitido não
+ * entra e nunca apaga o valor salvo.
+ */
+export type ImportInfo = Record<string, string | number>;
+/** Outras configurações sem coluna própria (gravadas em `details`, mescladas). */
+export type ImportDetails = Record<string, string | number | boolean | Array<string | number>>;
+
 export type ImportAd = {
+  info?: ImportInfo;
+  details?: ImportDetails;
   metaId: string | null;
   name: string;
   format: "imagem" | "video" | "carrossel" | "outro";
@@ -85,6 +96,8 @@ export type ImportAd = {
 };
 
 export type ImportAdSet = {
+  info?: ImportInfo;
+  details?: ImportDetails;
   metaId: string | null;
   name: string;
   /** Nome inventado pelo parser (texto sem "Conjunto:") — exige revisão. */
@@ -111,6 +124,8 @@ export type ReportedTotals = {
 };
 
 export type ImportCampaign = {
+  info?: ImportInfo;
+  details?: ImportDetails;
   metaId: string | null;
   name: string;
   objective: string | null;

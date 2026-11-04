@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildNewSubtaskRows, type NewSubtaskInput } from "@/lib/supabase/subtask-rows";
+import { INFO_MIGRATION, normalizeMetaId } from "@/lib/clt/registered-info";
 type State={error?:string;success?:string};
 type Db=import("@supabase/supabase-js").SupabaseClient;
 /** Módulos (clt/mkt) das empresas informadas; null se a coluna ainda não existe (tudo é CLT). */
@@ -129,12 +130,24 @@ export async function setCltCampaignCreatedInMetaAction(id:string,created:boolea
  const {error}=await s.from("clt_campaigns").update({created_in_meta:created}).eq("id",id).eq("user_id",user.id);
  if(error)return {error:error.message};refresh();return {success:created?"Marcada como criada no Meta Ads.":"Marcada como ainda não criada no Meta Ads."};
 }
-export async function saveCltTrafficCampaignAction(input:{id?:string;companyId:string;name:string;objective:string;startsOn:string;endsOn:string;budgetType:"daily"|"total";dailyBudget:number;plannedAmount:number;status:"planejada"|"ativa"|"pausada"|"finalizada";managerUrl?:string;description?:string}):Promise<State>{
+export async function saveCltTrafficCampaignAction(input:{id?:string;companyId:string;name:string;objective:string;startsOn:string;endsOn:string;budgetType:"daily"|"total";dailyBudget:number;plannedAmount:number;status:"planejada"|"ativa"|"pausada"|"finalizada";managerUrl?:string;description?:string;metaCampaignId?:string;bidStrategy?:string;buyingType?:string}):Promise<State>{
  const {s,user}=await ctx();if(!input.name.trim()||!input.startsOn||!input.endsOn||input.endsOn<input.startsOn||!Number.isFinite(input.plannedAmount)||input.plannedAmount<0||!Number.isFinite(input.dailyBudget)||input.dailyBudget<0)return{error:"Confira nome, datas e valores."};
  const {data:company}=await s.from("clt_companies").select("id").eq("id",input.companyId).eq("user_id",user.id).single();if(!company)return{error:"Empresa inválida."};
- const values={name:input.name.trim(),company_id:input.companyId,objective:input.objective,starts_on:input.startsOn,ends_on:input.endsOn,budget_type:input.budgetType,daily_budget:input.dailyBudget,planned_amount:input.plannedAmount,campaign_status:input.status,manager_url:input.managerUrl||null,description:input.description||null};
- const q=input.id?s.from("clt_campaigns").update(values).eq("id",input.id).eq("company_id",input.companyId).eq("user_id",user.id):s.from("clt_campaigns").insert({...values,user_id:user.id,spent_amount:0,messages:0,sales:0,views:0});
- const {data:saved,error}=await q.select("id,daily_budget").single();if(error)return{error:error.message};if(!saved)return{error:"Não foi possível confirmar a atualização da campanha."};refresh();return{success:input.id?"Campanha atualizada.":"Campanha criada."};
+ // Link salvo como digitado (como antes); a tela só oferece "Abrir" para http/https.
+ const managerUrl=(input.managerUrl||"").trim();
+ const values:Record<string,unknown>={name:input.name.trim(),company_id:input.companyId,objective:input.objective,starts_on:input.startsOn,ends_on:input.endsOn,budget_type:input.budgetType,daily_budget:input.dailyBudget,planned_amount:input.plannedAmount,campaign_status:input.status,manager_url:managerUrl||null,description:input.description||null};
+ // Informações cadastradas (só quando o formulário as envia — nunca apaga o que não veio).
+ if(input.metaCampaignId!==undefined){const r=normalizeMetaId(input.metaCampaignId);if(r.error)return{error:r.error};if(r.value&&r.value.length>80)return{error:"ID da campanha na Meta longo demais."};values.meta_campaign_id=r.value;}
+ if(input.bidStrategy!==undefined)values.bid_strategy=input.bidStrategy.trim().slice(0,500)||null;
+ if(input.buyingType!==undefined)values.buying_type=input.buyingType.trim().slice(0,500)||null;
+ const save=(v:Record<string,unknown>)=>(input.id?s.from("clt_campaigns").update(v as never).eq("id",input.id).eq("company_id",input.companyId).eq("user_id",user.id):s.from("clt_campaigns").insert({...v,user_id:user.id,spent_amount:0,messages:0,sales:0,views:0} as never)).select("id,daily_budget").single();
+ let {data:saved,error}=await save(values);
+ if(error&&["42703","PGRST204"].includes(String(error.code))){
+  // Migration 20261109100000 pendente: salva o restante se os campos novos estiverem vazios.
+  if(values.bid_strategy||values.buying_type)return{error:"Nada foi salvo. "+INFO_MIGRATION};
+  const legacy={...values};delete legacy.bid_strategy;delete legacy.buying_type;if(legacy.meta_campaign_id===null)delete legacy.meta_campaign_id;({data:saved,error}=await save(legacy));
+ }
+ if(error)return{error:error.code==="23505"?"Este ID da campanha na Meta já está em outra campanha.":error.message};if(!saved)return{error:"Não foi possível confirmar a atualização da campanha."};refresh();return{success:input.id?"Campanha atualizada.":"Campanha criada."};
 }
 export async function deleteCltTrafficCampaignAction(id:string,companyId:string):Promise<State>{
  const {s,user}=await ctx();

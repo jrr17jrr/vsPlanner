@@ -2,6 +2,8 @@ import { mapAudienceType, inferAdFormat } from "./parse-json";
 import { parseRate } from "@/lib/clt/video-rates";
 import { EXTRA_IMPORT_KEYS, RATE_IMPORT_KEYS, emptyMetrics, type ExtraImportKey, type ImportAd, type ImportAdSet, type ImportAudience, type ImportBundle, type ImportCampaign, type MetricKey, type ParseProblem } from "./types";
 import { normalizeKey, parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
+import { infoColumnFor, putAgeRange, putInfo } from "./info-fields";
+import { normalizeMetaId } from "@/lib/clt/registered-info";
 
 /**
  * Texto estruturado em pt-BR ("Chave: valor", uma informação por linha) →
@@ -111,12 +113,16 @@ export function parseStructuredText(text: string): ImportBundle {
   let adSet: ImportAdSet | null = null;
   let ad: ImportAd | null = null;
   let pendingAudienceName: string | null = null;
+  /** Dados de conjunto informados na campanha antes de "Conjunto:"/"Anúncio:" (vão para o 1º conjunto). */
+  let pendingSetInfo: NonNullable<ImportAdSet["info"]> = {};
+  const takePendingSetInfo = (set: ImportAdSet) => { if (Object.keys(pendingSetInfo).length) { set.info = { ...pendingSetInfo, ...(set.info ?? {}) }; pendingSetInfo = {}; } };
 
   const ensureAdSet = (lineNo: number) => {
     if (!campaign) return null;
     if (!adSet) {
       adSet = newAdSet(pendingAudienceName ?? campaign.name, true);
       adSet.audienceName = pendingAudienceName;
+      takePendingSetInfo(adSet);
       campaign.adSets.push(adSet);
       // Sem "Conjunto:": a validação procura o anúncio nos conjuntos da campanha
       // existente; só numa campanha NOVA o nome provisório vira conjunto (com confirmação).
@@ -135,14 +141,30 @@ export function parseStructuredText(text: string): ImportBundle {
     const lineNo = index + 1;
     const line = rawLine.replace(/^\s*[-*•]\s+/, "").trim();
     if (!line) return;
-    if (/^(-{3,}|={3,}|_{3,})$/.test(line)) { flushPending(lineNo); audience = null; campaign = null; adSet = null; ad = null; pendingAudienceName = null; return; }
+    if (/^(-{3,}|={3,}|_{3,})$/.test(line)) { flushPending(lineNo); audience = null; campaign = null; adSet = null; ad = null; pendingAudienceName = null; pendingSetInfo = {}; return; }
     const m = /^([^:=]{1,60})\s*[:=]\s*(.*)$/.exec(line);
     if (!m) { problems.push({ path: `linha ${lineNo}`, level: "warning", message: `Linha não reconhecida (use "Campo: valor"): ${line.slice(0, 80)}` }); return; }
     const keyText = normalizeKey(m[1]);
     const value = m[2].trim();
     const field = FIELD_BY_ALIAS.get(keyText);
+    const where0 = `linha ${lineNo}`;
+    // Informações cadastradas (link, textos, CTA, destino, lances, idioma…): no bloco mais interno.
+    if (!field && campaign) {
+      const level = ad ? "ad" : adSet ? "adSet" : null;
+      const col = (level && infoColumnFor(level, keyText)) ?? (!ad && !adSet ? infoColumnFor("campaign", keyText) : null);
+      if (col) {
+        const target = ad ?? adSet ?? campaign;
+        putInfo((target.info ??= {}), ad ? "ad" : adSet ? "adSet" : "campaign", col, value, where0, problems);
+        return;
+      }
+      if (!ad && !adSet && infoColumnFor("adSet", keyText)) {
+        putInfo(pendingSetInfo, "adSet", infoColumnFor("adSet", keyText)!, value, where0, problems);
+        return;
+      }
+    }
     if (!field) { problems.push({ path: `linha ${lineNo}`, level: "warning", message: `Campo desconhecido "${m[1].trim()}" — ignorado.` }); return; }
     const where = `linha ${lineNo}`;
+    const metaIdOf = (raw: string) => { const r = normalizeMetaId(raw); if (r.error) problems.push({ path: where, message: r.error }); return r.value; };
     const num = (integer: boolean) => {
       const v = integer ? parseBrInteger(value) : parseBrNumber(value);
       if (v === undefined) problems.push({ path: where, message: `Valor inválido para "${m[1].trim()}": ${value}` });
@@ -207,11 +229,11 @@ export function parseStructuredText(text: string): ImportBundle {
         if (!value) { problems.push({ path: where, message: "Nome da campanha vazio." }); return; }
         flushPending(lineNo);
         campaign = newCampaign(value); bundle.campaigns.push(campaign);
-        audience = null; adSet = null; ad = null; pendingAudienceName = null;
+        audience = null; adSet = null; ad = null; pendingAudienceName = null; pendingSetInfo = {};
         return;
       case "adSet":
         if (!campaign) { problems.push({ path: where, message: `"Conjunto:" precisa vir depois de "Campanha:".` }); return; }
-        adSet = newAdSet(value); adSet.audienceName = pendingAudienceName; pendingAudienceName = null; campaign.adSets.push(adSet); ad = null;
+        adSet = newAdSet(value); adSet.audienceName = pendingAudienceName; pendingAudienceName = null; takePendingSetInfo(adSet); campaign.adSets.push(adSet); ad = null;
         return;
       case "ad": {
         if (!campaign) { problems.push({ path: where, message: `"Anúncio:" precisa vir depois de "Campanha:".` }); return; }
@@ -245,15 +267,18 @@ export function parseStructuredText(text: string): ImportBundle {
     }
     if (ad) {
       switch (field) {
-        case "adId": ad.metaId = value || null; return;
-        case "format": ad.format = inferAdFormat(value, ad.name); return;
+        case "adId": ad.metaId = metaIdOf(value); return;
+        case "format": ad.format = inferAdFormat(value, ad.name); putInfo((ad.info ??= {}), "ad", "format", value, where, problems); return;
         case "postId": ad.postId = value || null; return;
         case "notes": ad.notes = value || null; return;
       }
     }
     if (adSet) {
       switch (field) {
-        case "adSetId": adSet.metaId = value || null; return;
+        case "adSetId": adSet.metaId = metaIdOf(value); return;
+        case "location": putInfo((adSet.info ??= {}), "adSet", "location", value, where, problems); return;
+        case "radius": putInfo((adSet.info ??= {}), "adSet", "radius_km", value.replace(/\s*km$/i, ""), where, problems); return;
+        case "age": putAgeRange((adSet.info ??= {}), value, where, problems); return;
         case "audienceKey": adSet.audienceKey = value || null; return;
         case "dailyBudget": adSet.dailyBudget = num(false); return;
         case "start": { const d = parseBrDateTime(value); if (d === undefined) problems.push({ path: where, message: `Data inválida: ${value}` }); else adSet.startAt = d; return; }
@@ -265,7 +290,12 @@ export function parseStructuredText(text: string): ImportBundle {
     }
     if (campaign) {
       switch (field) {
-        case "campaignId": campaign.metaId = value || null; return;
+        case "campaignId": campaign.metaId = metaIdOf(value); return;
+        // Dados de conjunto antes de "Conjunto:"/"Anúncio:" (ex.: "Localização:" logo após o público).
+        case "location": putInfo(pendingSetInfo, "adSet", "location", value, where, problems); return;
+        case "radius": putInfo(pendingSetInfo, "adSet", "radius_km", value.replace(/\s*km$/i, ""), where, problems); return;
+        case "age": putAgeRange(pendingSetInfo, value, where, problems); return;
+        case "placements": putInfo(pendingSetInfo, "adSet", "placements", value, where, problems); return;
         case "objective": campaign.objective = value || null; return;
         case "dailyBudget": campaign.dailyBudget = num(false); return;
         case "audienceKey": pendingAudienceName = null; ensureAdSet(lineNo)!.audienceKey = value || null; return;

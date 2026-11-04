@@ -19,11 +19,30 @@ Orçamento diário: R$ 20,00
 Início: 05/11/2026
 Fim: 30/11/2026
 Status: Ativa
+ID da campanha: 120210000000000001
+Estratégia de lances: Volume mais alto
+Tipo de compra: Leilão
 
 Conjunto: Engajados 365D | WhatsApp
+ID do conjunto: 120210000000000002
 Público: Engajados 365D
+Localização: Cabo Frio, RJ
+Raio: 10 km
+Idade: 25-55
+Idioma: Português
+Posicionamentos: Feed e Stories do Instagram
+Local da conversão: WhatsApp
+Objetivo de desempenho: Maximizar o número de conversas
+
 Anúncio: Vídeo 01 | Oferta
+ID do anúncio: 120210000000000003
 Formato: Vídeo
+Link: https://www.instagram.com/p/EXEMPLO1/
+Texto principal: Garanta sua vaga com condição especial de novembro.
+Título: Oferta de novembro
+Chamada para ação: Enviar mensagem
+Destino: WhatsApp
+
 Anúncio: Imagem 01 | Depoimento
 Formato: Imagem`;
 
@@ -63,15 +82,38 @@ const CAMPAIGN_JSON = JSON.stringify({
   campaigns: [
     {
       name: "SGIV | WhatsApp | Novembro",
+      meta_campaign_id: "120210000000000001",
       objective: "engagement_to_whatsapp",
       daily_budget_brl: 20,
+      bid_strategy: "Volume mais alto",
+      buying_type: "Leilão",
       ad_sets: [
         {
           name: "Engajados 365D | WhatsApp",
+          meta_adset_id: "120210000000000002",
           audience_external_key: "sgiv_engajados_365",
           start_at_local: "2026-11-05T09:00:00",
           scheduled_end_at_local: "2026-11-30T23:59:00",
-          ads: [{ name: "Vídeo 01 | Oferta", format: "video" }, { name: "Imagem 01 | Depoimento", format: "image" }],
+          location: "Cabo Frio, RJ",
+          radius_km: 10,
+          age_range: [25, 55],
+          languages: "Português",
+          placements: ["Feed do Instagram", "Stories do Instagram"],
+          conversion_location: "WhatsApp",
+          performance_goal: "Maximizar o número de conversas",
+          ads: [
+            {
+              name: "Vídeo 01 | Oferta",
+              meta_ad_id: "120210000000000003",
+              format: "video",
+              link: "https://www.instagram.com/p/EXEMPLO1/",
+              primary_text: "Garanta sua vaga com condição especial de novembro.",
+              headline: "Oferta de novembro",
+              call_to_action: "Enviar mensagem",
+              destination: "WhatsApp",
+            },
+            { name: "Imagem 01 | Depoimento", format: "image" },
+          ],
         },
       ],
     },

@@ -14,6 +14,7 @@ import type { ImportIssue, ImportPreview, PreviewAd, PreviewCampaign } from "@/l
 import { MONEY_METRICS, type Metrics } from "@/lib/import/types";
 import { columnLabel, informedColumns } from "@/lib/import/period-target";
 import { fmtRate, isRateKey } from "@/lib/clt/video-rates";
+import { LEVEL_LABEL, type InfoChange } from "@/lib/import/info-plan";
 
 type Company = { id: string; name: string };
 type Mode = "json" | "text";
@@ -29,10 +30,16 @@ Campanha: IG Predial | WhatsApp | Cabo Frio
 Objetivo: Mensagens no WhatsApp
 Início: 15/10/2026
 Fim: 01/11/2026
+Estratégia de lances: Volume mais alto
 Conjunto: Cabo Frio | Público Amplo | WhatsApp
 Público: Cabo Frio | + | 15/10/26
 Orçamento diário: R$ 15,00
+Local da conversão: WhatsApp
 Anúncio: Imagem 01 | Cabo Frio
+ID do anúncio: 120212345678901234
+Link: https://www.instagram.com/p/EXEMPLO/
+Chamada para ação: Enviar mensagem
+Destino: WhatsApp
 Investimento: R$ 206,22
 Conversas: 21
 Vendas: 37
@@ -108,6 +115,39 @@ function InformedFallback({ preview }: { preview: ImportPreview }) {
 }
 
 const fmtChange = (key: string, v: number | null) => v === null ? "não informado" : isRateKey(key) ? fmtRate(v) : key === "spend" || key === "revenue" ? money(v) : v.toLocaleString("pt-BR");
+
+/**
+ * Informações cadastradas (link, textos, CTA, destino, lances, idade…):
+ * atual → novo por registro. Campo omitido não aparece e não muda.
+ */
+export function InfoChangesPanel({ changes }: { changes?: InfoChange[] }) {
+  const list = (changes ?? []).filter(c => c.changes.length || c.same.length);
+  if (!list.length) return null;
+  return (
+    <section className="space-y-2 rounded-lg border border-violet-500/40 bg-violet-500/5 p-3" aria-label="Informações cadastradas">
+      <div>
+        <h3 className="text-sm font-semibold">Informações cadastradas</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">Ficam visíveis nos detalhes da campanha, do conjunto e do anúncio. Só os campos informados mudam; os omitidos continuam como estão. Métricas e histórico não são alterados.</p>
+      </div>
+      {list.map((c, i) => (
+        <div key={`${c.level}:${c.id ?? c.name}:${i}`} className="rounded-md border bg-background/60 p-3 text-sm">
+          <p className="break-words"><span className="text-muted-foreground">{LEVEL_LABEL[c.level]}{c.action === "create" ? " (novo)" : ""}:</span> <span className="font-medium">{c.name}</span></p>
+          {c.changes.length > 0 && (
+            <table className="mt-2 w-full table-fixed text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="w-1/3 py-1 font-normal">Campo</th><th className="py-1 font-normal">Atual</th><th className="py-1 font-normal">Novo</th></tr></thead>
+              <tbody>
+                {c.changes.map(x => (
+                  <tr key={x.column} className="border-t border-border/60 align-top"><td className="py-1 pr-2">{x.label}</td><td className="break-words py-1 pr-2 text-muted-foreground">{x.before ?? "não informado"}</td><td className="break-words py-1 font-medium">{x.after}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {c.same.length > 0 && <p className="mt-1 break-words text-[11px] text-muted-foreground">Informadas e já iguais (não mudam): {c.same.map(s => s.label).join(" · ")}</p>}
+        </div>
+      ))}
+    </section>
+  );
+}
 
 /** Prévia da atualização parcial: o que muda em cada anúncio, e só isso. */
 function MetricsUpdatePanel({ preview }: { preview: ImportPreview }) {
@@ -377,7 +417,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
             {mode === "text" && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer py-2">Campos reconhecidos</summary>
-                <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Início, Fim, Status · Conjunto, ID do conjunto, Público, Chave do público · Anúncio, ID do anúncio, Formato · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques no link, Leads · Interações, Reações à publicação, Comentários, Compartilhamentos, Novos seguidores, Visualizações, Reproduções de 3 segundos, ThruPlays, Visualizações de 75% e de 100% · Taxa de Gancho (%) e Taxa de Retenção (%) — percentual do Meta Ads, ex.: 35,75% · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero).</p>
+                <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Orçamento total, Início, Fim, Status, Estratégia de lances, Tipo de compra, Link do gerenciador · Conjunto, ID do conjunto, Público, Chave do público, Localização, Raio, Idade, Gênero, Idioma, Posicionamentos, Local da conversão, Objetivo de desempenho · Anúncio, ID do anúncio, Formato, Link, ID da publicação, Texto principal, Título, Descrição, Chamada para ação, Destino · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques no link, Leads · Interações, Reações à publicação, Comentários, Compartilhamentos, Novos seguidores, Visualizações, Reproduções de 3 segundos, ThruPlays, Visualizações de 75% e de 100% · Taxa de Gancho (%) e Taxa de Retenção (%) — percentual do Meta Ads, ex.: 35,75% · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero). IDs do Meta ficam como texto, sem perder dígitos; campos omitidos numa nova importação não apagam o que já está salvo.</p>
                 <p className="mt-1">Só atualizar métricas de um anúncio já cadastrado: informe Empresa, Campanha, Anúncio e as métricas — sem Período e sem Conjunto (o conjunto é identificado pelo anúncio). Só as métricas informadas mudam.</p>
                 <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => { setContent(textExample); invalidate(); }}>Inserir exemplo</Button>
               </details>
@@ -432,6 +472,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
                 onUsePeriod={(s, e) => { setPeriodStart(s); setPeriodEnd(e); setTargets({}); validate({ period: { start: s, end: e }, targets: {} }); }}
               />
             )}
+            <InfoChangesPanel changes={preview.infoChanges} />
 
             {preview.campaigns.length > 0 && preview.mode === "import" && (
               <div className="rounded-lg border p-3 text-sm">

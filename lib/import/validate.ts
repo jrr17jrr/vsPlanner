@@ -1,5 +1,6 @@
-import { AUDIENCE_DB_TYPE, METRIC_KEYS, NON_ADDITIVE_METRICS, emptyMetrics, hasExtraMetrics, type AudienceType, type ExistingSnapshot, type ImportAd, type ImportAudience, type ImportBundle, type Metrics, type ReportedTotals } from "./types";
+import { AUDIENCE_DB_TYPE, METRIC_KEYS, NON_ADDITIVE_METRICS, emptyMetrics, hasExtraMetrics, type AudienceType, type ExistingSnapshot, type ImportAd, type ImportAudience, type ImportDetails, type ImportInfo, type ImportBundle, type Metrics, type ReportedTotals } from "./types";
 import { normalizeKey, sameName } from "./values";
+import type { InfoChange } from "./info-plan";
 
 /**
  * Validação + prévia do Importador Inteligente. Puro: recebe o pacote
@@ -30,6 +31,7 @@ export type AudienceLink = { ref: string | null; name: string | null; type: stri
 
 export type PreviewAd = ImportAd & { action: RowAction; existingId: string | null; hasMetrics: boolean };
 export type PreviewAdSet = {
+  info?: ImportInfo; details?: ImportDetails;
   metaId: string | null; name: string; action: RowAction; existingId: string | null;
   /** Sem "Conjunto:" no arquivo: conjunto descoberto pelo anúncio já cadastrado. */
   autoIdentified?: boolean;
@@ -39,6 +41,7 @@ export type PreviewAdSet = {
   ads: PreviewAd[];
 };
 export type PreviewCampaign = {
+  info?: ImportInfo; details?: ImportDetails;
   metaId: string | null; name: string; action: RowAction; existingId: string | null; matchedBy: "meta_id" | "name" | null;
   objective: string | null; dailyBudget: number | null; budgetType: "daily" | "total";
   startsOn: string | null; endsOn: string | null; datesDerived: boolean; status: "planejada" | "ativa" | "pausada" | "finalizada"; statusExplicit: boolean; notes: string | null;
@@ -71,6 +74,8 @@ export type ImportPreview = {
   metricChanges?: MetricChange[];
   /** Só em `period_update`: registro de resultados que será atualizado (ou criado) em cada anúncio. */
   periodTargets?: PeriodTargetPreview[];
+  /** Informações cadastradas (link, textos, IDs, configurações) que mudam — calculado no servidor. */
+  infoChanges?: InfoChange[];
 };
 
 export type PeriodTargetPreview = {
@@ -384,6 +389,8 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
           let candidates = ad.metaId
             ? existing.ads.filter(e => e.meta_ad_id === ad.metaId && campaignSetIds.has(e.ad_set_id))
             : inCampaign.filter(e => sameName(e.name, ad.name));
+          // ID informado para um anúncio cadastrado SEM ID: identifica pelo nome (o ID passa a ser gravado nele).
+          if (!candidates.length && ad.metaId) candidates = inCampaign.filter(e => !e.meta_ad_id && sameName(e.name, ad.name));
           if (!candidates.length && !ad.metaId) {
             const loose = looseMatch(inCampaign, ad.name);
             if (loose) { candidates = [loose]; add("info", "ad-loose-match", apath, `Anúncio identificado: "${loose.name}" (o nome no texto difere só em pontuação ou espaços).`); }
@@ -404,7 +411,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
           unresolved.push(buildAd(ad, apath, undefined));
         });
         for (const [setId, ads] of bySet) {
-          adSets.push({ metaId: null, name: setName(setId), action: "update", existingId: setId, autoIdentified: true, audience: null, dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, resultType: s.resultType ?? null, ads });
+          adSets.push({ info: s.info, details: s.details, metaId: null, name: setName(setId), action: "update", existingId: setId, autoIdentified: true, audience: null, dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, resultType: s.resultType ?? null, ads });
         }
         if (unresolved.length) adSets.push({ metaId: null, name: "Conjunto não identificado", action: "update", existingId: null, autoIdentified: true, audience: null, dailyBudget: null, startAt: null, endAt: null, status: null, placements: null, notes: null, ads: unresolved });
         if (s.audienceName || s.audienceKey) add("warning", "set-aud-ignored", cpath, `"Público:" sem "Conjunto:" é ignorado numa campanha existente (o público dos conjuntos não muda).`);
@@ -467,7 +474,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
       });
 
       adSets.push({
-        metaId: s.metaId, name: setMatch?.name ?? s.name, action: setMatch ? "update" : "create", existingId: setMatch?.id ?? null, audience,
+        info: s.info, details: s.details, metaId: s.metaId, name: setMatch?.name ?? s.name, action: setMatch ? "update" : "create", existingId: setMatch?.id ?? null, audience,
         dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, resultType: s.resultType ?? null, ads,
       });
     });
@@ -489,7 +496,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
     const objectiveRaw = c.objective;
     const dailyBudget = c.dailyBudget;
     campaigns.push({
-      metaId: c.metaId, name: match?.name ?? c.name, action: match ? "update" : "create", existingId: match?.id ?? null, matchedBy,
+      info: c.info, details: c.details, metaId: c.metaId, name: match?.name ?? c.name, action: match ? "update" : "create", existingId: match?.id ?? null, matchedBy,
       objective: objectiveRaw ? OBJECTIVE_LABELS[objectiveRaw.toLowerCase()] ?? objectiveRaw : null,
       dailyBudget, budgetType: dailyBudget !== null || c.adSets.some(s => s.dailyBudget !== null) ? "daily" : "total",
       startsOn, endsOn, datesDerived: derived, status, statusExplicit: !!explicitStatus, notes: c.notes, adSets, known, reported: c.reportedTotals, difference,
@@ -509,7 +516,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
     for (let i = issues.length - 1; i >= 0; i--) if (issues[i].id.startsWith("ad-period-overlap:")) issues.splice(i, 1);
     bundle.campaigns.forEach((c, i) => {
       const ignored = [c.objective && "objetivo", c.dailyBudget !== null && "orçamento", (c.startsOn || c.endsOn) && "datas", c.status && "status"].filter(Boolean);
-      const setIgnored = c.adSets.some(s => s.dailyBudget !== null || s.startAt || s.endAt || s.status || s.placements || s.audienceName || s.audienceKey);
+      const setIgnored = c.adSets.some(s => s.dailyBudget !== null || s.startAt || s.endAt || s.status || s.audienceName || s.audienceKey);
       if (ignored.length || setIgnored) add("warning", "partial-ignored", `Campanha ${i + 1} (${campaigns[i].name})`, `Atualização só de métricas: ${[...ignored, setIgnored && "dados do conjunto"].filter(Boolean).join(", ")} informado(s) no texto NÃO serão alterados.`);
     });
     add("info", "period-mode", "atualização", "Atualização do registro de resultados do período: só as métricas informadas mudam (substituem o valor daquele registro, sem somar). Campanha, conjunto, anúncio, status, datas e as demais métricas ficam como estão.");
@@ -518,7 +525,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
     bundle.campaigns.forEach((c, i) => {
       const cpath = `Campanha ${i + 1} (${campaigns[i].name})`;
       const ignored = [c.objective && "objetivo", c.dailyBudget !== null && "orçamento", (c.startsOn || c.endsOn) && "datas", c.status && "status"].filter(Boolean);
-      const setIgnored = c.adSets.some(s => s.dailyBudget !== null || s.startAt || s.endAt || s.status || s.placements || s.audienceName || s.audienceKey);
+      const setIgnored = c.adSets.some(s => s.dailyBudget !== null || s.startAt || s.endAt || s.status || s.audienceName || s.audienceKey);
       if (ignored.length || setIgnored) add("warning", "partial-ignored", cpath, `Atualização só de métricas: ${[...ignored, setIgnored && "dados do conjunto"].filter(Boolean).join(", ")} informado(s) no texto NÃO serão alterados.`);
     });
     for (const ad of everyAd) if (!ad.hasMetrics && ad.existingId) add("info", "partial-no-metrics", ad.name, `"${ad.name}": nenhuma métrica informada — nada muda neste anúncio.`);

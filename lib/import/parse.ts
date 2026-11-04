@@ -9,6 +9,35 @@ export type ParseResult =
   | { ok: false; error: string; planning?: boolean };
 
 /**
+ * IDs do Meta têm 15–19 dígitos: como número JSON, passam do limite exato do
+ * JavaScript (2^53) e perderiam os últimos dígitos no JSON.parse. Inteiros
+ * com 16+ dígitos (fora de strings) viram texto ANTES da leitura — sem perda.
+ */
+export function protectBigIntegers(json: string): string {
+  let out = "", i = 0, inString = false;
+  while (i < json.length) {
+    const ch = json[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\") { out += json[i + 1] ?? ""; i += 2; continue; }
+      if (ch === '"') inString = false;
+      i++; continue;
+    }
+    if (ch === '"') { inString = true; out += ch; i++; continue; }
+    if (/[-\d]/.test(ch)) {
+      const m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?/.exec(json.slice(i, i + 400));
+      if (m) {
+        const tok = m[0];
+        out += !m[1] && !m[2] && tok.replace("-", "").length >= 16 ? `"${tok}"` : tok;
+        i += tok.length; continue;
+      }
+    }
+    out += ch; i++;
+  }
+  return out;
+}
+
+/**
  * Ponto único de entrada: arquivo JSON, JSON colado ou texto estruturado.
  * JSON colado no campo de texto é reconhecido automaticamente.
  */
@@ -18,7 +47,7 @@ export function parseImportInput(content: string): ParseResult {
   const trimmed = content.trim().replace(/^﻿/, "");
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     let data: unknown;
-    try { data = JSON.parse(trimmed); }
+    try { data = JSON.parse(protectBigIntegers(trimmed)); }
     catch (e) { return { ok: false, error: `JSON inválido: ${e instanceof Error ? e.message : "erro de sintaxe"}. Nenhum dado foi salvo.` }; }
     const detected = normalizeJson(data);
     if (detected.kind === "planning") return { ok: false, planning: true, error: "Este JSON é de tarefas/planejamento (items). Na Central de Importação, escolha o tipo Tarefas e subtarefas." };
