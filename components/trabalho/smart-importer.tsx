@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmSmartImportAction, previewSmartImportAction } from "@/lib/supabase/clt-import-actions";
 import type { ImportIssue, ImportPreview, PreviewAd, PreviewCampaign } from "@/lib/import/validate";
-import { METRIC_KEYS, METRIC_LABEL, MONEY_METRICS, type Metrics } from "@/lib/import/types";
+import { EXTRA_IMPORT_KEYS, EXTRA_IMPORT_LABEL, METRIC_KEYS, METRIC_LABEL, MONEY_METRICS, type Metrics } from "@/lib/import/types";
 
 type Company = { id: string; name: string };
 type Mode = "json" | "text";
@@ -63,12 +63,60 @@ function IssueRow({ issue, checked, onCheck }: { issue: ImportIssue; checked?: b
 
 function MetricsLine({ ad }: { ad: PreviewAd }) {
   if (!ad.hasMetrics) return <p className="text-xs text-muted-foreground">Sem métricas informadas.</p>;
+  const extras = EXTRA_IMPORT_KEYS.filter(k => ad.extraMetrics?.[k] !== null && ad.extraMetrics?.[k] !== undefined);
   return (
     <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs sm:grid-cols-4">
       {METRIC_KEYS.filter(k => ad.metrics[k] !== null || k === "spend" || k === "conversations").map(k => (
         <div key={k} className="flex justify-between gap-2 sm:block"><dt className="text-muted-foreground">{METRIC_LABEL[k]}</dt><dd className={ad.metrics[k] === null ? "text-muted-foreground" : "font-medium"}>{ad.metrics[k] === null ? "não informado" : fmtMetric(k, ad.metrics[k])}</dd></div>
       ))}
+      {extras.map(k => (
+        <div key={k} className="flex justify-between gap-2 sm:block"><dt className="text-muted-foreground">{EXTRA_IMPORT_LABEL[k]}</dt><dd className="font-medium">{ad.extraMetrics![k]!.toLocaleString("pt-BR")}</dd></div>
+      ))}
     </dl>
+  );
+}
+
+const fmtChange = (key: string, v: number | null) => v === null ? "não informado" : key === "spend" || key === "revenue" ? money(v) : v.toLocaleString("pt-BR");
+
+/** Prévia da atualização parcial: o que muda em cada anúncio, e só isso. */
+function MetricsUpdatePanel({ preview }: { preview: ImportPreview }) {
+  const changes = preview.metricChanges ?? [];
+  return (
+    <section className="space-y-3 rounded-lg border border-sky-500/40 bg-sky-500/5 p-3" aria-label="Atualização de métricas">
+      <div>
+        <h3 className="text-sm font-semibold">Atualização de métricas de anúncios existentes</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">Os valores do texto são os novos <strong>totais</strong> do anúncio; é gravada só a diferença, como no “Atualizar resultados”, e fica no histórico do anúncio.</p>
+      </div>
+      <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+        <dt className="text-muted-foreground">Empresa identificada</dt><dd className="font-medium">{preview.companyName}</dd>
+      </dl>
+      {changes.length === 0 && <p className="text-sm text-muted-foreground">Os detalhes aparecem quando não houver erros na validação.</p>}
+      {changes.map(m => (
+        <div key={m.creativeId} className="rounded-md border bg-background/60 p-3 text-sm">
+          <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
+            <dt className="text-muted-foreground">Campanha existente</dt><dd className="break-words font-medium">{m.campaign}</dd>
+            <dt className="text-muted-foreground">Conjunto</dt><dd className="break-words">{m.adSet}{m.adSetAutoIdentified && <span className="ml-1.5 rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">identificado automaticamente</span>}</dd>
+            <dt className="text-muted-foreground">Anúncio atualizado</dt><dd className="break-words font-medium">{m.ad}</dd>
+          </dl>
+          {m.unchanged ? (
+            <p className="mt-2 text-xs text-muted-foreground">Nenhuma métrica mudou — este anúncio não será alterado.</p>
+          ) : (
+            <>
+              <table className="mt-2 w-full text-xs">
+                <thead><tr className="text-left text-muted-foreground"><th className="py-1 font-normal">Métrica</th><th className="py-1 text-right font-normal">Atual</th><th className="py-1 text-right font-normal">Novo total</th></tr></thead>
+                <tbody>
+                  {m.changes.map(c => (
+                    <tr key={c.key} className="border-t border-border/60"><td className="py-1">{c.label}</td><td className="py-1 text-right tabular-nums text-muted-foreground">{fmtChange(c.key, c.before)}</td><td className="py-1 text-right font-medium tabular-nums">{fmtChange(c.key, c.after)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              {m.periodStart && <p className="mt-1 text-[11px] text-muted-foreground">A diferença conta nos relatórios no período {fmtDate(m.periodStart)} a {fmtDate(m.periodEnd)}.</p>}
+            </>
+          )}
+        </div>
+      ))}
+      <p className="flex items-start gap-1.5 text-xs text-emerald-400"><CheckCircle2 className="mt-px h-3.5 w-3.5 shrink-0" />Nenhuma outra informação será alterada: nada é criado, e orçamento, investimento, alcance, impressões, datas, status, conjuntos e os demais anúncios ficam como estão (exceto o que estiver na lista acima).</p>
+    </section>
   );
 }
 
@@ -95,7 +143,7 @@ function CampaignCard({ c }: { c: PreviewCampaign }) {
           {c.metaId && <p className="text-xs text-muted-foreground">ID Meta da campanha: {c.metaId}</p>}
           {c.adSets.map((s, j) => (
             <div key={j} className="rounded-md border-l-2 border-primary/40 bg-secondary/30 p-2">
-              <div className="flex flex-wrap items-center gap-2"><span className="break-words text-sm font-medium">Conjunto: {s.name}</span><ActionBadge action={s.action} /></div>
+              <div className="flex flex-wrap items-center gap-2"><span className="break-words text-sm font-medium">Conjunto: {s.name}</span><ActionBadge action={s.action} />{s.autoIdentified && s.existingId && <span className="text-[11px] text-sky-300">identificado automaticamente pelo anúncio</span>}</div>
               <p className="text-xs text-muted-foreground">
                 Público: {s.audience ? <>{s.audience.name} <span className="opacity-80">({s.audience.type ?? "?"} · {s.audience.inBundle ? "deste arquivo" : "já cadastrado"} · por {s.audience.via === "external_key" ? "chave" : "nome exato"})</span></> : "não vinculado"}
                 {s.dailyBudget !== null ? ` · orçamento diário ${money(s.dailyBudget)}` : ""}
@@ -217,7 +265,8 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
             {mode === "text" && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer py-2">Campos reconhecidos</summary>
-                <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Início, Fim, Status · Conjunto, ID do conjunto, Público, Chave do público · Anúncio, ID do anúncio, Formato · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques, Leads · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero).</p>
+                <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Início, Fim, Status · Conjunto, ID do conjunto, Público, Chave do público · Anúncio, ID do anúncio, Formato · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques no link, Leads · Interações, Reações à publicação, Comentários, Compartilhamentos, Novos seguidores, Visualizações, Reproduções de 3 segundos, ThruPlays, Visualizações de 75% e de 100% · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero).</p>
+                <p className="mt-1">Só atualizar métricas de um anúncio já cadastrado: informe Empresa, Campanha, Anúncio e as métricas — sem Período e sem Conjunto (o conjunto é identificado pelo anúncio). Só as métricas informadas mudam.</p>
                 <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => { setContent(textExample); invalidate(); }}>Inserir exemplo</Button>
               </details>
             )}
@@ -261,7 +310,9 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
               ))}
             </div>
 
-            {preview.campaigns.length > 0 && (
+            {preview.mode === "metrics_update" && <MetricsUpdatePanel preview={preview} />}
+
+            {preview.campaigns.length > 0 && preview.mode !== "metrics_update" && (
               <div className="rounded-lg border p-3 text-sm">
                 <p className="font-medium">Soma das métricas conhecidas dos anúncios</p>
                 <p className="mt-1">{fmtMetric("spend", preview.totals.known.spend)} · {preview.totals.known.conversations ?? "—"} conversas · {preview.totals.known.sales ?? "—"} vendas · {fmtMetric("revenue", preview.totals.known.revenue)}</p>
@@ -305,7 +356,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" className="h-11" onClick={invalidate} disabled={busy}>Cancelar</Button>
               <Button type="button" className="h-11" disabled={busy || !!schemaHint || !preview.canImport || pendingConfirmations > 0} onClick={confirmImport}>
-                {busy ? "Importando…" : schemaHint ? "Aplique a migration para importar" : !preview.canImport ? "Corrija os erros para importar" : pendingConfirmations ? `Confirme ${pendingConfirmations} alerta(s)` : `${step(6)}. Confirmar importação`}
+                {busy ? "Importando…" : schemaHint ? "Aplique a migration para importar" : !preview.canImport ? (preview.mode === "metrics_update" ? "Atualização bloqueada — veja os erros" : "Corrija os erros para importar") : pendingConfirmations ? `Confirme ${pendingConfirmations} alerta(s)` : preview.mode === "metrics_update" ? `${step(6)}. Confirmar atualização das métricas` : `${step(6)}. Confirmar importação`}
               </Button>
             </div>
           </CardContent>

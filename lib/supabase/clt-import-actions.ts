@@ -5,7 +5,10 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { parseImportInput } from "@/lib/import/parse";
-import { validateImport, type ImportPreview } from "@/lib/import/validate";
+import { validateImport, type ImportPreview, type MetricChange, type PreviewAd } from "@/lib/import/validate";
+import { BASE_TO_AD_KEY, EXTRA_IMPORT_KEYS, EXTRA_IMPORT_LABEL, METRIC_KEYS, hasExtraMetrics, type ImportBundle } from "@/lib/import/types";
+import { AD_METRICS, type AdMetricKey } from "@/lib/clt/ad-result-update";
+import { AD_RESULTS_MIGRATION_EXTRA, prepareAdResultUpdate, type PreparedAdUpdate } from "@/lib/supabase/clt-ad-results-core";
 import { buildImportPayload } from "@/lib/import/plan";
 import { buildSnapshot } from "@/lib/import/snapshot";
 import { assertCompanyInModule } from "@/lib/supabase/clt-scope";
@@ -83,6 +86,12 @@ async function loadSnapshot(db: SupabaseClient, company: { id: string; name: str
   return { snapshot, schemaReady };
 }
 
+function refreshImportViews() {
+  ["/trabalho", "/trabalho/empresas", "/trabalho/campanhas", "/trabalho/relatorios", "/trabalho/analises", "/importar"].forEach(p => revalidatePath(p));
+  revalidatePath("/trabalho/empresas/[id]", "page");
+  revalidatePath("/visionario/mkt", "layout");
+}
+
 function describeError(e: unknown): string {
   const code = typeof e === "object" && e && "code" in e ? String((e as { code: unknown }).code) : undefined;
   if (isMissingSchema(code)) return MIGRATION_HINT;
@@ -92,6 +101,49 @@ function describeError(e: unknown): string {
   return "Erro inesperado.";
 }
 
+/** Valores informados de um anúncio no formato do "Atualizar resultados" (só o que veio no texto). */
+function adValues(ad: PreviewAd): Partial<Record<AdMetricKey, number>> {
+  const out: Partial<Record<AdMetricKey, number>> = {};
+  for (const k of METRIC_KEYS) if (ad.metrics[k] !== null) out[BASE_TO_AD_KEY[k] as AdMetricKey] = ad.metrics[k]!;
+  for (const k of EXTRA_IMPORT_KEYS) { const v = ad.extraMetrics?.[k]; if (v !== null && v !== undefined) out[k as AdMetricKey] = v; }
+  return out;
+}
+const LABEL: Record<string, string> = {
+  ...Object.fromEntries(AD_METRICS.map((m) => [m.key, m.label.replace(/ \(R\$\)$/, "")])),
+  ...Object.fromEntries(Object.entries(EXTRA_IMPORT_LABEL)),
+};
+
+/**
+ * Atualização parcial: prepara TODOS os anúncios (lendo os totais atuais do
+ * banco) antes de qualquer gravação. "Nenhum valor mudou" não é erro — o
+ * anúncio só fica marcado como sem mudanças.
+ */
+async function prepareMetricsUpdate(db: SupabaseClient, userId: string, preview: ImportPreview) {
+  const prepared: PreparedAdUpdate[] = [];
+  const changes: MetricChange[] = [];
+  for (const c of preview.campaigns) for (const s of c.adSets) for (const ad of s.ads) {
+    if (!ad.existingId || !ad.hasMetrics) continue;
+    const r = await prepareAdResultUpdate(db, userId, ad.existingId, adValues(ad), null);
+    const base = { creativeId: ad.existingId, campaign: c.name, adSet: s.name, adSetAutoIdentified: !!s.autoIdentified, ad: ad.name };
+    if ("error" in r) {
+      if (r.error === "Nenhum valor mudou.") { changes.push({ ...base, periodStart: null, periodEnd: null, changes: [], unchanged: true }); continue; }
+      preview.issues.push({ id: `metrics-plan:${ad.existingId}`, level: "error", path: `${c.name} › ${ad.name}`, message: r.error });
+      continue;
+    }
+    prepared.push(r);
+    changes.push({
+      ...base, periodStart: r.plan.periodStart, periodEnd: r.plan.periodEnd, unchanged: false,
+      changes: (Object.keys(r.plan.updated) as AdMetricKey[]).map((k) => ({ key: k, label: LABEL[k] ?? k, before: r.plan.previous[k] ?? null, after: r.plan.updated[k]! })),
+    });
+  }
+  preview.metricChanges = changes;
+  if (!prepared.length && !preview.issues.some((i) => i.level === "error")) {
+    preview.issues.push({ id: "metrics-nothing", level: "error", path: "atualização", message: "Nenhuma métrica mudou: os valores informados são iguais aos já registrados. Nada a gravar." });
+  }
+  preview.canImport = !preview.issues.some((i) => i.level === "error");
+  return prepared;
+}
+
 async function buildPreview(input: Input) {
   const parsed = parseImportInput(input.content);
   if (!parsed.ok) return { error: parsed.error } as const;
@@ -99,7 +151,26 @@ async function buildPreview(input: Input) {
   const { db, user, company } = await context(input.companyId, input.module);
   const { snapshot, schemaReady } = await loadSnapshot(db, company);
   const preview = validateImport(parsed.bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) });
-  return { preview, detected: parsed.detected, schemaReady, db, user } as const;
+  const prepared = preview.mode === "metrics_update" && preview.canImport && schemaReady ? await prepareMetricsUpdate(db, user.id, preview) : [];
+  return { preview, detected: parsed.detected, schemaReady, db, user, prepared, bundle: parsed.bundle, company } as const;
+}
+
+/**
+ * Importação por período: o `clt_import_bundle` grava as métricas principais;
+ * engajamento/vídeo (mesmas colunas do "Atualizar resultados") entram em
+ * seguida na MESMA linha do período, só nas colunas informadas.
+ */
+async function saveExtraMetrics(db: SupabaseClient, input: Input, bundle: ImportBundle, company: { id: string; name: string }, period: { start: string; end: string }): Promise<string> {
+  if (!bundle.campaigns.some((c) => c.adSets.some((s) => s.ads.some((a) => hasExtraMetrics(a.extraMetrics))))) return "";
+  const { snapshot } = await loadSnapshot(db, company);
+  const fresh = validateImport(bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) ?? period });
+  for (const ad of fresh.campaigns.flatMap((c) => c.adSets.flatMap((s) => s.ads))) {
+    if (!ad.existingId || !hasExtraMetrics(ad.extraMetrics)) continue;
+    const values = Object.fromEntries(Object.entries(ad.extraMetrics!).filter(([, v]) => v !== null && v !== undefined));
+    const { error } = await db.from("clt_ad_period_metrics").update(values).eq("creative_id", ad.existingId).eq("period_start", period.start).eq("period_end", period.end);
+    if (error) return ` Engajamento/vídeo não foram gravados: ${isMissingSchema(error.code) ? AD_RESULTS_MIGRATION_EXTRA : error.message}`;
+  }
+  return "";
 }
 
 export async function previewSmartImportAction(input: Input): Promise<{ error?: string; preview?: ImportPreview; detected?: "json" | "text"; schemaReady?: boolean; migrationHint?: string }> {
@@ -123,8 +194,25 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
     const pending = preview.confirmationIds.filter(id => !confirmed.has(id));
     if (pending.length) return { error: `Confirme os ${pending.length} alerta(s) marcados antes de importar.` };
 
+    // Atualização parcial: nada de campanha/conjunto/anúncio é criado ou editado —
+    // só a diferença das métricas informadas, como no "Atualizar resultados".
+    if (preview.mode === "metrics_update") {
+      let done = 0;
+      for (const p of r.prepared) {
+        const applied = await p.apply();
+        if (applied.error) {
+          return { error: done ? `${done} anúncio(s) atualizado(s); o seguinte falhou e os demais não foram gravados: ${applied.error}` : `Nada foi gravado: ${applied.error}` };
+        }
+        done++;
+      }
+      refreshImportViews();
+      const unchanged = (preview.metricChanges ?? []).filter(m => m.unchanged).length;
+      return { success: `Atualização concluída: ${done} anúncio(s) com métricas atualizadas${unchanged ? `, ${unchanged} sem mudanças` : ""}. Nenhuma campanha, conjunto ou anúncio foi criado; orçamento, datas, status e as métricas não informadas ficaram como estavam.`, summary: { ads_updated: done } };
+    }
+
     const { data, error } = await db.rpc("clt_import_bundle", { p_company_id: preview.companyId, p_payload: buildImportPayload(preview) });
     if (error) return { error: `Importação cancelada, nada foi gravado: ${describeError(error)}` };
+    const extraWarning = preview.period ? await saveExtraMetrics(db, input, r.bundle, r.company, preview.period) : "";
 
     // Tipo de resultado por conjunto (opcional no JSON): só preenche quem veio no arquivo, sem tocar em métricas.
     const typed = preview.campaigns.flatMap(c => c.adSets.filter(s => s.resultType).map(s => ({ campaign: c, set: s })));
@@ -142,12 +230,10 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
         if (typeError) { typeWarning = " O tipo de resultado dos conjuntos não foi gravado (atualização do banco pendente: clt_ad_sets.result_type)."; break; }
       }
     }
-    ["/trabalho", "/trabalho/empresas", "/trabalho/campanhas", "/trabalho/relatorios", "/trabalho/analises", "/importar"].forEach(p => revalidatePath(p));
-    revalidatePath("/trabalho/empresas/[id]", "page");
-    revalidatePath("/visionario/mkt", "layout");
+    refreshImportViews();
     const s = (data ?? {}) as Record<string, number | string>;
     return {
-      success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas.${typeWarning}`,
+      success: `Importação concluída: ${s.audiences_created ?? 0} públicos criados e ${s.audiences_updated ?? 0} atualizados; ${s.campaigns_created ?? 0} campanhas criadas e ${s.campaigns_updated ?? 0} atualizadas; ${s.ad_sets_created ?? 0}+${s.ad_sets_updated ?? 0} conjuntos; ${s.ads_created ?? 0}+${s.ads_updated ?? 0} anúncios; ${s.metrics_saved ?? 0} registros de métricas.${typeWarning}${extraWarning}`,
       summary: s,
     };
   } catch (e) {

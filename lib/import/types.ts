@@ -27,6 +27,25 @@ export const METRIC_LABEL: Record<MetricKey, string> = {
 
 export const emptyMetrics = (): Metrics => ({ spend: null, conversations: null, sales: null, revenue: null, impressions: null, reach: null, linkClicks: null, leads: null });
 
+/**
+ * Métricas de engajamento e vídeo — as MESMAS colunas de
+ * `clt_ad_period_metrics` usadas pelo formulário "Atualizar resultados"
+ * (lib/clt/ad-result-update.ts). Nenhuma coluna nova.
+ */
+export const EXTRA_IMPORT_KEYS = ["engagements", "reactions", "comments", "shares", "new_followers", "views", "video_plays_3s", "thruplays", "video_p75", "video_p100"] as const;
+export type ExtraImportKey = (typeof EXTRA_IMPORT_KEYS)[number];
+export type ExtraMetrics = Partial<Record<ExtraImportKey, number | null>>;
+export const EXTRA_IMPORT_LABEL: Record<ExtraImportKey, string> = {
+  engagements: "Interações", reactions: "Reações à publicação", comments: "Comentários", shares: "Compartilhamentos",
+  new_followers: "Novos seguidores", views: "Visualizações", video_plays_3s: "Reproduções de 3 segundos", thruplays: "ThruPlays",
+  video_p75: "Visualizações de 75%", video_p100: "Visualizações de 100%",
+};
+/** Métrica base do importador → chave do "Atualizar resultados". */
+export const BASE_TO_AD_KEY: Record<MetricKey, string> = {
+  spend: "spend", conversations: "conversations", sales: "sales", revenue: "revenue", impressions: "impressions", reach: "reach", linkClicks: "link_clicks", leads: "leads",
+};
+export const hasExtraMetrics = (m: ExtraMetrics | undefined) => !!m && Object.values(m).some((v) => v !== null && v !== undefined);
+
 /** Campo inválido detectado na leitura (valor que não deu para interpretar). */
 export type ParseProblem = { path: string; message: string; level?: "error" | "warning" };
 
@@ -57,6 +76,8 @@ export type ImportAd = {
   postId: string | null;
   notes: string | null;
   metrics: Metrics;
+  /** Engajamento/vídeo (opcional; ausente = nada informado). */
+  extraMetrics?: ExtraMetrics;
   extra: Record<string, unknown>;
 };
 

@@ -1,5 +1,5 @@
 import { mapAudienceType, inferAdFormat } from "./parse-json";
-import { emptyMetrics, type ImportAd, type ImportAdSet, type ImportAudience, type ImportBundle, type ImportCampaign, type MetricKey, type ParseProblem } from "./types";
+import { EXTRA_IMPORT_KEYS, emptyMetrics, type ExtraImportKey, type ImportAd, type ImportAdSet, type ImportAudience, type ImportBundle, type ImportCampaign, type MetricKey, type ParseProblem } from "./types";
 import { normalizeKey, parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 
 /**
@@ -19,7 +19,7 @@ type Field =
   | "company" | "period" | "audienceDef" | "audience" | "audienceType" | "externalKey" | "audienceKey" | "source"
   | "percentage" | "retention" | "location" | "radius" | "age" | "interests" | "size" | "notes"
   | "campaign" | "campaignId" | "objective" | "dailyBudget" | "start" | "end" | "status"
-  | "adSet" | "adSetId" | "ad" | "adId" | "format" | "postId" | "placements" | MetricKey;
+  | "adSet" | "adSetId" | "ad" | "adId" | "format" | "postId" | "placements" | "savedPosts" | MetricKey | ExtraImportKey;
 
 const FIELD_ALIASES: Array<[Field, string[]]> = [
   ["company", ["empresa", "cliente"]],
@@ -58,11 +58,24 @@ const FIELD_ALIASES: Array<[Field, string[]]> = [
   ["revenue", ["faturamento", "receita", "valor vendido"]],
   ["impressions", ["impressoes"]],
   ["reach", ["alcance"]],
-  ["linkClicks", ["cliques", "cliques no link"]],
+  ["linkClicks", ["cliques", "cliques no link", "clique no link", "cliques em links", "link clicks"]],
   ["leads", ["leads", "cadastros"]],
+  // Engajamento e vídeo — mesmos campos do formulário "Atualizar resultados".
+  ["engagements", ["interacoes", "interacoes com a publicacao", "engajamento", "engajamentos", "engajamento com a publicacao", "post engagement"]],
+  ["reactions", ["reacoes", "reacoes a publicacao", "reacoes na publicacao", "reacoes da publicacao", "reacoes ao post", "post reactions"]],
+  ["comments", ["comentarios", "comentarios na publicacao", "comentarios da publicacao", "comentarios no post"]],
+  ["shares", ["compartilhamentos", "compartilhamentos da publicacao", "compartilhamentos na publicacao", "compartilhamentos do post"]],
+  ["new_followers", ["novos seguidores", "seguidores novos", "seguidores ganhos", "novos seguidores (anuncios)", "seguidores do anuncio"]],
+  ["views", ["visualizacoes", "visualizacoes do video", "views"]],
+  ["video_plays_3s", ["reproducoes de 3 segundos", "visualizacoes de 3 segundos", "reproducoes de video de 3 segundos", "reproducoes de 3s", "visualizacoes de 3s"]],
+  ["thruplays", ["thruplays", "thruplay", "thru plays", "thru play"]],
+  ["video_p75", ["visualizacoes de 75%", "visualizacoes 75%", "reproducoes de 75%", "reproducoes do video ate 75%", "video assistido ate 75%", "visualizacoes de 75% do video", "75%"]],
+  ["video_p100", ["visualizacoes de 100%", "visualizacoes 100%", "reproducoes de 100%", "reproducoes do video ate 100%", "video assistido ate 100%", "visualizacoes de 100% do video", "100%"]],
+  ["savedPosts", ["publicacoes guardadas", "publicacoes salvas", "salvamentos", "salvamentos da publicacao", "posts salvos"]],
 ];
 const FIELD_BY_ALIAS = new Map<string, Field>();
 for (const [field, aliases] of FIELD_ALIASES) for (const a of aliases) FIELD_BY_ALIAS.set(a, field);
+const EXTRA_FIELDS = new Set<Field>(EXTRA_IMPORT_KEYS);
 const METRIC_FIELDS = new Set<Field>(["spend", "conversations", "sales", "revenue", "impressions", "reach", "linkClicks", "leads"]);
 const INTEGER_FIELDS = new Set<Field>(["conversations", "sales", "impressions", "reach", "linkClicks", "leads"]);
 
@@ -80,7 +93,7 @@ function newAdSet(name: string, inferred = false): ImportAdSet {
   return { metaId: null, name, nameInferred: inferred || undefined, audienceKey: null, audienceName: null, dailyBudget: null, startAt: null, endAt: null, status: null, placements: null, notes: null, ads: [] };
 }
 function newAd(name: string): ImportAd {
-  return { metaId: null, name, format: inferAdFormat(null, name), postId: null, notes: null, metrics: emptyMetrics(), extra: {} };
+  return { metaId: null, name, format: inferAdFormat(null, name), postId: null, notes: null, metrics: emptyMetrics(), extraMetrics: {}, extra: {} };
 }
 
 export function parseStructuredText(text: string): ImportBundle {
@@ -101,7 +114,9 @@ export function parseStructuredText(text: string): ImportBundle {
       adSet = newAdSet(pendingAudienceName ?? campaign.name, true);
       adSet.audienceName = pendingAudienceName;
       campaign.adSets.push(adSet);
-      problems.push({ path: `linha ${lineNo}`, level: "warning", message: `Conjunto não informado em "${campaign.name}": criado um conjunto com o nome "${adSet.name}". Revise ou informe "Conjunto:".` });
+      // Sem "Conjunto:": a validação procura o anúncio nos conjuntos da campanha
+      // existente; só numa campanha NOVA o nome provisório vira conjunto (com confirmação).
+      void lineNo;
     }
     return adSet;
   };
@@ -130,6 +145,18 @@ export function parseStructuredText(text: string): ImportBundle {
       return v ?? null;
     };
 
+    if (field === "savedPosts") {
+      // Sem coluna no banco (nem no formulário manual): reconhecido, mas não gravado.
+      problems.push({ path: where, level: "warning", message: `"${m[1].trim()}" ainda não é registrado pelo VS Planner (não existe esse campo nos resultados) — ignorado.` });
+      return;
+    }
+    if (EXTRA_FIELDS.has(field)) {
+      const key = field as ExtraImportKey;
+      const v = num(true);
+      if (ad) { (ad.extraMetrics ??= {})[key] = v; return; }
+      problems.push({ path: where, ...(campaign ? { level: "warning" as const, message: `"${m[1].trim()}" informado fora de um anúncio — ignorado. Informe depois de "Anúncio:".` } : { message: `"${m[1].trim()}" precisa vir depois de um "Anúncio:".` }) });
+      return;
+    }
     if (METRIC_FIELDS.has(field)) {
       const key = field as MetricKey;
       const v = num(INTEGER_FIELDS.has(field));

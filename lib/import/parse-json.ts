@@ -1,7 +1,10 @@
 import { normalizeObjective } from "@/lib/clt/history";
 import { parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 import {
+  EXTRA_IMPORT_KEYS,
   emptyMetrics,
+  type ExtraImportKey,
+  type ExtraMetrics,
   type AudienceType,
   type ImportAd,
   type ImportAdSet,
@@ -53,6 +56,31 @@ const METRIC_ALIASES: Record<MetricKey, string[]> = {
   leads: ["leads"],
 };
 const INTEGER_METRICS = new Set<MetricKey>(["conversations", "sales", "impressions", "reach", "linkClicks", "leads"]);
+const EXTRA_ALIASES: Record<ExtraImportKey, string[]> = {
+  engagements: ["engagements", "post_engagement", "interacoes", "interações", "engajamento"],
+  reactions: ["reactions", "post_reactions", "reacoes", "reações"],
+  comments: ["comments", "comentarios", "comentários"],
+  shares: ["shares", "compartilhamentos"],
+  new_followers: ["new_followers", "novos_seguidores", "follows"],
+  views: ["views", "video_views", "visualizacoes", "visualizações"],
+  video_plays_3s: ["video_plays_3s", "video_3s_views", "reproducoes_3s"],
+  thruplays: ["thruplays", "thruplay"],
+  video_p75: ["video_p75", "video_p75_watched", "visualizacoes_75"],
+  video_p100: ["video_p100", "video_p100_watched", "visualizacoes_100"],
+};
+
+function readExtraMetrics(source: Obj | null, path: string, problems: ParseProblem[]): ExtraMetrics {
+  const out: ExtraMetrics = {};
+  if (!source) return out;
+  for (const key of EXTRA_IMPORT_KEYS) {
+    const raw = pick(source, EXTRA_ALIASES[key]);
+    if (raw === undefined) continue;
+    const value = parseBrInteger(raw);
+    if (value === undefined) problems.push({ path: `${path}.${key}`, message: `Valor inválido: ${JSON.stringify(raw)}` });
+    else out[key] = value;
+  }
+  return out;
+}
 
 function readMetrics(source: Obj | null, path: string, problems: ParseProblem[]): Metrics {
   const metrics = emptyMetrics();
@@ -155,6 +183,7 @@ function readAd(ad: Obj, path: string, problems: ParseProblem[]): ImportAd {
     postId: str(ad.post_id),
     notes: str(pick(ad, ["notes", "observacoes"])),
     metrics: readMetrics(isObj(metricSource) ? metricSource : null, `${path}.metrics`, problems),
+    extraMetrics: readExtraMetrics(isObj(metricSource) ? metricSource : null, `${path}.metrics`, problems),
     extra,
   };
 }

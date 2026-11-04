@@ -1,4 +1,4 @@
-import { AUDIENCE_DB_TYPE, METRIC_KEYS, NON_ADDITIVE_METRICS, emptyMetrics, type AudienceType, type ExistingSnapshot, type ImportAd, type ImportAudience, type ImportBundle, type Metrics, type ReportedTotals } from "./types";
+import { AUDIENCE_DB_TYPE, METRIC_KEYS, NON_ADDITIVE_METRICS, emptyMetrics, hasExtraMetrics, type AudienceType, type ExistingSnapshot, type ImportAd, type ImportAudience, type ImportBundle, type Metrics, type ReportedTotals } from "./types";
 import { normalizeKey, sameName } from "./values";
 
 /**
@@ -31,6 +31,8 @@ export type AudienceLink = { ref: string | null; name: string | null; type: stri
 export type PreviewAd = ImportAd & { action: RowAction; existingId: string | null; hasMetrics: boolean };
 export type PreviewAdSet = {
   metaId: string | null; name: string; action: RowAction; existingId: string | null;
+  /** Sem "Conjunto:" no arquivo: conjunto descoberto pelo anúncio já cadastrado. */
+  autoIdentified?: boolean;
   audience: AudienceLink | null;
   dailyBudget: number | null; startAt: string | null; endAt: string | null; status: string | null; placements: string | null; notes: string | null;
   resultType?: string | null;
@@ -47,6 +49,12 @@ export type PreviewCampaign = {
 };
 
 export type ImportPreview = {
+  /**
+   * `metrics_update`: só anúncios JÁ cadastrados, sem período — os valores são
+   * os novos TOTAIS e só as métricas informadas mudam (mesma regra do
+   * "Atualizar resultados"). Nada de campanha/conjunto/anúncio é criado ou editado.
+   */
+  mode: "import" | "metrics_update";
   companyId: string;
   companyName: string;
   sourceFormat: ImportBundle["sourceFormat"];
@@ -59,6 +67,21 @@ export type ImportPreview = {
   canImport: boolean;
   confirmationIds: string[];
   dataQualityNotes: string[];
+  /** Só em `metrics_update`: o que muda em cada anúncio (calculado no servidor a partir do banco). */
+  metricChanges?: MetricChange[];
+};
+
+export type MetricChange = {
+  creativeId: string;
+  campaign: string;
+  adSet: string;
+  adSetAutoIdentified: boolean;
+  ad: string;
+  /** Período em que a diferença passa a contar nos relatórios. */
+  periodStart: string | null;
+  periodEnd: string | null;
+  changes: Array<{ key: string; label: string; before: number | null; after: number }>;
+  unchanged: boolean;
 };
 
 export type ValidateOptions = {
@@ -238,7 +261,9 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
     let match = c.metaId ? existing.campaigns.find(e => e.meta_campaign_id === c.metaId) : undefined;
     let matchedBy: PreviewCampaign["matchedBy"] = match ? "meta_id" : null;
     if (!match && c.name) {
-      const byName = existing.campaigns.find(e => sameName(e.name, c.name));
+      const sameNamed = existing.campaigns.filter(e => sameName(e.name, c.name) && (!c.metaId || !e.meta_campaign_id || e.meta_campaign_id === c.metaId));
+      if (sameNamed.length > 1) add("error", "cmp-ambiguous", cpath, `Existem ${sameNamed.length} campanhas chamadas "${c.name}" nesta empresa. Informe "ID da campanha:" para indicar qual atualizar — nada foi alterado.`);
+      const byName = sameNamed.length > 1 ? undefined : existing.campaigns.find(e => sameName(e.name, c.name));
       if (byName && byName.meta_campaign_id && c.metaId && byName.meta_campaign_id !== c.metaId) {
         add("warning", "cmp-name-other-id", cpath, "Já existe uma campanha com este nome, mas com outro ID do Meta — será criada uma nova campanha.", true);
       } else if (byName) {
@@ -275,17 +300,75 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
     if (!explicitStatus && !match) add("info", "cmp-status-derived", cpath, `Status não informado: "${status}" (pelas datas).`);
 
     const adSets: PreviewAdSet[] = [];
+    const campaignSetIds = match ? new Set(existing.adSets.filter(e => e.campaign_id === match!.id).map(e => e.id)) : new Set<string>();
+    const setName = (id: string) => existing.adSets.find(e => e.id === id)?.name ?? "?";
+
+    /** Valida UM anúncio já posicionado num conjunto (existente ou novo). */
+    const buildAd = (ad: ImportAd, apath: string, adMatch: ExistingSnapshot["ads"][number] | undefined): PreviewAd => {
+      if (!ad.name) add("error", "ad-name", apath, "Anúncio sem nome.");
+      for (const key of METRIC_KEYS) { const v = ad.metrics[key]; if (v !== null && v < 0) add("error", "ad-negative", `${apath}.${key}`, "Métrica negativa."); }
+      for (const [key, v] of Object.entries(ad.extraMetrics ?? {})) if (v !== null && v !== undefined && v < 0) add("error", "ad-negative", `${apath}.${key}`, "Métrica negativa.");
+      const hasMetrics = METRIC_KEYS.some(k => ad.metrics[k] !== null) || hasExtraMetrics(ad.extraMetrics);
+      if (hasMetrics) anyMetrics = true;
+      if (!hasMetrics) add("info", "ad-no-metrics", apath, "Sem métricas informadas (somente estrutura).");
+      const m = ad.metrics;
+      if (m.sales !== null && m.conversations !== null && m.sales > m.conversations) add("warning", "ad-sales-gt-conv", apath, `${m.sales} vendas para ${m.conversations} conversas — confira se as vendas são do mesmo período/anúncio.`);
+      if (m.sales !== null && m.sales > 0 && m.revenue === null) add("info", "ad-no-revenue", apath, "Vendas informadas sem faturamento.");
+      if (adMatch && period && existing.periodMetrics.some(p => p.creative_id === adMatch.id && !(p.period_start === period.start && p.period_end === period.end) && p.period_start <= period.end && p.period_end >= period.start)) {
+        add("warning", "ad-period-overlap", apath, "Este anúncio já tem métricas de outro período que se sobrepõe a este. Os dois serão mantidos; confira os relatórios.", true);
+      }
+      if (ad.notes) add("info", "ad-notes", apath, `Observação: ${ad.notes}`);
+      // Registro existente mantém o nome gravado (diferenças de caixa/acentos não reescrevem nada).
+      return { ...ad, name: adMatch?.name ?? ad.name, action: adMatch ? "update" : "create", existingId: adMatch?.id ?? null, hasMetrics };
+    };
+
     c.adSets.forEach((s, j) => {
       const spath = `${cpath} › Conjunto ${j + 1}${s.name ? ` (${s.name})` : ""}`;
+
+      // Sem "Conjunto:" numa campanha JÁ cadastrada: cada anúncio é procurado
+      // nos conjuntos dela. Nunca cria conjunto/anúncio com nome inventado.
+      if (s.nameInferred && match) {
+        const bySet = new Map<string, PreviewAd[]>();
+        const unresolved: PreviewAd[] = [];
+        s.ads.forEach((ad, k) => {
+          const apath = `${cpath} › Anúncio ${k + 1}${ad.name ? ` (${ad.name})` : ""}`;
+          if (ad.metaId) { if (seenAdIds.has(ad.metaId)) add("error", "ad-dup-id", apath, `ID do anúncio ${ad.metaId} repetido.`); seenAdIds.add(ad.metaId); }
+          const candidates = ad.metaId
+            ? existing.ads.filter(e => e.meta_ad_id === ad.metaId && campaignSetIds.has(e.ad_set_id))
+            : existing.ads.filter(e => campaignSetIds.has(e.ad_set_id) && sameName(e.name, ad.name));
+          if (candidates.length === 1) {
+            const found = candidates[0];
+            if (!bySet.has(found.ad_set_id)) bySet.set(found.ad_set_id, []);
+            bySet.get(found.ad_set_id)!.push(buildAd(ad, apath, found));
+            return;
+          }
+          if (candidates.length > 1) {
+            add("error", "ad-ambiguous", apath, `Há ${candidates.length} anúncios chamados "${ad.name}" nesta campanha (conjuntos: ${candidates.map(x => `"${setName(x.ad_set_id)}"`).join(", ")}). Informe "Conjunto:" ou "ID do anúncio:" antes do anúncio para indicar qual atualizar — nada foi alterado.`);
+          } else {
+            add("error", "ad-404", apath, ad.metaId
+              ? `Nenhum anúncio com ID ${ad.metaId} nesta campanha.`
+              : `Anúncio "${ad.name}" não encontrado na campanha "${match!.name}". Nada será criado: confira o nome ou, para cadastrar um anúncio novo, informe "Conjunto:".`);
+          }
+          unresolved.push(buildAd(ad, apath, undefined));
+        });
+        for (const [setId, ads] of bySet) {
+          adSets.push({ metaId: null, name: setName(setId), action: "update", existingId: setId, autoIdentified: true, audience: null, dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, resultType: s.resultType ?? null, ads });
+        }
+        if (unresolved.length) adSets.push({ metaId: null, name: "Conjunto não identificado", action: "update", existingId: null, autoIdentified: true, audience: null, dailyBudget: null, startAt: null, endAt: null, status: null, placements: null, notes: null, ads: unresolved });
+        if (s.audienceName || s.audienceKey) add("warning", "set-aud-ignored", cpath, `"Público:" sem "Conjunto:" é ignorado numa campanha existente (o público dos conjuntos não muda).`);
+        return;
+      }
+
       if (!s.name) add("error", "set-name", spath, "Conjunto sem nome.");
-      if (s.nameInferred) add("warning", "set-inferred", spath, `Nome do conjunto não informado; será usado "${s.name}".`, true);
+      if (s.nameInferred) add("warning", "set-inferred", spath, `Nome do conjunto não informado; será criado o conjunto "${s.name}" nesta campanha nova.`, true);
       if (s.metaId) { if (seenSetIds.has(s.metaId)) add("error", "set-dup-id", spath, `ID do conjunto ${s.metaId} repetido.`); seenSetIds.add(s.metaId); }
       let setMatch = s.metaId ? existing.adSets.find(e => e.meta_adset_id === s.metaId) : undefined;
       if (setMatch && match && setMatch.campaign_id !== match.id) { add("error", "set-other-campaign", spath, "Este ID de conjunto já pertence a outra campanha."); setMatch = undefined; }
       if (setMatch && !match) { add("error", "set-other-campaign", spath, "Este ID de conjunto já pertence a outra campanha."); setMatch = undefined; }
       if (!setMatch && match && s.name) {
-        const byName = existing.adSets.find(e => e.campaign_id === match!.id && sameName(e.name, s.name) && (!e.meta_adset_id || !s.metaId || e.meta_adset_id === s.metaId));
-        if (byName) setMatch = byName;
+        const byNames = existing.adSets.filter(e => e.campaign_id === match!.id && sameName(e.name, s.name) && (!e.meta_adset_id || !s.metaId || e.meta_adset_id === s.metaId));
+        if (byNames.length > 1) add("error", "set-ambiguous", spath, `Há ${byNames.length} conjuntos chamados "${s.name}" nesta campanha. Informe "ID do conjunto:" — nada foi alterado.`);
+        else if (byNames.length === 1) setMatch = byNames[0];
       }
 
       let audience: AudienceLink | null = null;
@@ -293,7 +376,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
         audience = resolveAudience(s.audienceKey, s.audienceKey ? null : s.audienceName);
         if (!audience) add("error", "set-aud-404", spath, `Público "${s.audienceKey ?? s.audienceName}" não encontrado nesta empresa. Importe o público antes (ou no mesmo arquivo).`);
         else if (audience.via === "name") add("info", "set-aud-name", spath, `Público vinculado pelo nome exato "${audience.name}".`);
-      } else add("warning", "set-aud-none", spath, "Conjunto sem público informado.");
+      } else if (!setMatch) add("warning", "set-aud-none", spath, "Conjunto sem público informado.");
       if (audience) {
         const setName = normalizeKey(s.name);
         for (const hint of NAME_HINTS) {
@@ -311,28 +394,19 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
 
       const ads: PreviewAd[] = s.ads.map((ad, k) => {
         const apath = `${spath} › Anúncio ${k + 1}${ad.name ? ` (${ad.name})` : ""}`;
-        if (!ad.name) add("error", "ad-name", apath, "Anúncio sem nome.");
         if (ad.metaId) { if (seenAdIds.has(ad.metaId)) add("error", "ad-dup-id", apath, `ID do anúncio ${ad.metaId} repetido.`); seenAdIds.add(ad.metaId); }
         let adMatch = ad.metaId ? existing.ads.find(e => e.meta_ad_id === ad.metaId) : undefined;
         if (adMatch && adMatch.ad_set_id !== setMatch?.id) { add("error", "ad-other-set", apath, "Este ID de anúncio já pertence a outro conjunto."); adMatch = undefined; }
-        if (!adMatch && setMatch && ad.name) adMatch = existing.ads.find(e => e.ad_set_id === setMatch!.id && sameName(e.name, ad.name) && (!e.meta_ad_id || !ad.metaId || e.meta_ad_id === ad.metaId));
-        for (const key of METRIC_KEYS) { const v = ad.metrics[key]; if (v !== null && v < 0) add("error", "ad-negative", `${apath}.${key}`, "Métrica negativa."); }
-        const values = METRIC_KEYS.map(k => ad.metrics[k]);
-        const hasMetrics = values.some(v => v !== null);
-        if (hasMetrics) anyMetrics = true;
-        if (!hasMetrics) add("info", "ad-no-metrics", apath, "Sem métricas informadas (somente estrutura).");
-        const m = ad.metrics;
-        if (m.sales !== null && m.conversations !== null && m.sales > m.conversations) add("warning", "ad-sales-gt-conv", apath, `${m.sales} vendas para ${m.conversations} conversas — confira se as vendas são do mesmo período/anúncio.`);
-        if (m.sales !== null && m.sales > 0 && m.revenue === null) add("info", "ad-no-revenue", apath, "Vendas informadas sem faturamento.");
-        if (adMatch && period && existing.periodMetrics.some(p => p.creative_id === adMatch!.id && !(p.period_start === period.start && p.period_end === period.end) && p.period_start <= period.end && p.period_end >= period.start)) {
-          add("warning", "ad-period-overlap", apath, "Este anúncio já tem métricas de outro período que se sobrepõe a este. Os dois serão mantidos; confira os relatórios.", true);
+        if (!adMatch && setMatch && ad.name) {
+          const byNames = existing.ads.filter(e => e.ad_set_id === setMatch!.id && sameName(e.name, ad.name) && (!e.meta_ad_id || !ad.metaId || e.meta_ad_id === ad.metaId));
+          if (byNames.length > 1) add("error", "ad-ambiguous", apath, `Há ${byNames.length} anúncios chamados "${ad.name}" neste conjunto. Informe "ID do anúncio:" — nada foi alterado.`);
+          else adMatch = byNames[0];
         }
-        if (ad.notes) add("info", "ad-notes", apath, `Observação: ${ad.notes}`);
-        return { ...ad, action: adMatch ? "update" : "create", existingId: adMatch?.id ?? null, hasMetrics };
+        return buildAd(ad, apath, adMatch);
       });
 
       adSets.push({
-        metaId: s.metaId, name: s.name, action: setMatch ? "update" : "create", existingId: setMatch?.id ?? null, audience,
+        metaId: s.metaId, name: setMatch?.name ?? s.name, action: setMatch ? "update" : "create", existingId: setMatch?.id ?? null, audience,
         dailyBudget: s.dailyBudget, startAt: s.startAt, endAt: s.endAt, status: s.status, placements: s.placements, notes: s.notes, resultType: s.resultType ?? null, ads,
       });
     });
@@ -354,14 +428,30 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
     const objectiveRaw = c.objective;
     const dailyBudget = c.dailyBudget;
     campaigns.push({
-      metaId: c.metaId, name: c.name, action: match ? "update" : "create", existingId: match?.id ?? null, matchedBy,
+      metaId: c.metaId, name: match?.name ?? c.name, action: match ? "update" : "create", existingId: match?.id ?? null, matchedBy,
       objective: objectiveRaw ? OBJECTIVE_LABELS[objectiveRaw.toLowerCase()] ?? objectiveRaw : null,
       dailyBudget, budgetType: dailyBudget !== null || c.adSets.some(s => s.dailyBudget !== null) ? "daily" : "total",
       startsOn, endsOn, datesDerived: derived, status, statusExplicit: !!explicitStatus, notes: c.notes, adSets, known, reported: c.reportedTotals, difference,
     });
   });
 
-  if (anyMetrics && !period) add("error", "period-missing", "period", "Há métricas no arquivo, mas o período não foi informado. Informe o período das métricas (início e fim).");
+  // Atualização parcial: só anúncios já cadastrados, sem período → novos totais
+  // das métricas informadas (regra do "Atualizar resultados"); nada mais muda.
+  const everyAd = campaigns.flatMap(c => c.adSets.flatMap(s => s.ads));
+  const metricsUpdate = !period && !audiences.length && campaigns.length > 0 && anyMetrics
+    && campaigns.every(c => c.action === "update" && c.adSets.length > 0 && c.adSets.every(s => s.action === "update" && s.ads.every(a => a.action === "update" || (!!s.autoIdentified && !s.existingId))));
+  if (metricsUpdate) {
+    bundle.campaigns.forEach((c, i) => {
+      const cpath = `Campanha ${i + 1} (${campaigns[i].name})`;
+      const ignored = [c.objective && "objetivo", c.dailyBudget !== null && "orçamento", (c.startsOn || c.endsOn) && "datas", c.status && "status"].filter(Boolean);
+      const setIgnored = c.adSets.some(s => s.dailyBudget !== null || s.startAt || s.endAt || s.status || s.placements || s.audienceName || s.audienceKey);
+      if (ignored.length || setIgnored) add("warning", "partial-ignored", cpath, `Atualização só de métricas: ${[...ignored, setIgnored && "dados do conjunto"].filter(Boolean).join(", ")} informado(s) no texto NÃO serão alterados.`);
+    });
+    for (const ad of everyAd) if (!ad.hasMetrics && ad.existingId) add("info", "partial-no-metrics", ad.name, `"${ad.name}": nenhuma métrica informada — nada muda neste anúncio.`);
+    add("info", "partial-mode", "atualização", "Atualização parcial: somente as métricas informadas mudam. Orçamento, investimento, alcance, impressões, datas, status e os demais anúncios ficam como estão (a menos que estejam no texto).");
+  } else if (anyMetrics && !period) {
+    add("error", "period-missing", "period", "Há métricas no arquivo, mas o período não foi informado. Informe o período das métricas (início e fim) — ou, para só atualizar anúncios já cadastrados, informe apenas campanha e anúncio existentes.");
+  }
   for (const note of bundle.dataQualityNotes) add("info", "dq-note", `Nota do arquivo ${normalizeKey(note).slice(0, 24)}`, note);
 
   const totalsKnown = sumKnown(bundle.campaigns.flatMap(c => c.adSets.flatMap(s => s.ads)));
@@ -369,6 +459,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
   const count = <T extends { action: RowAction }>(rows: T[]) => ({ create: rows.filter(r => r.action === "create").length, update: rows.filter(r => r.action === "update").length });
   const allSets = campaigns.flatMap(c => c.adSets), allAds = allSets.flatMap(s => s.ads);
   const preview: ImportPreview = {
+    mode: metricsUpdate ? "metrics_update" : "import",
     companyId: existing.company.id,
     companyName: existing.company.name,
     sourceFormat: bundle.sourceFormat,
