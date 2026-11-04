@@ -8,25 +8,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 type Row = Record<string, unknown>;
 const tables: Record<string, Row[]> = {};
-const writes: Array<{ table: string; op: string }> = [];
+const writes: Array<{ table: string; op: string; payload?: Row }> = [];
 const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
 
 function query(table: string) {
   const filters: Array<(r: Row) => boolean> = [];
   let single = false;
+  let op: "select" | "insert" | "update" | "delete" | "upsert" = "select";
+  let payload: Row | null = null;
   const rows = () => (tables[table] ??= []);
   const b = {
     select: () => b,
-    insert: () => { writes.push({ table, op: "insert" }); return b; },
-    update: () => { writes.push({ table, op: "update" }); return b; },
-    delete: () => { writes.push({ table, op: "delete" }); return b; },
-    upsert: () => { writes.push({ table, op: "upsert" }); return b; },
+    insert: (p: Row) => { op = "insert"; payload = p; return b; },
+    update: (p: Row) => { op = "update"; payload = p; return b; },
+    delete: () => { op = "delete"; return b; },
+    upsert: (p: Row) => { op = "upsert"; payload = p; return b; },
     eq: (c: string, v: unknown) => { filters.push((r) => r[c] === v); return b; },
     in: (c: string, v: unknown[]) => { filters.push((r) => v.includes(r[c])); return b; },
     order: () => b,
     maybeSingle: () => { single = true; return b; },
     then: (resolve: (v: unknown) => void) => {
+      if (op !== "select") writes.push({ table, op, payload: payload ?? undefined });
+      if (op === "insert") { const r = { id: `${table}-new-${rows().length + 1}`, ...payload }; rows().push(r); return resolve({ data: [r], error: null }); }
       const out = rows().filter((r) => filters.every((f) => f(r)));
+      if (op === "update") { out.forEach((r) => Object.assign(r, payload)); return resolve({ data: out, error: null }); }
       resolve({ data: single ? out[0] ?? null : out, error: null });
     },
   };
@@ -114,6 +119,77 @@ describe("Central de Importação — atualização parcial (AIV)", () => {
     const r = await confirmSmartImportAction({ companyId: "co", content: same, confirmed: [] });
     expect(r.error).toMatch(/Há erros na validação/);
     expect(rpcCalls).toEqual([]);
+  });
+
+  it("com período igual ao do registro: atualiza SÓ as métricas informadas desse registro", async () => {
+    const period = { start: "2026-10-14", end: "2026-10-31" };
+    const p = await previewSmartImportAction({ companyId: "co", content: TEXT, period });
+    expect(p.preview!.mode).toBe("period_update");
+    expect(p.preview!.canImport).toBe(true);
+    const [t] = p.preview!.periodTargets!;
+    expect(t).toMatchObject({ kind: "update_row", target: { id: "pm-1", start: "2026-10-14", end: "2026-10-31", chosen: false }, adSet: "Público local", adSetAutoIdentified: true });
+    expect(t.changes.find((c) => c.key === "engagements")).toEqual({ key: "engagements", label: "Interações", before: 2000, after: 2580 });
+    expect(p.preview!.issues.some((i) => /Os dois serão mantidos/.test(i.message))).toBe(false);
+    expect(writes).toEqual([]);
+
+    const r = await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [] });
+    expect(r.error).toBeUndefined();
+    expect(r.success).toMatch(/1 registro\(s\) de resultados atualizado/);
+    const metricWrites = writes.filter((w) => w.table === "clt_ad_period_metrics");
+    expect(metricWrites).toHaveLength(1);
+    expect(metricWrites[0].op).toBe("update");
+    expect(Object.keys(metricWrites[0].payload!).sort()).toEqual(["comments", "engagements", "link_clicks", "new_followers", "reactions", "shares", "thruplays", "updated_at", "video_p100", "video_p75"]);
+    const saved = tables.clt_ad_period_metrics[0];
+    expect(saved).toMatchObject({ spend: 150, impressions: 40000, reach: 21000, engagements: 2580, link_clicks: 16, thruplays: 1679 });
+    expect(tables.clt_ad_period_metrics).toHaveLength(1);
+    // Nada de estrutura; nada de RPC de importação ou de diferença.
+    expect(writes.some((w) => ["clt_campaigns", "clt_ad_sets", "clt_ad_creatives"].includes(w.table))).toBe(false);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("período sobreposto e diferente (caso real 14/10 a 30/10): bloqueia, mostra os registros e não cria nada", async () => {
+    const period = { start: "2026-10-14", end: "2026-10-30" };
+    const p = await previewSmartImportAction({ companyId: "co", content: TEXT, period });
+    expect(p.preview!.canImport).toBe(false);
+    const [t] = p.preview!.periodTargets!;
+    expect(t.kind).toBe("choose");
+    expect(t.options).toEqual([expect.objectContaining({ id: "pm-1", start: "2026-10-14", end: "2026-10-31", selectable: true })]);
+    const r = await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [] });
+    expect(r.error).toBeDefined();
+    expect(writes).toEqual([]);
+    expect(tables.clt_ad_period_metrics).toHaveLength(1);
+  });
+
+  it("sobreposto + registro escolhido: atualiza o escolhido, sem somar e sem criar outro", async () => {
+    const period = { start: "2026-10-14", end: "2026-10-30" };
+    const p = await previewSmartImportAction({ companyId: "co", content: TEXT, period, targets: { "ad-1": "pm-1" } });
+    expect(p.preview!.canImport).toBe(true);
+    expect(p.preview!.periodTargets![0]).toMatchObject({ kind: "update_row", target: { id: "pm-1", chosen: true, end: "2026-10-31" } });
+    const r = await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [], targets: { "ad-1": "pm-1" } });
+    expect(r.error).toBeUndefined();
+    expect(tables.clt_ad_period_metrics).toHaveLength(1);
+    expect(tables.clt_ad_period_metrics[0]).toMatchObject({ engagements: 2580, link_clicks: 16, spend: 150 });
+  });
+
+  it("período sem nenhum registro sobreposto: cria UM registro só com as métricas informadas", async () => {
+    const period = { start: "2026-11-01", end: "2026-11-03" };
+    const r = await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [] });
+    expect(r.error).toBeUndefined();
+    expect(tables.clt_ad_period_metrics).toHaveLength(2);
+    const created = tables.clt_ad_period_metrics[1];
+    expect(created).toMatchObject({ creative_id: "ad-1", campaign_id: "cmp-1", ad_set_id: "set-a", period_start: "2026-11-01", period_end: "2026-11-03", engagements: 2580 });
+    expect(created).not.toHaveProperty("spend");
+    expect(created).not.toHaveProperty("reach");
+  });
+
+  it("reimportar o mesmo texto e período: nada a gravar (sem duplicar)", async () => {
+    const period = { start: "2026-10-14", end: "2026-10-31" };
+    await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [] });
+    writes.length = 0;
+    const again = await confirmSmartImportAction({ companyId: "co", content: TEXT, period, confirmed: [] });
+    expect(again.error).toMatch(/Há erros na validação/);
+    expect(writes).toEqual([]);
+    expect(tables.clt_ad_period_metrics).toHaveLength(1);
   });
 
   it("anúncio ambíguo: bloqueado antes de qualquer gravação", async () => {

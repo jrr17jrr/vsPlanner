@@ -54,7 +54,7 @@ export type ImportPreview = {
    * os novos TOTAIS e só as métricas informadas mudam (mesma regra do
    * "Atualizar resultados"). Nada de campanha/conjunto/anúncio é criado ou editado.
    */
-  mode: "import" | "metrics_update";
+  mode: "import" | "metrics_update" | "period_update";
   companyId: string;
   companyName: string;
   sourceFormat: ImportBundle["sourceFormat"];
@@ -69,6 +69,23 @@ export type ImportPreview = {
   dataQualityNotes: string[];
   /** Só em `metrics_update`: o que muda em cada anúncio (calculado no servidor a partir do banco). */
   metricChanges?: MetricChange[];
+  /** Só em `period_update`: registro de resultados que será atualizado (ou criado) em cada anúncio. */
+  periodTargets?: PeriodTargetPreview[];
+};
+
+export type PeriodTargetPreview = {
+  creativeId: string;
+  campaign: string;
+  adSet: string;
+  adSetAutoIdentified: boolean;
+  ad: string;
+  /** update_row: atualiza um registro existente · insert_row: cria o do período (nada sobreposto) · choose/blocked: nada é gravado. */
+  kind: "update_row" | "insert_row" | "choose" | "blocked";
+  message: string | null;
+  target: { id: string | null; start: string; end: string; chosen: boolean } | null;
+  options: Array<{ id: string; start: string; end: string; source: string | null; selectable: boolean; reason: string | null }>;
+  changes: Array<{ key: string; label: string; before: number | null; after: number }>;
+  unchanged: boolean;
 };
 
 export type MetricChange = {
@@ -438,8 +455,21 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
   // Atualização parcial: só anúncios já cadastrados, sem período → novos totais
   // das métricas informadas (regra do "Atualizar resultados"); nada mais muda.
   const everyAd = campaigns.flatMap(c => c.adSets.flatMap(s => s.ads));
-  const metricsUpdate = !period && !audiences.length && campaigns.length > 0 && anyMetrics
+  const existingOnly = !audiences.length && campaigns.length > 0 && anyMetrics
     && campaigns.every(c => c.action === "update" && c.adSets.length > 0 && c.adSets.every(s => s.action === "update" && s.ads.every(a => a.action === "update" || (!!s.autoIdentified && !s.existingId))));
+  const metricsUpdate = existingOnly && !period;
+  // Com período, em itens só já cadastrados: atualiza o REGISTRO do período (lib/import/period-target.ts),
+  // sem passar pela importação de estrutura. A sobreposição é resolvida no servidor (escolha do registro).
+  const periodUpdate = existingOnly && !!period;
+  if (periodUpdate) {
+    for (let i = issues.length - 1; i >= 0; i--) if (issues[i].id.startsWith("ad-period-overlap:")) issues.splice(i, 1);
+    bundle.campaigns.forEach((c, i) => {
+      const ignored = [c.objective && "objetivo", c.dailyBudget !== null && "orçamento", (c.startsOn || c.endsOn) && "datas", c.status && "status"].filter(Boolean);
+      const setIgnored = c.adSets.some(s => s.dailyBudget !== null || s.startAt || s.endAt || s.status || s.placements || s.audienceName || s.audienceKey);
+      if (ignored.length || setIgnored) add("warning", "partial-ignored", `Campanha ${i + 1} (${campaigns[i].name})`, `Atualização só de métricas: ${[...ignored, setIgnored && "dados do conjunto"].filter(Boolean).join(", ")} informado(s) no texto NÃO serão alterados.`);
+    });
+    add("info", "period-mode", "atualização", "Atualização do registro de resultados do período: só as métricas informadas mudam (substituem o valor daquele registro, sem somar). Campanha, conjunto, anúncio, status, datas e as demais métricas ficam como estão.");
+  }
   if (metricsUpdate) {
     bundle.campaigns.forEach((c, i) => {
       const cpath = `Campanha ${i + 1} (${campaigns[i].name})`;
@@ -459,7 +489,7 @@ export function validateImport(bundle: ImportBundle, existing: ExistingSnapshot,
   const count = <T extends { action: RowAction }>(rows: T[]) => ({ create: rows.filter(r => r.action === "create").length, update: rows.filter(r => r.action === "update").length });
   const allSets = campaigns.flatMap(c => c.adSets), allAds = allSets.flatMap(s => s.ads);
   const preview: ImportPreview = {
-    mode: metricsUpdate ? "metrics_update" : "import",
+    mode: metricsUpdate ? "metrics_update" : periodUpdate ? "period_update" : "import",
     companyId: existing.company.id,
     companyName: existing.company.name,
     sourceFormat: bundle.sourceFormat,

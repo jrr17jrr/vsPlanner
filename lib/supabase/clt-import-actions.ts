@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { parseImportInput } from "@/lib/import/parse";
-import { validateImport, type ImportPreview, type MetricChange, type PreviewAd } from "@/lib/import/validate";
+import { validateImport, type ImportPreview, type MetricChange, type PeriodTargetPreview, type PreviewAd } from "@/lib/import/validate";
+import { informedColumns, planRowChanges, resolvePeriodTarget, type PeriodRow } from "@/lib/import/period-target";
 import { BASE_TO_AD_KEY, EXTRA_IMPORT_KEYS, EXTRA_IMPORT_LABEL, METRIC_KEYS, hasExtraMetrics, type ImportBundle } from "@/lib/import/types";
 import { AD_METRICS, type AdMetricKey } from "@/lib/clt/ad-result-update";
 import { AD_RESULTS_MIGRATION_EXTRA, prepareAdResultUpdate, type PreparedAdUpdate } from "@/lib/supabase/clt-ad-results-core";
@@ -22,7 +23,14 @@ import { assertCompanyInModule } from "@/lib/supabase/clt-scope";
 
 type Period = { start: string; end: string } | null;
 /** `module`: quando informado (Central de Importação), a empresa precisa ser desse módulo — CLT e MKT nunca se misturam. */
-type Input = { companyId: string; content: string; period?: Period; module?: "clt" | "mkt" };
+/** `targets`: registro escolhido por anúncio (creative_id → id do registro) quando há períodos sobrepostos. */
+type Input = { companyId: string; content: string; period?: Period; module?: "clt" | "mkt"; targets?: Record<string, string> };
+
+const UUIDISH = /^[0-9a-zA-Z-]{1,64}$/;
+function validTargets(t: unknown): Record<string, string> {
+  if (!t || typeof t !== "object") return {};
+  return Object.fromEntries(Object.entries(t as Record<string, unknown>).filter(([k, v]) => UUIDISH.test(k) && typeof v === "string" && UUIDISH.test(v)) as Array<[string, string]>);
+}
 
 const MIGRATION_HINT = "Aplique no Supabase a migration supabase/migrations/20261030110000_clt_smart_import.sql para habilitar o importador.";
 const isMissingSchema = (code?: string) => code === "42703" || code === "42P01" || code === "PGRST204" || code === "PGRST205" || code === "PGRST202" || code === "42883";
@@ -144,6 +152,50 @@ async function prepareMetricsUpdate(db: SupabaseClient, userId: string, preview:
   return prepared;
 }
 
+type PeriodOp =
+  | { kind: "update"; rowId: string; values: Record<string, number>; label: string }
+  | { kind: "insert"; row: Record<string, unknown>; label: string };
+
+/**
+ * Atualização COM período em anúncios já cadastrados: lê os registros de
+ * resultados reais de cada anúncio, escolhe o alvo (lib/import/period-target.ts)
+ * e prepara só as colunas informadas. Sobreposição sem escolha válida ou
+ * qualquer dúvida → erro e NADA é gravado.
+ */
+async function preparePeriodUpdate(db: SupabaseClient, userId: string, preview: ImportPreview, targets: Record<string, string>) {
+  const period = preview.period!;
+  const ads = preview.campaigns.flatMap((c) => c.adSets.flatMap((s) => s.ads.filter((a) => a.existingId && a.hasMetrics).map((a) => ({ c, s, a }))));
+  const ids = ads.map((x) => x.a.existingId!);
+  const { data, error } = await db.from("clt_ad_period_metrics").select("*").in("creative_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]).eq("user_id", userId);
+  if (error) throw error;
+  const rows = (data ?? []) as PeriodRow[];
+  const ops: PeriodOp[] = [];
+  const out: PeriodTargetPreview[] = [];
+  for (const { c, s, a } of ads) {
+    const id = a.existingId!;
+    const base = { creativeId: id, campaign: c.name, adSet: s.name, adSetAutoIdentified: !!s.autoIdentified, ad: a.name };
+    const target = resolvePeriodTarget({ rows: rows.filter((r) => r.creative_id === id), period, chosenId: targets[id] ?? null });
+    const informed = informedColumns(a);
+    if (target.kind === "choose" || target.kind === "blocked") {
+      out.push({ ...base, kind: target.kind, message: target.message, target: null, options: target.options, changes: [], unchanged: false });
+      preview.issues.push({ id: `period-target:${id}`, level: "error", path: `${c.name} › ${a.name}`, message: target.kind === "choose" ? `${target.message} Escolha o registro na prévia abaixo.` : target.message });
+      continue;
+    }
+    const row = target.kind === "update_row" ? rows.find((r) => r.id === target.rowId)! : null;
+    const { changes, update } = planRowChanges(row, informed);
+    out.push({ ...base, kind: target.kind, message: null, target: { id: target.kind === "update_row" ? target.rowId : null, start: target.start, end: target.end, chosen: target.kind === "update_row" && target.chosen }, options: target.options, changes, unchanged: !changes.length });
+    if (!changes.length) continue;
+    if (target.kind === "update_row") ops.push({ kind: "update", rowId: target.rowId, values: update, label: a.name });
+    else ops.push({ kind: "insert", label: a.name, row: { user_id: userId, company_id: preview.companyId, campaign_id: c.existingId, ad_set_id: s.existingId, creative_id: id, period_start: target.start, period_end: target.end, source: preview.sourceFormat, ...update } });
+  }
+  preview.periodTargets = out;
+  if (!ops.length && !preview.issues.some((i) => i.level === "error")) {
+    preview.issues.push({ id: "period-nothing", level: "error", path: "atualização", message: "Nenhuma métrica mudou: os valores informados já estão no registro. Nada a gravar." });
+  }
+  preview.canImport = !preview.issues.some((i) => i.level === "error");
+  return ops;
+}
+
 async function buildPreview(input: Input) {
   const parsed = parseImportInput(input.content);
   if (!parsed.ok) return { error: parsed.error } as const;
@@ -152,7 +204,8 @@ async function buildPreview(input: Input) {
   const { snapshot, schemaReady } = await loadSnapshot(db, company);
   const preview = validateImport(parsed.bundle, snapshot, { today: todayKeySaoPaulo(), period: validPeriod(input.period) });
   const prepared = preview.mode === "metrics_update" && preview.canImport && schemaReady ? await prepareMetricsUpdate(db, user.id, preview) : [];
-  return { preview, detected: parsed.detected, schemaReady, db, user, prepared, bundle: parsed.bundle, company } as const;
+  const periodOps = preview.mode === "period_update" && preview.canImport && schemaReady ? await preparePeriodUpdate(db, user.id, preview, validTargets(input.targets)) : [];
+  return { preview, detected: parsed.detected, schemaReady, db, user, prepared, periodOps, bundle: parsed.bundle, company } as const;
 }
 
 /**
@@ -208,6 +261,27 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
       refreshImportViews();
       const unchanged = (preview.metricChanges ?? []).filter(m => m.unchanged).length;
       return { success: `Atualização concluída: ${done} anúncio(s) com métricas atualizadas${unchanged ? `, ${unchanged} sem mudanças` : ""}. Nenhuma campanha, conjunto ou anúncio foi criado; orçamento, datas, status e as métricas não informadas ficaram como estavam.`, summary: { ads_updated: done } };
+    }
+
+    // Com período, só itens já cadastrados: atualiza o registro do período (só as colunas informadas).
+    if (preview.mode === "period_update") {
+      let done = 0;
+      for (const op of r.periodOps) {
+        const res = op.kind === "update"
+          ? await db.from("clt_ad_period_metrics").update({ ...op.values, updated_at: new Date().toISOString() }).eq("id", op.rowId).eq("user_id", r.user.id).select("id")
+          : await db.from("clt_ad_period_metrics").insert(op.row).select("id");
+        const failed = res.error ?? (op.kind === "update" && !res.data?.length ? { message: "registro não encontrado (recarregue e valide de novo)" } : null);
+        if (failed) {
+          const reason = "code" in failed && isMissingSchema(String(failed.code)) ? AD_RESULTS_MIGRATION_EXTRA : failed.message;
+          return { error: done ? `${done} registro(s) atualizado(s); "${op.label}" falhou e os seguintes não foram gravados: ${reason}` : `Nada foi gravado: ${reason}` };
+        }
+        done++;
+      }
+      // Registro da execução (auditoria; não interfere nos resultados).
+      await db.from("clt_import_runs").insert({ user_id: r.user.id, company_id: preview.companyId, source_format: preview.sourceFormat, period_start: preview.period!.start, period_end: preview.period!.end, summary: { mode: "period_update", targets: (preview.periodTargets ?? []).map((t) => ({ ad: t.ad, record: t.target, changes: t.changes })) } });
+      refreshImportViews();
+      const updated = r.periodOps.filter((o) => o.kind === "update").length, created = done - updated;
+      return { success: `Atualização concluída: ${updated} registro(s) de resultados atualizado(s)${created ? ` e ${created} criado(s) (sem sobreposição)` : ""}. Só as métricas informadas mudaram; campanha, conjunto, anúncio, status, datas e as demais métricas ficaram como estavam.`, summary: { records_updated: updated, records_created: created } };
     }
 
     const { data, error } = await db.rpc("clt_import_bundle", { p_company_id: preview.companyId, p_payload: buildImportPayload(preview) });

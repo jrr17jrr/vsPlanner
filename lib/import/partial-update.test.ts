@@ -169,10 +169,12 @@ describe("compatibilidade e prevenção de duplicatas", () => {
     const p = run(AIV_TEXT.replace("AIV | Engajamento | video 14/10/26", "Campanha nova"));
     expect(errors(p).some(e => e.id === "period-missing:period")).toBe(true);
   });
-  it("com período: importação por período no conjunto existente (sem criar conjunto) e só as colunas informadas", () => {
+  it("com período e só itens existentes: vira atualização do registro do período (sem importação de estrutura)", () => {
     const p = run(AIV_TEXT, snapshot(), { start: "2026-10-14", end: "2026-10-31" });
-    expect(p.mode).toBe("import");
+    expect(p.mode).toBe("period_update");
     expect(errors(p)).toEqual([]);
+    expect(p.counts.campaigns.create + p.counts.adSets.create + p.counts.ads.create).toBe(0);
+    // O payload de estrutura continua sem tocar em nada que não veio no texto (caso seja usado).
     const payload = buildImportPayload(p);
     const set = payload.campaigns[0].ad_sets[0];
     expect(set).toMatchObject({ existing_id: "set-a", name: "Público local 20-65", daily_budget: null, starts_at: null, ends_at: null, status: null });
