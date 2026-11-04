@@ -60,6 +60,8 @@ export const REPORT_METRICS: ReportMetricDef[] = [
   v("thruplays", "ThruPlays", "video", (m) => m.thruplays, "int"),
   v("video75", "Visualizações de 75%", "video", (m) => m.video75, "int", { short: "75%" }),
   v("video100", "Visualizações de 100%", "video", (m) => m.video100, "int", { short: "100%" }),
+  // Percentuais informados por anúncio: bloco (tabela por anúncio), nunca somados nem em média.
+  { id: "taxasVideo", label: "Taxa de Gancho e Taxa de Retenção (por anúncio)", section: "video" },
 
   v("cpmsg", "Custo por mensagem", "custos", costPerMessage, "money", { short: "Custo/msg", lowerIsBetter: true }),
   v("cpv", "Custo por venda", "custos", costPerSale, "money", { short: "Custo/venda", lowerIsBetter: true }),

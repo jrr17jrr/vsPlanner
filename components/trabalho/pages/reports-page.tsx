@@ -12,6 +12,7 @@ import type { CltModule } from "@/lib/clt/module";
 import type { CltCampaignResultEntry } from "@/types/database.types";
 import type { FollowerRecord } from "@/lib/clt/followers";
 import { sanitizeReportMetrics } from "@/lib/clt/report-metrics";
+import type { AdRateRow } from "@/lib/clt/video-rates";
 
 /**
  * Relatórios (PDF) do módulo. Empresas, campanhas, resultados, movimentações
@@ -49,7 +50,15 @@ export async function CltReportsPage({ module }: { module: CltModule }) {
   const note = merged.crossMonthPeriods ? " Resultados importados por período aparecem no mês em que o período termina." : "";
   // Início real de cada resultado importado por período: o intervalo de dias não rateia períodos que cruzam a borda.
   const reportResults = merged.results.map(r => ({ ...r, period_start: importedPeriodStart(r) }));
+  // Taxas de Gancho/Retenção informadas (migration 20261108100000) — por anúncio; sem a migration, o bloco fica vazio.
+  const rateRows = campaignIds.length
+    ? await db.from("clt_ad_period_metrics").select("creative_id,campaign_id,period_start,period_end,hook_rate,hold_rate").eq("user_id", user.id).in("campaign_id", campaignIds).or("hook_rate.not.is.null,hold_rate.not.is.null")
+    : { data: [], error: null };
+  const rateData = (rateRows.error ? [] : rateRows.data || []) as AdRateRow[];
+  const rateAdIds = [...new Set(rateData.map(r => r.creative_id))];
+  const rateAds = rateAdIds.length ? await db.from("clt_ad_creatives").select("id,name").eq("user_id", user.id).in("id", rateAdIds) : { data: [], error: null };
+  const adNames = Object.fromEntries(((rateAds.data || []) as { id: string; name: string }[]).map(a => [a.id, a.name]));
   const companies = scope.companies.filter(c => c.is_active).map(c => ({ id: c.id, name: c.name, current_ad_balance: c.current_ad_balance }));
   const title = module === "mkt" ? "Relatórios MKT" : "Relatórios CLT";
-  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e período (mês, intervalo de dias, intervalo de meses ou ano), registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={reportResults} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} preferences={preferences} preferencesAvailable={!prefs.error} /></div>;
+  return <div className="space-y-5"><PageHeader title={title} description={"Selecione empresas e período (mês, intervalo de dias, intervalo de meses ou ano), registre movimentações e gere um PDF com resultados reais." + note} /><ModulePendingNotice module={module} ready={scope.ready} /><CltReportClient companies={companies} campaigns={campaigns.data || []} results={reportResults} movements={(movements.data || []) as { company_id: string; movement_date: string; kind: string; amount: number }[]} movementError={movementError} comparisons={(comparisons.data || []) as { company_id: string; old_campaign_ids: string[]; new_campaign_ids: string[] }[]} messaging={messaging} followers={(followers.error ? [] : followers.data || []) as FollowerRecord[]} preferences={preferences} preferencesAvailable={!prefs.error} adRates={rateData} adNames={adNames} /></div>;
 }

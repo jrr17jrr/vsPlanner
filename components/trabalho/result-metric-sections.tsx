@@ -2,6 +2,7 @@
 
 import { CollapsibleSection } from "@/components/trabalho/company/collapsible-section";
 import { levelCards, type LevelCard, type LevelTotals } from "@/lib/clt/result-metrics";
+import { fmtRate, RATE_KEYS, RATE_SHORT, type LatestRate, type RateKey } from "@/lib/clt/video-rates";
 
 export type CardSection = { id: string; title: string; cards: LevelCard[]; defaultOpen?: boolean; note?: string };
 
@@ -30,13 +31,28 @@ export function MetricCardSections({ sections }: { sections: CardSection[] }) {
 export const ENGAGEMENT_NOTE = "Novos seguidores atribuídos aos anúncios (Meta Ads) — não é o total de seguidores do Instagram. Cliques no link não contam como conversas.";
 export const COSTS_NOTE = "CPC = investimento ÷ cliques no link · CTR = cliques ÷ impressões · CPM = investimento ÷ impressões × 1000. Só entram registros que informaram os dois valores; sem base suficiente aparece “—”.";
 
-/** Totais de anúncio/conjunto/campanha em Principais (aberta), Engajamento, Vídeo e Custos e taxas. */
-export function LevelMetricSections({ t }: { t: LevelTotals }) {
+export const RATES_NOTE = "Taxa de Gancho e Taxa de Retenção são informadas (Meta Ads), salvas exatamente como digitadas e nunca calculadas nem somadas. No anúncio, vale a do registro mais recente.";
+export const RATES_AGG_NOTE = "Taxa de Gancho e Taxa de Retenção são informadas por anúncio e não são somadas nem viram média — veja cada anúncio.";
+
+/** Cards das taxas informadas de UM anúncio (registro mais recente de cada uma). */
+export function rateCards(rates: Record<RateKey, LatestRate>): LevelCard[] {
+  return RATE_KEYS.map((k) => {
+    const r = rates[k];
+    const when = r ? ` (${r.start === r.end ? r.end.split("-").reverse().join("/") : `${r.start.split("-").reverse().join("/")} a ${r.end.split("-").reverse().join("/")}`})` : "";
+    return { key: k, label: RATE_SHORT[k] + when, value: r ? fmtRate(r.value) : "não informado", muted: !r };
+  });
+}
+
+/**
+ * Totais de anúncio/conjunto/campanha em Principais (aberta), Engajamento, Vídeo e Custos e taxas.
+ * `rates`: só na tela do ANÚNCIO (taxas informadas); nos agregados, só a observação.
+ */
+export function LevelMetricSections({ t, rates }: { t: LevelTotals; rates?: Record<RateKey, LatestRate> }) {
   const c = levelCards(t);
   return <MetricCardSections sections={[
     { id: "principal", title: "Resultados principais", cards: c.principal, defaultOpen: true },
     { id: "engajamento", title: "Engajamento", cards: c.engajamento, note: ENGAGEMENT_NOTE },
-    { id: "video", title: "Vídeo", cards: c.video },
+    { id: "video", title: "Vídeo", cards: rates ? [...c.video, ...rateCards(rates)] : c.video, note: rates ? RATES_NOTE : RATES_AGG_NOTE },
     { id: "custos", title: "Custos e taxas (CPC, CTR, CPM)", cards: c.custos, note: COSTS_NOTE },
   ]} />;
 }

@@ -1,5 +1,6 @@
 import type { CltAdLevelResult } from "@/types/database.types";
 import { EXTRA_METRIC_KEYS, type ExtraMetricKey } from "@/lib/clt/result-metrics";
+import { RATE_KEYS, type RateKey } from "@/lib/clt/video-rates";
 
 /**
  * Métricas importadas por anúncio e período (`clt_ad_period_metrics`)
@@ -42,6 +43,9 @@ export type PeriodMetricFullRow = {
   video_plays_3s?: number | null;
   video_p75?: number | null;
   video_p100?: number | null;
+  /** Taxas informadas (%) — migration 20261108100000. Nunca somadas. */
+  hook_rate?: number | string | null;
+  hold_rate?: number | string | null;
   /** 'import' (padrão) ou 'manual_update' ("Atualizar resultados"). */
   source?: string | null;
 };
@@ -49,7 +53,7 @@ export type PeriodMetricFullRow = {
 /** Campos de `CltAdLevelResult` que o período nunca traz (sempre "não informado"). */
 const NOT_IMPORTED = ["profile_visits", "appointments"] as const;
 
-export type AdLevelRow = CltAdLevelResult & Partial<Record<ExtraMetricKey, number>> & {
+export type AdLevelRow = CltAdLevelResult & Partial<Record<ExtraMetricKey | RateKey, number>> & {
   /** Presentes só nas linhas por período (importadas ou atualizações manuais). */
   period_start?: string;
   period_end?: string;
@@ -75,7 +79,7 @@ const num = (v: number | string | null | undefined) => (v === null || v === unde
 const day = (d: string) => String(d).slice(0, 10);
 
 export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
-  const fields: Array<[keyof CltAdLevelResult | ExtraMetricKey, number | null]> = [
+  const fields: Array<[keyof CltAdLevelResult | ExtraMetricKey | RateKey, number | null]> = [
     ["spent_amount", num(m.spend)],
     ["messages", num(m.conversations)],
     ["sales", num(m.sales)],
@@ -88,6 +92,8 @@ export function periodRowToLevel(m: PeriodMetricFullRow): AdLevelRow {
     ["thruplays", num(m.thruplays)],
     ["engagements", num(m.engagements)],
     ...EXTRA_METRIC_KEYS.map((k) => [k, num(m[k])] as [ExtraMetricKey, number | null]),
+    // Taxas (%) informadas: só seguem junto com a linha; nenhum total as soma.
+    ...RATE_KEYS.map((k) => [k, num(m[k])] as [RateKey, number | null]),
   ];
   const row = {
     id: `period:${m.id}`,

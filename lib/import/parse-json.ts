@@ -1,4 +1,5 @@
 import { normalizeObjective } from "@/lib/clt/history";
+import { parseRate } from "@/lib/clt/video-rates";
 import { parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 import {
   EXTRA_IMPORT_KEYS,
@@ -67,6 +68,8 @@ const EXTRA_ALIASES: Record<ExtraImportKey, string[]> = {
   thruplays: ["thruplays", "thruplay"],
   video_p75: ["video_p75", "video_p75_watched", "visualizacoes_75"],
   video_p100: ["video_p100", "video_p100_watched", "visualizacoes_100"],
+  hook_rate: ["hook_rate", "taxa_de_gancho", "taxa_gancho", "hookRate"],
+  hold_rate: ["hold_rate", "taxa_de_retencao", "taxa_retencao", "holdRate"],
 };
 
 function readExtraMetrics(source: Obj | null, path: string, problems: ParseProblem[]): ExtraMetrics {
@@ -75,8 +78,9 @@ function readExtraMetrics(source: Obj | null, path: string, problems: ParseProbl
   for (const key of EXTRA_IMPORT_KEYS) {
     const raw = pick(source, EXTRA_ALIASES[key]);
     if (raw === undefined) continue;
-    const value = parseBrInteger(raw);
-    if (value === undefined) problems.push({ path: `${path}.${key}`, message: `Valor inválido: ${JSON.stringify(raw)}` });
+    const isRate = key === "hook_rate" || key === "hold_rate";
+    const value = isRate ? parseRate(raw) : parseBrInteger(raw);
+    if (value === undefined) problems.push({ path: `${path}.${key}`, message: isRate ? `Percentual inválido (0 a 100, até 2 casas): ${JSON.stringify(raw)}` : `Valor inválido: ${JSON.stringify(raw)}` });
     else out[key] = value;
   }
   return out;

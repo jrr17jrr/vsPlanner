@@ -9,7 +9,10 @@ import { validateImport, type ImportPreview, type MetricChange, type PeriodTarge
 import { informedColumns, planRowChanges, resolvePeriodTarget, type PeriodRow } from "@/lib/import/period-target";
 import { BASE_TO_AD_KEY, EXTRA_IMPORT_KEYS, EXTRA_IMPORT_LABEL, METRIC_KEYS, hasExtraMetrics, type ImportBundle } from "@/lib/import/types";
 import { AD_METRICS, type AdMetricKey } from "@/lib/clt/ad-result-update";
-import { AD_RESULTS_MIGRATION_EXTRA, prepareAdResultUpdate, type PreparedAdUpdate } from "@/lib/supabase/clt-ad-results-core";
+import { AD_RATES_MIGRATION, AD_RESULTS_MIGRATION_EXTRA, prepareAdResultUpdate, type PreparedAdUpdate } from "@/lib/supabase/clt-ad-results-core";
+
+/** Coluna ausente no banco: qual migration falta (taxas → 20261108100000; engajamento/vídeo → 20261106100000). */
+const migrationHint = (cols: Record<string, unknown>) => ("hook_rate" in cols || "hold_rate" in cols ? `${AD_RATES_MIGRATION} ${AD_RESULTS_MIGRATION_EXTRA}` : AD_RESULTS_MIGRATION_EXTRA);
 import { buildImportPayload } from "@/lib/import/plan";
 import { buildSnapshot } from "@/lib/import/snapshot";
 import { assertCompanyInModule } from "@/lib/supabase/clt-scope";
@@ -223,7 +226,7 @@ async function saveExtraMetrics(db: SupabaseClient, input: Input, bundle: Import
     if (!ad.existingId || !hasExtraMetrics(ad.extraMetrics)) continue;
     const values = Object.fromEntries(Object.entries(ad.extraMetrics!).filter(([, v]) => v !== null && v !== undefined));
     const { error } = await db.from("clt_ad_period_metrics").update(values).eq("creative_id", ad.existingId).eq("period_start", period.start).eq("period_end", period.end);
-    if (error) return ` Engajamento/vídeo não foram gravados: ${isMissingSchema(error.code) ? AD_RESULTS_MIGRATION_EXTRA : error.message}`;
+    if (error) return ` Engajamento/vídeo não foram gravados: ${isMissingSchema(error.code) ? migrationHint(values) : error.message}`;
   }
   return "";
 }
@@ -274,7 +277,7 @@ export async function confirmSmartImportAction(input: Input & { confirmed: strin
           : await db.from("clt_ad_period_metrics").insert(op.row).select("id");
         const failed = res.error ?? (op.kind === "update" && !res.data?.length ? { message: "registro não encontrado (recarregue e valide de novo)" } : null);
         if (failed) {
-          const reason = "code" in failed && isMissingSchema(String(failed.code)) ? AD_RESULTS_MIGRATION_EXTRA : failed.message;
+          const reason = "code" in failed && isMissingSchema(String(failed.code)) ? migrationHint(op.kind === "update" ? op.values : op.row) : failed.message;
           return { error: done ? `${done} registro(s) atualizado(s); "${op.label}" falhou e os seguintes não foram gravados: ${reason}` : `Nada foi gravado: ${reason}` };
         }
         done++;

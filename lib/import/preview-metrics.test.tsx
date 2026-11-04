@@ -84,6 +84,26 @@ describe("painel de atualização do registro", () => {
   });
 });
 
+describe("Taxa de Gancho e Taxa de Retenção na importação", () => {
+  it("texto e JSON reconhecem as taxas com decimais; 'Retenção:' dos públicos continua sendo dias", () => {
+    const t = parseImportInput(`Campanha: X\nConjunto: S\nAnúncio: A\nTaxa de Gancho (%): 35,75\nHold rate: 12.4%`);
+    if (!t.ok) throw new Error(t.error);
+    expect(t.bundle.campaigns[0].adSets[0].ads[0].extraMetrics).toMatchObject({ hook_rate: 35.75, hold_rate: 12.4 });
+    const aud = parseImportInput(`Público personalizado: Engajou 180D\nRetenção: 180 dias`);
+    if (!aud.ok) throw new Error(aud.error);
+    expect(aud.bundle.audiences[0].retentionDays).toBe(180);
+    const j = parseImportInput(JSON.stringify({ format: "vsplanner_v1", campaigns: [{ name: "X", ad_sets: [{ name: "S", ads: [{ name: "A", metrics: { hook_rate: "35,75%", hold_rate: 12.4 } }] }] }] }));
+    if (!j.ok) throw new Error(j.error);
+    expect(j.bundle.campaigns[0].adSets[0].ads[0].extraMetrics).toMatchObject({ hook_rate: 35.75, hold_rate: 12.4 });
+  });
+  it("prévia mostra as taxas como percentual informado", () => {
+    const p = preview(snap(), `${TEXT}\nTaxa de Gancho: 35,75%\nTaxa de Retenção: 12,4%`);
+    const t = text(renderToStaticMarkup(<MetricsLine ad={p.campaigns[0].adSets[0].ads[0]} />));
+    expect(t).toContain("Taxa de Gancho (%) 35,75%");
+    expect(t).toContain("Taxa de Retenção (%) 12,40%");
+  });
+});
+
 describe("sem campanha duplicada por diferença de nome", () => {
   it("nome que difere só em pontuação/espaços → mesma campanha (atualização, nada criado)", () => {
     const p = preview(snap("AIV - Engajamento - video 14/10/26"));

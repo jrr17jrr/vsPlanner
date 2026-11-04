@@ -207,6 +207,48 @@ describe("Central de Importação — atualização parcial (AIV)", () => {
     expect(tables.clt_ad_period_metrics).toHaveLength(1);
   });
 
+  it("taxas com período: prévia atual → novo e grava só as duas colunas, exatamente como informadas", async () => {
+    tables.clt_ad_period_metrics[0].hook_rate = 30.1;
+    tables.clt_ad_period_metrics[0].hold_rate = null;
+    const text = `Campanha: AIV | Engajamento | video 14/10/26\nAnúncio: AIV | Vídeo local | Engajamento\nTaxa de Gancho: 35,75%\nTaxa de Retenção (%): 12,4`;
+    const period = { start: "2026-10-14", end: "2026-10-31" };
+    const p = await previewSmartImportAction({ companyId: "co", content: text, period });
+    expect(p.preview!.canImport).toBe(true);
+    expect(p.preview!.periodTargets![0].changes).toEqual([
+      { key: "hook_rate", label: "Taxa de Gancho (%)", before: 30.1, after: 35.75 },
+      { key: "hold_rate", label: "Taxa de Retenção (%)", before: null, after: 12.4 },
+    ]);
+    const r = await confirmSmartImportAction({ companyId: "co", content: text, period, confirmed: [] });
+    expect(r.error).toBeUndefined();
+    const w = writes.filter((x) => x.table === "clt_ad_period_metrics");
+    expect(Object.keys(w[0].payload!).sort()).toEqual(["hold_rate", "hook_rate", "updated_at"]);
+    expect(tables.clt_ad_period_metrics).toHaveLength(1);
+    expect(tables.clt_ad_period_metrics[0]).toMatchObject({ hook_rate: 35.75, hold_rate: 12.4, spend: 150, impressions: 40000, reach: 21000, engagements: 2000 });
+  });
+
+  it("taxas sem período (atualização parcial): substitui, não soma, e não mexe nas outras métricas", async () => {
+    tables.clt_ad_period_metrics[0].hook_rate = 30;
+    const text = `Campanha: AIV | Engajamento | video 14/10/26\nAnúncio: AIV | Vídeo local | Engajamento\nTaxa de Gancho: 35,75%`;
+    const p = await previewSmartImportAction({ companyId: "co", content: text });
+    expect(p.preview!.mode).toBe("metrics_update");
+    expect(p.preview!.metricChanges![0].changes).toEqual([{ key: "hook_rate", label: "Taxa de Gancho (%)", before: 30, after: 35.75 }]);
+    const r = await confirmSmartImportAction({ companyId: "co", content: text, confirmed: [] });
+    expect(r.error).toBeUndefined();
+    const args = rpcCalls[0].args;
+    expect(args.p_values).toMatchObject({ hook_rate: 35.75, spend: null, impressions: null, reach: null, engagements: null });
+    expect(args.p_delta).toEqual({ hook_rate: 35.75 });
+  });
+
+  it("taxa inválida no texto (135%): erro na prévia, nada gravado", async () => {
+    const text = `Campanha: AIV | Engajamento | video 14/10/26\nAnúncio: AIV | Vídeo local | Engajamento\nTaxa de Gancho: 135%`;
+    const p = await previewSmartImportAction({ companyId: "co", content: text });
+    expect(p.preview!.canImport).toBe(false);
+    expect(p.preview!.issues.some((i) => /percentual entre 0 e 100/.test(i.message))).toBe(true);
+    await confirmSmartImportAction({ companyId: "co", content: text, confirmed: [] });
+    expect(writes).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+  });
+
   it("anúncio ambíguo: bloqueado antes de qualquer gravação", async () => {
     tables.clt_ad_sets.push({ id: "set-b", campaign_id: "cmp-1", user_id: USER, name: "Remarketing", meta_adset_id: null });
     tables.clt_ad_creatives.push({ id: "ad-9", ad_set_id: "set-b", user_id: USER, name: "AIV | Vídeo local | Engajamento", meta_ad_id: null });

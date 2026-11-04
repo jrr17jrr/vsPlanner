@@ -1,5 +1,6 @@
 import { mapAudienceType, inferAdFormat } from "./parse-json";
-import { EXTRA_IMPORT_KEYS, emptyMetrics, type ExtraImportKey, type ImportAd, type ImportAdSet, type ImportAudience, type ImportBundle, type ImportCampaign, type MetricKey, type ParseProblem } from "./types";
+import { parseRate } from "@/lib/clt/video-rates";
+import { EXTRA_IMPORT_KEYS, RATE_IMPORT_KEYS, emptyMetrics, type ExtraImportKey, type ImportAd, type ImportAdSet, type ImportAudience, type ImportBundle, type ImportCampaign, type MetricKey, type ParseProblem } from "./types";
 import { normalizeKey, parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 
 /**
@@ -71,6 +72,9 @@ const FIELD_ALIASES: Array<[Field, string[]]> = [
   ["thruplays", ["thruplays", "thruplay", "thru plays", "thru play"]],
   ["video_p75", ["visualizacoes de 75%", "visualizacoes 75%", "reproducoes de 75%", "reproducoes do video ate 75%", "video assistido ate 75%", "visualizacoes de 75% do video", "75%"]],
   ["video_p100", ["visualizacoes de 100%", "visualizacoes 100%", "reproducoes de 100%", "reproducoes do video ate 100%", "video assistido ate 100%", "visualizacoes de 100% do video", "100%"]],
+  // Sem apelidos curtos: "Retenção:" sozinho é a retenção (dias) dos públicos.
+  ["hook_rate", ["taxa de gancho", "taxa de gancho (%)", "taxa gancho", "hook rate", "hook rate (%)"]],
+  ["hold_rate", ["taxa de retencao", "taxa de retencao (%)", "taxa retencao", "hold rate", "hold rate (%)"]],
   ["savedPosts", ["publicacoes guardadas", "publicacoes salvas", "salvamentos", "salvamentos da publicacao", "posts salvos"]],
 ];
 const FIELD_BY_ALIAS = new Map<string, Field>();
@@ -152,7 +156,13 @@ export function parseStructuredText(text: string): ImportBundle {
     }
     if (EXTRA_FIELDS.has(field)) {
       const key = field as ExtraImportKey;
-      const v = num(true);
+      let v: number | null;
+      if (RATE_IMPORT_KEYS.has(key)) {
+        // Percentual informado (ex.: "35,75%"): salvo exatamente como veio.
+        const r = parseRate(value);
+        if (r === undefined) problems.push({ path: where, message: `"${m[1].trim()}": informe um percentual entre 0 e 100, com até 2 casas decimais (ex.: 35,75%). Recebido: ${value}` });
+        v = r ?? null;
+      } else v = num(true);
       if (ad) { (ad.extraMetrics ??= {})[key] = v; return; }
       problems.push({ path: where, ...(campaign ? { level: "warning" as const, message: `"${m[1].trim()}" informado fora de um anúncio — ignorado. Informe depois de "Anúncio:".` } : { message: `"${m[1].trim()}" precisa vir depois de um "Anúncio:".` }) });
       return;

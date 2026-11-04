@@ -13,6 +13,7 @@ import { confirmSmartImportAction, previewSmartImportAction } from "@/lib/supaba
 import type { ImportIssue, ImportPreview, PreviewAd, PreviewCampaign } from "@/lib/import/validate";
 import { MONEY_METRICS, type Metrics } from "@/lib/import/types";
 import { columnLabel, informedColumns } from "@/lib/import/period-target";
+import { fmtRate, isRateKey } from "@/lib/clt/video-rates";
 
 type Company = { id: string; name: string };
 type Mode = "json" | "text";
@@ -106,7 +107,7 @@ function InformedFallback({ preview }: { preview: ImportPreview }) {
   );
 }
 
-const fmtChange = (key: string, v: number | null) => v === null ? "não informado" : key === "spend" || key === "revenue" ? money(v) : v.toLocaleString("pt-BR");
+const fmtChange = (key: string, v: number | null) => v === null ? "não informado" : isRateKey(key) ? fmtRate(v) : key === "spend" || key === "revenue" ? money(v) : v.toLocaleString("pt-BR");
 
 /** Prévia da atualização parcial: o que muda em cada anúncio, e só isso. */
 function MetricsUpdatePanel({ preview }: { preview: ImportPreview }) {
@@ -115,7 +116,7 @@ function MetricsUpdatePanel({ preview }: { preview: ImportPreview }) {
     <section className="space-y-3 rounded-lg border border-sky-500/40 bg-sky-500/5 p-3" aria-label="Atualização de métricas">
       <div>
         <h3 className="text-sm font-semibold">Atualização de métricas de anúncios existentes</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">Os valores do texto são os novos <strong>totais</strong> do anúncio; é gravada só a diferença, como no “Atualizar resultados”, e fica no histórico do anúncio.</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Os valores do texto são os novos <strong>totais</strong> do anúncio; é gravada só a diferença, como no “Atualizar resultados”, e fica no histórico do anúncio. Taxa de Gancho e Taxa de Retenção são percentuais informados: substituem o valor atual (não somam).</p>
       </div>
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
         <dt className="text-muted-foreground">Empresa identificada</dt><dd className="font-medium">{preview.companyName}</dd>
@@ -376,7 +377,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
             {mode === "text" && (
               <details className="text-xs text-muted-foreground">
                 <summary className="cursor-pointer py-2">Campos reconhecidos</summary>
-                <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Início, Fim, Status · Conjunto, ID do conjunto, Público, Chave do público · Anúncio, ID do anúncio, Formato · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques no link, Leads · Interações, Reações à publicação, Comentários, Compartilhamentos, Novos seguidores, Visualizações, Reproduções de 3 segundos, ThruPlays, Visualizações de 75% e de 100% · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero).</p>
+                <p>Empresa, Período · Público salvo / personalizado / semelhante, Tipo, Chave, Origem, Porcentagem, Retenção, Cidade, Raio, Idade, Interesses, Tamanho · Campanha, ID da campanha, Objetivo, Orçamento diário, Início, Fim, Status · Conjunto, ID do conjunto, Público, Chave do público · Anúncio, ID do anúncio, Formato · Investimento, Conversas, Vendas, Faturamento, Impressões, Alcance, Cliques no link, Leads · Interações, Reações à publicação, Comentários, Compartilhamentos, Novos seguidores, Visualizações, Reproduções de 3 segundos, ThruPlays, Visualizações de 75% e de 100% · Taxa de Gancho (%) e Taxa de Retenção (%) — percentual do Meta Ads, ex.: 35,75% · Observações. Use “---” para separar blocos. “—” ou vazio = não informado (não vira zero).</p>
                 <p className="mt-1">Só atualizar métricas de um anúncio já cadastrado: informe Empresa, Campanha, Anúncio e as métricas — sem Período e sem Conjunto (o conjunto é identificado pelo anúncio). Só as métricas informadas mudam.</p>
                 <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => { setContent(textExample); invalidate(); }}>Inserir exemplo</Button>
               </details>

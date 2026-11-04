@@ -32,13 +32,16 @@ export const emptyMetrics = (): Metrics => ({ spend: null, conversations: null, 
  * `clt_ad_period_metrics` usadas pelo formulário "Atualizar resultados"
  * (lib/clt/ad-result-update.ts). Nenhuma coluna nova.
  */
-export const EXTRA_IMPORT_KEYS = ["engagements", "reactions", "comments", "shares", "new_followers", "views", "video_plays_3s", "thruplays", "video_p75", "video_p100"] as const;
+export const EXTRA_IMPORT_KEYS = ["engagements", "reactions", "comments", "shares", "new_followers", "views", "video_plays_3s", "thruplays", "video_p75", "video_p100", "hook_rate", "hold_rate"] as const;
+/** Percentuais informados (Taxa de Gancho/Retenção): decimais 0–100, nunca somados nem calculados. */
+export const RATE_IMPORT_KEYS = new Set<string>(["hook_rate", "hold_rate"]);
 export type ExtraImportKey = (typeof EXTRA_IMPORT_KEYS)[number];
 export type ExtraMetrics = Partial<Record<ExtraImportKey, number | null>>;
 export const EXTRA_IMPORT_LABEL: Record<ExtraImportKey, string> = {
   engagements: "Interações", reactions: "Reações à publicação", comments: "Comentários", shares: "Compartilhamentos",
   new_followers: "Novos seguidores", views: "Visualizações", video_plays_3s: "Reproduções de 3 segundos", thruplays: "ThruPlays",
   video_p75: "Visualizações de 75%", video_p100: "Visualizações de 100%",
+  hook_rate: "Taxa de Gancho (%)", hold_rate: "Taxa de Retenção (%)",
 };
 /** Métrica base do importador → chave do "Atualizar resultados". */
 export const BASE_TO_AD_KEY: Record<MetricKey, string> = {

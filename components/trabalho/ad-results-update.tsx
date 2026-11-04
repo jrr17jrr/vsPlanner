@@ -11,6 +11,7 @@ import { moveCltAdResultUpdatePeriodAction, updateCltAdResultsAction } from "@/l
 import { AD_METRICS, currentTotals, isExtraMetric, monthReference, primaryMetrics, type AdMetricKey, type CountedRow, type Totals } from "@/lib/clt/ad-result-update";
 import type { ResultType } from "@/lib/clt/history";
 import { SECTION_TITLES, type MetricSection } from "@/lib/clt/result-metrics";
+import { fmtRate, isRateKey, parseRate } from "@/lib/clt/video-rates";
 import { CollapsibleSection } from "@/components/trabalho/company/collapsible-section";
 
 export type AdResultUpdate = {
@@ -69,12 +70,13 @@ export function ReferencePeriodFields({ onChange, initial, idPrefix }: { onChang
   </div>;
 }
 const isMoney = (k: AdMetricKey) => k === "spend" || k === "revenue";
-const show = (k: AdMetricKey, v: number | null | undefined) => (v === null || v === undefined ? "não informado" : isMoney(k) ? money(v) : v.toLocaleString("pt-BR"));
+const show = (k: AdMetricKey, v: number | null | undefined) => (v === null || v === undefined ? "não informado" : isRateKey(k) ? fmtRate(v) : isMoney(k) ? money(v) : v.toLocaleString("pt-BR"));
 /** Valor inicial do campo (pt-BR, sem símbolo). */
-const toField = (k: AdMetricKey, v: number | null) => (v === null ? "" : isMoney(k) ? v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }) : String(v));
+const toField = (k: AdMetricKey, v: number | null) => (v === null ? "" : isMoney(k) || isRateKey(k) ? v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }) : String(v));
 
-/** "1.234,56" / "1234.56" / "150" → número; contagens aceitam "50.100". Vazio = null (não informado). */
+/** "1.234,56" / "1234.56" / "150" → número; contagens aceitam "50.100"; taxas aceitam "35,75" ou "35,75%". Vazio = null (não informado). */
 export function parseMetricInput(k: AdMetricKey, raw: string): number | null {
+  if (isRateKey(k)) { const r = parseRate(raw); return r === undefined ? NaN : r; }
   const s = raw.trim().replace(/\s|R\$/g, "");
   if (!s) return null;
   if (!isMoney(k)) { const t = s.replace(/\./g, ""); return /^\d+$/.test(t) ? Number(t) : NaN; }
@@ -119,10 +121,10 @@ export function AdResultsFields({ adId, totals, type, fields, setField, pending 
     const locked = !extrasAvailable && isExtraMetric(k);
     return <div key={k} className="flex min-w-0 flex-col gap-1">
       <Label htmlFor={`ad-${adId}-${k}`} className="text-xs">{m.label}</Label>
-      <Input id={`ad-${adId}-${k}`} inputMode={isMoney(k) ? "decimal" : "numeric"} placeholder="Não informado" value={fields[k]} disabled={pending || locked}
+      <Input id={`ad-${adId}-${k}`} inputMode={isMoney(k) || isRateKey(k) ? "decimal" : "numeric"} placeholder={isRateKey(k) ? "Ex.: 35,75" : "Não informado"} value={fields[k]} disabled={pending || locked}
         aria-invalid={Number.isNaN(p) || undefined} onChange={(e) => setField(k, e.target.value)} />
       <p className={`text-[11px] ${Number.isNaN(p) ? "text-destructive" : changedOf(k) ? "text-primary" : "text-muted-foreground"}`}>
-        {Number.isNaN(p) ? "Número inválido" : changedOf(k) ? `Atual: ${show(k, totals[k])} → ${show(k, p)}` : `Atual: ${show(k, totals[k])}`}
+        {Number.isNaN(p) ? (isRateKey(k) ? "Percentual entre 0 e 100, até 2 casas (ex.: 35,75)" : "Número inválido") : changedOf(k) ? `Atual: ${show(k, totals[k])} → ${show(k, p)}` : `Atual: ${show(k, totals[k])}`}
       </p>
     </div>;
   };
@@ -136,6 +138,7 @@ export function AdResultsFields({ adId, totals, type, fields, setField, pending 
     return <CollapsibleSection key={s} compact className="shadow-none" title={SECTION_TITLES[s]} defaultOpen={s === "principal"} summary={<span className={invalid ? "text-destructive" : changed ? "text-primary" : undefined}>{summary}</span>}>
       <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">{keys.map(field)}</div>
       {s === "engajamento" && <p className="mt-2 text-[11px] text-muted-foreground">Novos seguidores atribuídos aos anúncios (Meta Ads) — não é o total de seguidores do Instagram. Cliques no link não contam como conversas.</p>}
+      {s === "video" && <p className="mt-2 text-[11px] text-muted-foreground">Taxa de Gancho e Taxa de Retenção: informe o percentual como aparece no Meta Ads (ex.: 35,75). Ele é salvo exatamente assim — nada é calculado, e o novo valor substitui o anterior (não soma).</p>}
     </CollapsibleSection>;
   })}</div>;
 }
@@ -223,6 +226,8 @@ export function AdResultsHistory({ updates, available, changes = [], editable = 
       </div>
       <ul className="mt-1 space-y-0.5">{AD_METRICS.filter((m) => u.updated[m.key] !== undefined).map((m) => {
         const d = u.delta[m.key] ?? 0;
+        // Taxa: substituída (o histórico guarda o valor novo, não uma diferença).
+        if (m.rate) return <li key={m.key} className="break-words">{m.label.replace(" (%)", "")}: {show(m.key, u.previous[m.key] ?? null)} → <b>{show(m.key, u.updated[m.key])}</b> <span className="text-muted-foreground">(informada)</span></li>;
         return <li key={m.key} className="break-words">{m.label.replace(" (R$)", "")}: {show(m.key, u.previous[m.key] ?? null)} → <b>{show(m.key, u.updated[m.key])}</b> <span className={d > 0 ? "text-success" : d < 0 ? "text-destructive" : "text-muted-foreground"}>({d > 0 ? "+" : d < 0 ? "−" : ""}{isMoney(m.key) ? money(Math.abs(d)) : Math.abs(d).toLocaleString("pt-BR")})</span></li>;
       })}</ul>
       {fixes.length > 0 && <ul className="mt-2 space-y-0.5 border-t pt-2 text-[11px] text-muted-foreground">{fixes.map((c) => <li key={c.id}>Período corrigido de {describeReference({ start: c.old_start, end: c.old_end })} para <b className="text-foreground">{describeReference({ start: c.new_start, end: c.new_end })}</b> em {when(c.created_at)}{c.changed_by_name ? ` por ${c.changed_by_name}` : ""}.</li>)}</ul>}
