@@ -60,6 +60,7 @@ import type {
   FinancialKind,
   FinancialOrigin,
   FinancialPayment,
+  FinancialPersonalLink,
   FinancialReferenceType,
   Service,
 } from "@/types/database.types";
@@ -122,9 +123,11 @@ export function FinanceiroPageClient({
   clients,
   clientServices,
   services,
+  personalLinks = [],
   permissions,
   initialTab = "visao",
 }: {
+  personalLinks?: FinancialPersonalLink[];
   initialTab?: Tab;
   scope: FinancialScope;
   charges: FinancialCharge[];
@@ -401,7 +404,7 @@ export function FinanceiroPageClient({
       )}
 
       {tab === "movimentacoes" && (
-        <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} />
+        <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} personalLinks={personalLinks} />
       )}
       {tab === "a_receber" && (
         <ChargesList {...listProps} kind="entrada" onCreate={() => setDialog({ kind: "entrada", pending: true })} selectedMonth={selectedMonth} />

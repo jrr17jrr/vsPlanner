@@ -364,6 +364,37 @@ export type FinancialPayment = {
 };
 
 /**
+ * Pagamento de despesa empresarial feito com dinheiro pessoal (migration
+ * 20261110100000). Escrito somente pelas funções do banco.
+ */
+export type FinancialPersonalLinkStatus = "ativo" | "estornado" | "desvinculado";
+export type FinancialPersonalLink = {
+  id: string;
+  business_space_id: string;
+  business_charge_id: string | null;
+  business_payment_id: string | null;
+  business_account_id_before: string | null;
+  personal_space_id: string;
+  personal_account_id: string | null;
+  personal_charge_id: string | null;
+  personal_payment_id: string | null;
+  link_mode: "novo" | "retroativo" | "existente";
+  amount: number;
+  payment_date: string;
+  description: string;
+  account_name: string;
+  status: FinancialPersonalLinkStatus;
+  created_by: string;
+  created_at: string;
+  reversed_by: string | null;
+  reversed_at: string | null;
+  reversal_note: string | null;
+};
+
+/** Conta do Financeiro Pessoal oferecida no Financeiro da empresa (com saldo atual). */
+export type PersonalAccountOption = { id: string; name: string; balance: number; initial_balance_date: string };
+
+/**
  * Módulos pessoais reais (migration 008) — Tarefas, Rotina, Trabalho/CLT,
  * Metas. RLS é `user_id = auth.uid()` direto (space Pessoal é sempre de
  * um usuário só, sem papéis/permissão por módulo).

@@ -137,3 +137,17 @@ export function initials(name: string): string {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+/**
+ * BRL para custos unitários: igual a `formatCurrency` (2 casas) a partir de
+ * R$ 0,01; abaixo disso mostra casas suficientes para não virar "R$ 0,00"
+ * (R$ 155,89 / 39.691 ThruPlays = 0,00393 → "R$ 0,004"). Só formata — o
+ * valor calculado não muda.
+ */
+export function formatMoneyPrecise(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs === 0 || abs >= 0.01) return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const decimals = Math.min(8, Math.max(3, -Math.floor(Math.log10(abs))));
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}

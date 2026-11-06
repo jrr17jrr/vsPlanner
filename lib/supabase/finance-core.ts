@@ -51,6 +51,9 @@ export function revalidateFinancialViews(scope: FinancialScope) {
   } else {
     revalidatePath("/visionario", "layout");
   }
+  // Pagamento da empresa pode ter débito/estorno no Financeiro Pessoal
+  // (migration 20261110100000) — o saldo pessoal precisa refletir na hora.
+  if (scope !== "pessoal") revalidatePath("/financeiro");
 }
 
 export type OriginSpec = {

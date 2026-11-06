@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoneyPrecise } from "@/lib/format";
 import { useId, useMemo, useState, useTransition, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, FileJson, Info, PenLine, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -19,7 +20,7 @@ import { LEVEL_LABEL, type InfoChange } from "@/lib/import/info-plan";
 type Company = { id: string; name: string };
 type Mode = "json" | "text";
 
-const money = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const money = (v: number) => formatMoneyPrecise(v);
 const fmtMetric = (key: keyof Metrics, v: number | null) => v === null ? "—" : MONEY_METRICS.has(key) ? money(v) : v.toLocaleString("pt-BR");
 const fmtDate = (d: string | null) => d ? d.slice(0, 10).split("-").reverse().join("/") : "—";
 

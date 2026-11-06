@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { createPartnerExpenseAction } from "@/lib/supabase/financial-actions";
 import { parseMoneyInput, todayKeySaoPaulo } from "@/lib/format";
 import type { FinancialAccount } from "@/types/database.types";
+import { formatCurrency } from "@/lib/format";
+import { usePersonalAccounts } from "@/components/visionario/financeiro/use-personal-accounts";
 
 export function PartnerExpenseForm({accounts}:{accounts:FinancialAccount[]}) {
  const router=useRouter();
@@ -17,6 +19,7 @@ export function PartnerExpenseForm({accounts}:{accounts:FinancialAccount[]}) {
  const [recordOnly,setRecordOnly]=useState(true);
  const [account,setAccount]=useState("");
  const [saving,setSaving]=useState(false);
+ const personal=usePersonalAccounts("visionario", !recordOnly && Number(parseMoneyInput(junior))>0);
  async function submit(e:React.FormEvent) {
    e.preventDefault();
    setSaving(true);
@@ -33,7 +36,7 @@ export function PartnerExpenseForm({accounts}:{accounts:FinancialAccount[]}) {
   <label className="block text-sm">Visionário Dev pagou<input value={empresa} onChange={e=>setEmpresa(e.target.value)} placeholder="0,00" className="mt-1 w-full rounded-md border bg-background p-2" /></label>
   <p className="text-xs text-muted-foreground">Soma das partes: R$ {((parseMoneyInput(junior)||0)+(parseMoneyInput(empresa)||0)).toFixed(2).replace(".",",")} de R$ {(parseMoneyInput(total)||0).toFixed(2).replace(".",",")}</p>
   <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={recordOnly} onChange={e=>setRecordOnly(e.target.checked)} /> Somente registrar, sem movimentar saldo</label>
-  {!recordOnly && Number(parseMoneyInput(junior))>0 && <label className="block text-sm">Conta para descontar a parte do Júnior<select value={account} onChange={e=>setAccount(e.target.value)} className="mt-1 w-full rounded-md border bg-background p-2"><option value="">Selecione uma conta</option>{accounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>}
+  {!recordOnly && Number(parseMoneyInput(junior))>0 && (personal.loading ? <p className="text-xs text-muted-foreground">Carregando contas pessoais…</p> : personal.allowed ? <label className="block text-sm">Conta pessoal do Ricardo Júnior (Financeiro Pessoal)<select value={account} onChange={e=>setAccount(e.target.value)} className="mt-1 w-full rounded-md border bg-background p-2"><option value="">Selecione uma conta</option>{personal.accounts.map(a=><option key={a.id} value={a.id}>{a.name} · saldo {formatCurrency(a.balance)}</option>)}</select></label> : <p className="text-xs text-warning">Só o Ricardo Júnior pode descontar a parte dele de uma conta pessoal. Marque “Somente registrar”.</p>)}
   {!recordOnly && Number(parseMoneyInput(empresa))>0 && <label className="block text-sm">Conta da Visionário Dev<select value={companyAccount} onChange={e=>setCompanyAccount(e.target.value)} className="mt-1 w-full rounded-md border bg-background p-2"><option value="">Selecione uma conta</option>{accounts.filter(a=>a.is_active).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>}
   <p className="text-xs text-muted-foreground">A despesa entra uma vez no financeiro da Visionário Dev. </p>
   <button type="submit" disabled={saving} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{saving?"Salvando...":"Registrar gasto"}</button>

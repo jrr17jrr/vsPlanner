@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoneyPrecise } from "@/lib/format";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,7 +19,7 @@ import {
 } from "@/lib/clt/history";
 import { setCltAdSetResultTypeAction } from "@/lib/supabase/clt-history-actions";
 
-const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const brl = (n: number) => formatMoneyPrecise(n);
 const int = (n: number) => n.toLocaleString("pt-BR");
 const dash = "—";
 const money = (n: number | null) => (n === null ? dash : brl(n));

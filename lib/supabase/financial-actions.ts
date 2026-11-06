@@ -13,6 +13,7 @@ import {
   revalidateFinancialViews,
   type Supa,
 } from "@/lib/supabase/finance-core";
+import { payChargeWithPersonalAccountCore } from "@/lib/supabase/finance-personal-core";
 import type { FinancialScope } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { FORMER_PARTNER_DEBT_DESCRIPTION } from "@/lib/financial-calc";
@@ -260,6 +261,11 @@ export type MovementFormInput = {
   accountId?: string;
   payerLabel?: "junior" | "guilherme";
   recordOnly?: boolean;
+  /**
+   * Pago pelo Ricardo Júnior descontando de uma conta do Financeiro
+   * PESSOAL (migration 20261110100000) — a empresa não movimenta conta.
+   */
+  personalAccountId?: string;
   /** Data real do pagamento quando `settled` (padrão: a própria data da movimentação). */
   paymentDate?: string;
 
@@ -321,7 +327,11 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
   }
 
   if (input.payerLabel && (scope !== "visionario" || input.kind !== "saida" || input.tipo !== "unico")) return { error: "Gasto dos sócios permitido somente em saída única do Visionário Dev." };
-  if (settled && !input.recordOnly && input.payerLabel !== "guilherme") {
+  const personalPayment = settled && !input.recordOnly && input.payerLabel === "junior" && !!input.personalAccountId && input.kind === "saida" && scope !== "pessoal";
+  if (settled && !input.recordOnly && input.payerLabel === "junior" && !personalPayment) {
+    return { error: "Escolha a conta pessoal de onde saiu o dinheiro ou desligue \"Descontar de uma conta\"." };
+  }
+  if (settled && !input.recordOnly && input.payerLabel !== "guilherme" && !personalPayment) {
     const accountError = await assertUsableAccount(supabase, input.accountId, space.id);
     if (accountError) return { error: accountError };
   }
@@ -350,6 +360,20 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
     notes: input.notes,
   });
   if (created.error || !created.charges) return { error: created.error ?? "Não foi possível criar a movimentação." };
+
+  if (settled && personalPayment) {
+    const first = created.charges[0];
+    const paid = await payChargeWithPersonalAccountCore(first.id, {
+      amount: Number(first.amount),
+      paymentDate: input.paymentDate && DATE_RE.test(input.paymentDate) ? input.paymentDate : input.dueDate,
+      paymentMethod: input.paymentMethod!,
+      personalAccountId: input.personalAccountId!,
+      settle: true,
+    });
+    revalidateFinancialViews(scope);
+    if (paid.error) return { error: `Despesa criada como pendente (nenhum saldo foi alterado), mas o pagamento falhou: ${paid.error}`, id: created.originId };
+    return { success: "Despesa paga e descontada da conta pessoal.", id: created.originId };
+  }
 
   if (settled) {
     // Único (ou 1ª competência de recorrente) já liquidado na criação.
@@ -387,6 +411,8 @@ export type RegisterPaymentInput = {
   accountId: string;
   payerLabel?: "junior" | "guilherme" | "empresa";
   recordOnly?: boolean;
+  /** Pago pelo Ricardo Júnior descontando de uma conta do Financeiro Pessoal. */
+  personalAccountId?: string;
   notes?: string;
   /**
    * true = este pagamento QUITA a cobrança mesmo com valor diferente do
@@ -419,7 +445,24 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
   const externalPartner = scope === "visionario" && charge.kind === "saida" && input.payerLabel === "guilherme";
   const noAccountMovement = externalPartner || input.recordOnly === true;
   if (input.payerLabel && scope !== "visionario") return { error: "Pagadores disponíveis apenas no Visionário Dev." };
-  if (!noAccountMovement) {
+  const juniorPaying = scope === "visionario" && charge.kind === "saida" && input.payerLabel === "junior";
+  if (juniorPaying && !input.recordOnly) {
+    // Dinheiro do Júnior sai do Financeiro PESSOAL dele — nunca de uma conta
+    // da empresa (senão o gasto contaria duas vezes). Atômico no banco.
+    if (!input.personalAccountId) return { error: "Escolha a conta pessoal de onde saiu o dinheiro ou desligue \"Descontar de uma conta\"." };
+    const paid = await payChargeWithPersonalAccountCore(chargeId, {
+      amount: input.amount,
+      paymentDate: input.paymentDate,
+      paymentMethod: input.paymentMethod,
+      personalAccountId: input.personalAccountId,
+      settle: input.settle,
+      notes: input.notes,
+    });
+    if (paid.error) return { error: paid.error };
+    revalidateFinancialViews(scope);
+    return { success: paid.success };
+  }
+  if (!noAccountMovement && !juniorPaying) {
     const accountError = await assertUsableAccount(supabase, input.accountId, space.id);
     if (accountError) return { error: accountError };
   }
@@ -912,7 +955,7 @@ export async function createPartnerExpenseAction(input: {
   if (error || !charge) return { error: "Despesa criada como pendente; não foi possível localizar a cobrança." };
   for (const [payer, amount] of [["junior",input.junior],["guilherme",input.guilherme],["empresa",input.empresa]] as const) {
     if (amount <= 0) continue;
-    const paid = await registerPaymentAction("visionario", charge.id, { amount, paymentDate: input.date, paymentMethod: "pix", accountId: payer === "junior" ? input.juniorAccountId ?? "" : payer === "empresa" ? input.companyAccountId ?? "" : "", payerLabel: payer, recordOnly: payer === "guilherme" || input.recordOnly, settle: false });
+    const paid = await registerPaymentAction("visionario", charge.id, { amount, paymentDate: input.date, paymentMethod: "pix", accountId: payer === "empresa" ? input.companyAccountId ?? "" : "", ...(payer === "junior" && input.juniorAccountId ? { personalAccountId: input.juniorAccountId } : {}), payerLabel: payer, recordOnly: payer === "guilherme" || input.recordOnly, settle: false });
     if (paid.error) return { error: "Despesa criada, mas um pagamento ficou pendente: " + paid.error };
   }
   revalidateFinancialViews("visionario");

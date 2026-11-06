@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoneyPrecise } from "@/lib/format";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -29,7 +30,7 @@ export type AdResultUpdate = {
 
 export type AdResultPeriodChange = { id: string; update_id: string; old_start: string; old_end: string; new_start: string; new_end: string; changed_by_name: string | null; created_at: string };
 
-const money = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const money = (n: number) => formatMoneyPrecise(n);
 const todaySP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 const dBR = (d: string) => d.slice(0, 10).split("-").reverse().join("/");
 const monthName = (m: string) => { const s = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(m + "-01T12:00:00Z")); return s.charAt(0).toUpperCase() + s.slice(1); };

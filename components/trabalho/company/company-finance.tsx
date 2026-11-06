@@ -1,3 +1,4 @@
+import { formatMoneyPrecise } from "@/lib/format";
 import Link from "next/link";
 import { ArrowDownCircle, ArrowUpCircle, CalendarRange, PiggyBank, TrendingDown, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +7,7 @@ import type { CltCompany, CltMonthlyBudget } from "@/types/database.types";
 
 export type AccountMovement = { id: string; movement_date: string; kind: "deposito" | "credito"; amount: number | string; notes: string | null };
 
-const money = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const money = (n: number) => formatMoneyPrecise(n);
 const dateBR = (s: string) => s.slice(0, 10).split("-").reverse().join("/");
 
 /**

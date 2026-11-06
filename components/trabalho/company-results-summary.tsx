@@ -1,4 +1,5 @@
 "use client";
+import { formatMoneyPrecise } from "@/lib/format";
 import {useState} from "react";
 import Link from "next/link";
 import {Card,CardContent} from "@/components/ui/card";
@@ -7,7 +8,7 @@ import type {MessagingPoint} from "@/lib/clt/history";
 import {campaignsInPeriod,costPerMessage,cpc,cpm as cpmMil,ctr,periodMetrics,reportPeriodLabel,roas,type PeriodCampaign,type ReportPeriod,type ReportResult} from "@/lib/clt/report-period";
 import {formatMetric,NEW_FOLLOWERS_LABEL} from "@/lib/clt/result-metrics";
 import {COSTS_NOTE,ENGAGEMENT_NOTE,MetricCardSections} from "@/components/trabalho/result-metric-sections";
-const money=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const money=(n: number) => formatMoneyPrecise(n);
 const num=(n:number)=>n.toLocaleString("pt-BR");
 const todaySP=()=>new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});
 /**

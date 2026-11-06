@@ -5,6 +5,7 @@ import type {
   FinancialCharge,
   FinancialOrigin,
   FinancialPayment,
+  FinancialPersonalLink,
   FinancialReferenceType,
 } from "@/types/database.types";
 
@@ -150,4 +151,31 @@ export async function listFinancialPaymentsByCharge(chargeId: string): Promise<F
     .order("payment_date", { ascending: true });
   if (error) throw error;
   return data ?? [];
+}
+
+/** Tabela/função da migration 20261110100000 ainda não aplicada? */
+export function isMissingPersonalLinkSchema(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (["42P01", "PGRST205", "PGRST202", "42883"].includes(error.code ?? "")) return true;
+  return /financial_personal_links|fin_pay_with_personal_account|fin_link_payment_to_personal_account|fin_unlink_personal_account/.test(error.message ?? "")
+    && /does not exist|schema cache|Could not find/i.test(error.message ?? "");
+}
+
+/**
+ * Vínculos empresa ↔ pessoal em que o space participa (como empresa OU
+ * como pessoal). Sem a migration aplicada, volta vazio — as telas seguem
+ * funcionando exatamente como antes.
+ */
+export async function listFinancialPersonalLinks(spaceId: string): Promise<FinancialPersonalLink[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("financial_personal_links" as never)
+    .select("*")
+    .or(`business_space_id.eq.${spaceId},personal_space_id.eq.${spaceId}`)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (isMissingPersonalLinkSchema(error)) return [];
+    throw error;
+  }
+  return (data ?? []) as FinancialPersonalLink[];
 }

@@ -1,4 +1,5 @@
 "use client";
+import { formatMoneyPrecise } from "@/lib/format";
 import {useState,useTransition} from "react";
 import {toast} from "sonner";
 import {useRouter} from "next/navigation";
@@ -16,7 +17,7 @@ type Company={id:string;name:string;current_ad_balance:number};
 type Campaign={id:string;company_id:string;name:string;starts_on:string;ends_on:string;planned_amount:number|null|undefined};
 type Movement={company_id:string;movement_date:string;kind:string;amount:number};
 type Comparison={company_id:string;old_campaign_ids:string[];new_campaign_ids:string[]};
-const br=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const br=(n: number) => formatMoneyPrecise(n);
 const num=(n:number)=>n.toLocaleString("pt-BR");
 const pctText=(p:number|null)=>p===null?"—":(p>0?"+":p<0?"−":"")+Math.abs(p).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%";
 /** Seções com métricas de valor (prévia/PDF): "Blocos do relatório" não tem valor. */

@@ -10,6 +10,7 @@ import {
   listFinancialOrigins,
   listFinancialCharges,
   listFinancialPayments,
+  listFinancialPersonalLinks,
 } from "@/lib/supabase/repositories/financial.repository";
 import { listClients, listAllClientServices, listServices } from "@/lib/supabase/repositories/clients.repository";
 import { ensureFinancialDefaults, ensureRecurringChargesForSpace } from "@/lib/supabase/finance-core";
@@ -52,7 +53,7 @@ export async function loadFinanceiroPageData(scope: FinancialScope) {
     await ensureRecurringChargesForSpace(supabase, space.id, profile.id);
   }
 
-  const [charges, payments, accounts, categories, referenceTypes, origins, clients, clientServices, services] =
+  const [charges, payments, accounts, categories, referenceTypes, origins, clients, clientServices, services, personalLinks] =
     await Promise.all([
       listFinancialCharges(space.id),
       listFinancialPayments(space.id),
@@ -63,6 +64,7 @@ export async function loadFinanceiroPageData(scope: FinancialScope) {
       listClients(space.id),
       listAllClientServices(space.id),
       listServices(space.id),
+      listFinancialPersonalLinks(space.id),
     ]);
 
   return {
@@ -75,6 +77,7 @@ export async function loadFinanceiroPageData(scope: FinancialScope) {
     clients,
     clientServices,
     services,
+    personalLinks,
     permissions: { canCreate, canEdit, canDelete },
   };
 }

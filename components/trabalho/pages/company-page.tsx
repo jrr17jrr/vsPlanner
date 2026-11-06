@@ -1,3 +1,4 @@
+import { formatMoneyPrecise } from "@/lib/format";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { notFound } from "next/navigation";
@@ -30,7 +31,7 @@ import { buildHistoryFacts, messagingPoints } from "@/lib/clt/history";
 import type { CltMonthlyBudget,CltCampaignResultEntry,CltAdSet,CltAdCreative,CltAdLevelResult } from "@/types/database.types";
 import { MODULES, mktOwnerLabel, type CltModule } from "@/lib/clt/module";
 
-const money = (n:number) => n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const money = (n: number) => formatMoneyPrecise(n);
 const missingTable = (code?: string) => ["42P01","PGRST205"].includes(String(code));
 /**
  * Painel individual da empresa (cinco abas) — compartilhado por CLT e MKT.

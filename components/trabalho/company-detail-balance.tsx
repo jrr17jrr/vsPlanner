@@ -1,4 +1,5 @@
 "use client";
+import { formatMoneyPrecise } from "@/lib/format";
 import {useState,useTransition} from "react";
 import {toast} from "sonner";
 import {Card,CardContent} from "@/components/ui/card";
@@ -8,7 +9,7 @@ import {Label} from "@/components/ui/label";
 import {Select,SelectContent,SelectItem,SelectTrigger,SelectValue} from "@/components/ui/select";
 import {adjustCltCompanyBalancesAction} from "@/lib/supabase/clt-actions";
 import type {CltCompany} from "@/types/database.types";
-const money=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const money=(n: number) => formatMoneyPrecise(n);
 export function CompanyDetailBalance({company}:{company:CltCompany}){
  const [operation,setOperation]=useState<"add"|"remove"|"set">("add");
  const [amount,setAmount]=useState("");

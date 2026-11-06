@@ -1,3 +1,4 @@
+import { formatMoneyPrecise } from "@/lib/format";
 /**
  * Métricas de resultado (CLT e MKT) — puro, compartilhado por formulário,
  * telas de anúncio/conjunto/campanha/empresa e relatórios.
@@ -74,7 +75,7 @@ export function rowRatioBase(r: object): RatioBase {
 
 // ----------------------------------------------------------------- formatos
 
-export const fmtMoney = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+export const fmtMoney = (n: number) => formatMoneyPrecise(n);
 export const fmtInt = (n: number) => n.toLocaleString("pt-BR");
 export const fmtPct = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
 export const fmtRoas = (n: number) => n.toFixed(2).replace(".", ",") + "x";

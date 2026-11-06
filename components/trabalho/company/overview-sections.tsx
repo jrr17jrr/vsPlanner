@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoneyPrecise } from "@/lib/format";
 import { ArrowRight, CheckCircle2, Circle, ListChecks, Megaphone, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CollapsibleSection } from "@/components/trabalho/company/collapsible-section";
@@ -10,7 +11,7 @@ import { isActiveOn, isDoneOn, todaySaoPaulo, type TaskOccurrence } from "@/lib/
 import type { AudienceRecord } from "@/lib/supabase/clt-audience-actions";
 import type { CltCampaign, CltTask } from "@/types/database.types";
 
-const money = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const money = (n: number) => formatMoneyPrecise(n);
 const dateBR = (s: string) => s.slice(0, 10).split("-").reverse().join("/");
 const PREVIEW = 5;
 const statusRank = (s: string) => (s === "ativa" ? 0 : s === "pausada" ? 1 : s === "finalizada" ? 3 : 2);

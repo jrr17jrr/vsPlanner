@@ -1,4 +1,5 @@
 "use client";
+import { formatMoneyPrecise } from "@/lib/format";
 import {useMemo,useState} from "react";
 import Link from "next/link";
 import {Card,CardContent} from "@/components/ui/card";
@@ -6,7 +7,7 @@ import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import type {CltCampaign,CltCompany,CltCampaignResultEntry} from "@/types/database.types";
 import {messagingCost,type MessagingPoint} from "@/lib/clt/history";
-const brl=(n:number)=>n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const brl=(n: number) => formatMoneyPrecise(n);
 const fmt=(n:number)=>n.toLocaleString("pt-BR");
 type Metric="cost"|"messages"|"views"|"sales"|"revenue"|"spent"|"net"|"roas";
 const metrics:{key:Metric;label:string}[]=[{key:"cost",label:"Custo por mensagem"},{key:"messages",label:"Mensagens"},{key:"views",label:"Visualizações"},{key:"sales",label:"Vendas"},{key:"revenue",label:"Faturamento bruto"},{key:"spent",label:"Investimento"},{key:"net",label:"Resultado após anúncios"},{key:"roas",label:"ROAS"}];
