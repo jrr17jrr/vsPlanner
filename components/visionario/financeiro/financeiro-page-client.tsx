@@ -60,6 +60,7 @@ import type {
   FinancialKind,
   FinancialOrigin,
   FinancialPayment,
+  FinancialPaymentReversal,
   FinancialPersonalLink,
   FinancialReferenceType,
   Service,
@@ -124,10 +125,12 @@ export function FinanceiroPageClient({
   clientServices,
   services,
   personalLinks = [],
+  reversals = [],
   permissions,
   initialTab = "visao",
 }: {
   personalLinks?: FinancialPersonalLink[];
+  reversals?: FinancialPaymentReversal[];
   initialTab?: Tab;
   scope: FinancialScope;
   charges: FinancialCharge[];
@@ -190,6 +193,8 @@ export function FinanceiroPageClient({
 
   const listProps = {
     scope,
+    personalLinks,
+    reversals,
     charges,
     payments,
     accounts,
@@ -404,7 +409,7 @@ export function FinanceiroPageClient({
       )}
 
       {tab === "movimentacoes" && (
-        <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} personalLinks={personalLinks} categories={categories} />
+        <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} personalLinks={personalLinks} categories={categories} reversals={reversals} />
       )}
       {tab === "a_receber" && (
         <ChargesList {...listProps} kind="entrada" onCreate={() => setDialog({ kind: "entrada", pending: true })} selectedMonth={selectedMonth} />

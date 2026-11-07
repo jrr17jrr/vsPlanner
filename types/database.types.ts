@@ -357,6 +357,9 @@ export type FinancialPayment = {
   payment_method: FinancialPaymentMethod;
   account_id: string | null;
   payer_label?: "junior" | "guilherme" | "empresa" | null;
+  /** Desconto/acréscimo que ESTE pagamento aplicou ao quitar (migration 20261111100000; 0 nos antigos). */
+  settle_discount?: number | null;
+  settle_addition?: number | null;
   notes: string | null;
   created_by: string;
   created_at: string;
@@ -389,6 +392,28 @@ export type FinancialPersonalLink = {
   reversed_by: string | null;
   reversed_at: string | null;
   reversal_note: string | null;
+};
+
+/** Pagamento desfeito (migration 20261111100000) — com ou sem devolução à conta. */
+export type FinancialPaymentReversal = {
+  id: string;
+  space_id: string;
+  charge_id: string | null;
+  payment_id: string;
+  mode: "devolvido" | "sem_devolucao";
+  amount: number;
+  payment_date: string;
+  payment_method: string | null;
+  account_id: string | null;
+  account_name: string | null;
+  charge_description: string | null;
+  discount_reverted: number;
+  addition_reverted: number;
+  adjustment_charge_id: string | null;
+  personal_link_id: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
 };
 
 /** Conta do Financeiro Pessoal oferecida no Financeiro da empresa (com saldo atual). */

@@ -1,5 +1,6 @@
 "use server";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireScopedModulePermission } from "@/lib/supabase/dal";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { listFinancialChargesByOrigin } from "@/lib/supabase/repositories/financial.repository";
@@ -55,6 +56,16 @@ function isForeignKeyRestrictError(error: { code?: string } | null): boolean {
 function isUniqueViolation(error: { code?: string } | null): boolean {
   return error?.code === "23505";
 }
+
+/** Função SQL ainda não criada (migration pendente)? */
+function isMissingFunctionError(error: { code?: string; message?: string } | null, fn: string): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST202" || error.code === "42883") return true;
+  return new RegExp(fn).test(error.message ?? "") && /Could not find|does not exist|schema cache/i.test(error.message ?? "");
+}
+
+const UNDO_MIGRATION_MESSAGE =
+  "Desfazer sem devolver o dinheiro ainda não está ativo no banco: execute a migração 20261111100000_financial_payment_undo.sql no Supabase (SQL Editor).";
 
 // -----------------------------------------------------------------------------
 // Contas / Categorias / Referente a
@@ -473,6 +484,33 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
     if (accountError) return { error: accountError };
   }
 
+  // Caminho atômico (migration 20261111100000): ajuste do "quitar" +
+  // pagamento numa transação, guardando o desconto/acréscimo DESTE
+  // pagamento para um desfazer exato. Sem a migration, segue o caminho antigo.
+  {
+    const verb = charge.kind === "entrada" ? "Recebimento" : "Pagamento";
+    const { data: rpcData, error: rpcError } = await (supabase as unknown as SupabaseClient).rpc("fin_register_payment", {
+      p_charge_id: chargeId,
+      p_amount: Math.round(input.amount * 100) / 100,
+      p_payment_date: input.paymentDate,
+      p_payment_method: input.paymentMethod,
+      p_account_id: noAccountMovement ? null : input.accountId,
+      p_settle: input.settle,
+      p_notes: input.notes?.trim() || null,
+      p_payer_label: scope === "visionario" && charge.kind === "saida" && input.payerLabel ? input.payerLabel : null,
+    });
+    if (!rpcError) {
+      revalidateFinancialViews(scope);
+      const r = (rpcData ?? {}) as { discount?: number; addition?: number; remaining?: number };
+      const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      if (Number(r.discount) > 0) return { success: `${verb} registrado e quitado com desconto de ${brl(Number(r.discount))}.` };
+      if (Number(r.addition) > 0) return { success: `${verb} registrado e quitado com acréscimo de ${brl(Number(r.addition))}.` };
+      if (Number(r.remaining) > 0) return { success: `${verb} parcial registrado — restam ${brl(Number(r.remaining))} em aberto.` };
+      return { success: `${verb} registrado.` };
+    }
+    if (!isMissingFunctionError(rpcError, "fin_register_payment")) return { error: rpcError.message };
+  }
+
   const { data: existingPayments, error: paymentsError } = await supabase
     .from("financial_payments")
     .select("amount")
@@ -539,6 +577,42 @@ export async function deletePaymentAction(scope: FinancialScope, paymentId: stri
   if (!data) return { error: "Pagamento não encontrado." };
   revalidateFinancialViews(scope);
   return { success: "Pagamento desfeito — a cobrança voltou a ficar em aberto." };
+}
+
+/**
+ * "Desfazer pagamento" de UM pagamento (migration 20261111100000), numa
+ * transação no banco:
+ *  - refund = true: o lançamento sai do caixa, o valor efetivamente pago
+ *    volta à conta de origem (pagamento com conta pessoal: volta à mesma
+ *    conta pessoal) e o desconto/acréscimo aplicado por ele é revertido;
+ *  - refund = false: a cobrança reabre, mas o MESMO lançamento de caixa passa
+ *    para a saída "Sem devolução · …" (saldo igual, travado para sempre).
+ * Um pagamento só pode ser desfeito uma vez.
+ */
+export async function undoPaymentAction(scope: FinancialScope, paymentId: string, refund: boolean, note?: string): Promise<ActionState> {
+  const { space } = await requireScopedModulePermission(scope, "financeiro", "edit");
+  const supabase = await createSupabaseServerClient();
+  const { data: payment } = await supabase.from("financial_payments").select("id").eq("id", paymentId).eq("space_id", space.id).maybeSingle();
+  if (!payment) return { error: "Pagamento não encontrado (talvez já tenha sido desfeito). Recarregue a página." };
+
+  const { data, error } = await (supabase as unknown as SupabaseClient).rpc("fin_undo_payment", {
+    p_payment_id: paymentId,
+    p_refund: refund,
+    p_note: note?.trim() || null,
+  });
+  if (error) {
+    if (!isMissingFunctionError(error, "fin_undo_payment")) return { error: error.message };
+    if (!refund) return { error: UNDO_MIGRATION_MESSAGE };
+    return deletePaymentAction(scope, paymentId);
+  }
+  revalidateFinancialViews(scope);
+  const r = (data ?? {}) as { discount_reverted?: number; addition_reverted?: number };
+  const adj = Number(r.discount_reverted) > 0 ? " O desconto aplicado foi revertido." : Number(r.addition_reverted) > 0 ? " O acréscimo aplicado foi revertido." : "";
+  return {
+    success: refund
+      ? `Pagamento desfeito — o valor voltou para a conta de origem e a cobrança está em aberto.${adj}`
+      : `Pagamento desfeito sem devolução — a cobrança está em aberto e o saldo da conta não mudou (registrado em "Sem devolução").${adj}`,
+  };
 }
 
 /**

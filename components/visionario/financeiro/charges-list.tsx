@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Ban, HandCoins, Pencil, MoreVertical, Plus, Repeat, StopCircle } from "lucide-react";
+import { CheckCircle2, Ban, HandCoins, History, Lock, Pencil, MoreVertical, Plus, Repeat, StopCircle, Undo2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Tabs, ScrollableTabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +18,9 @@ import { AsyncConfirmDialog } from "@/components/shared/async-confirm-dialog";
 import { MarkPaymentDialog } from "@/components/visionario/financeiro/mark-payment-dialog";
 import { EditChargeDialog } from "@/components/visionario/financeiro/edit-charge-dialog";
 import { RecurrencesPanel } from "@/components/visionario/financeiro/recurrences-panel";
+import { UndoPaymentDialog } from "@/components/visionario/financeiro/undo-payment-dialog";
+import { PaymentHistoryDialog } from "@/components/visionario/financeiro/payment-history-dialog";
+import { activeLinksIndex } from "@/lib/finance/personal-link";
 import { isDueUpToMonth, listChargesForKind, pendingUpToMonth, type ReceivablePayable } from "@/lib/financial-calc";
 import { cancelChargeAction, stopRecurrenceAction } from "@/lib/supabase/financial-actions";
 import { FREQUENCY_LABEL, chargeBadgeStatus } from "@/lib/finance-labels";
@@ -29,6 +33,8 @@ import type {
   FinancialKind,
   FinancialOrigin,
   FinancialPayment,
+  FinancialPaymentReversal,
+  FinancialPersonalLink,
   FinancialReferenceType,
 } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
@@ -55,7 +61,11 @@ export function ChargesList({
   permissions,
   onCreate,
   selectedMonth,
+  personalLinks = [],
+  reversals = [],
 }: {
+  personalLinks?: FinancialPersonalLink[];
+  reversals?: FinancialPaymentReversal[];
   scope: FinancialScope;
   kind: FinancialKind;
   charges: FinancialCharge[];
@@ -73,6 +83,30 @@ export function ChargesList({
   const [markingCharge, setMarkingCharge] = useState<ReceivablePayable | null>(null);
   const [editingCharge, setEditingCharge] = useState<ReceivablePayable | null>(null);
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
+  const [historyCharge, setHistoryCharge] = useState<FinancialCharge | null>(null);
+  const [undoing, setUndoing] = useState<FinancialPayment | null>(null);
+  const router = useRouter();
+  const links = useMemo(() => activeLinksIndex(personalLinks), [personalLinks]);
+  const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+  const chargeById = useMemo(() => new Map(charges.map((c) => [c.id, c])), [charges]);
+  const paymentsByCharge = useMemo(() => {
+    const m = new Map<string, FinancialPayment[]>();
+    for (const p of payments) m.set(p.charge_id, [...(m.get(p.charge_id) ?? []), p]);
+    return m;
+  }, [payments]);
+  const reversalsByCharge = useMemo(() => {
+    const m = new Map<string, FinancialPaymentReversal[]>();
+    for (const r of reversals) if (r.charge_id) m.set(r.charge_id, [...(m.get(r.charge_id) ?? []), r]);
+    return m;
+  }, [reversals]);
+  /** Saídas "Sem devolução · …" (lançamento travado de um pagamento desfeito sem devolução). */
+  const lockedChargeIds = useMemo(() => new Set(reversals.filter((r) => r.mode === "sem_devolucao" && r.adjustment_charge_id).map((r) => r.adjustment_charge_id!)), [reversals]);
+
+  function startUndo(charge: FinancialCharge) {
+    const list = paymentsByCharge.get(charge.id) ?? [];
+    if (list.length === 1) setUndoing(list[0]);
+    else setHistoryCharge(charge);
+  }
 
   const today = todayKeySaoPaulo();
   const isEntrada = kind === "entrada";
@@ -193,7 +227,11 @@ export function ChargesList({
             const info = originInfo(charge);
             const open = row.status !== "pago" && row.status !== "cancelado";
             const canStop = permissions.canEdit && origin?.origin_type === "recorrente" && origin.is_active && !origin.client_service_id;
-            const hasMenu = permissions.canEdit || (permissions.canDelete && open && row.paid === 0) || canStop;
+            const chargePayments = paymentsByCharge.get(charge.id) ?? [];
+            const hasHistory = chargePayments.length > 0 || (reversalsByCharge.get(charge.id)?.length ?? 0) > 0;
+            const locked = lockedChargeIds.has(charge.id);
+            const canUndo = permissions.canEdit && chargePayments.length > 0 && !locked;
+            const hasMenu = permissions.canEdit || (permissions.canDelete && open && row.paid === 0) || canStop || hasHistory;
             return (
               <li
                 key={charge.id}
@@ -206,6 +244,7 @@ export function ChargesList({
                     {client && <span>· {client.name}</span>}
                     {!client && charge.supplier_name && <span>· {charge.supplier_name}</span>}
                     {category && <span>· {category.name}</span>}
+                    {locked && <span className="inline-flex items-center gap-0.5 text-warning">· <Lock className="h-3 w-3" aria-hidden /> pagamento desfeito sem devolução</span>}
                     {info && (
                       <span className="inline-flex items-center gap-0.5">
                         · {origin?.origin_type === "recorrente" && <Repeat className="h-3 w-3" aria-hidden />}
@@ -215,7 +254,15 @@ export function ChargesList({
                   </p>
                   {row.status === "parcial" && (
                     <p className="text-xs text-warning">
-                      {isEntrada ? "Recebido" : "Pago"} {formatCurrency(row.paid)} de {formatCurrency(Number(charge.amount))}
+                      {isEntrada ? "Recebido" : "Pago"} {formatCurrency(row.paid)} de {formatCurrency(Number(charge.amount))} · restam {formatCurrency(row.remaining)}
+                    </p>
+                  )}
+                  {row.status === "pago" && (Number(charge.discount_amount) > 0 || Number(charge.addition_amount) > 0) && (
+                    <p className="text-xs text-muted-foreground">
+                      Original {formatCurrency(Number(charge.original_amount))}
+                      {Number(charge.discount_amount) > 0 && ` · desconto ${formatCurrency(Number(charge.discount_amount))}`}
+                      {Number(charge.addition_amount) > 0 && ` · acréscimo ${formatCurrency(Number(charge.addition_amount))}`}
+                      {` · ${isEntrada ? "recebido" : "pago"} ${formatCurrency(row.paid)}`}
                     </p>
                   )}
                 </div>
@@ -242,6 +289,16 @@ export function ChargesList({
                         {permissions.canEdit && (
                           <DropdownMenuItem onClick={() => setEditingCharge(row)}>
                             <Pencil className="h-4 w-4" /> Editar cobrança
+                          </DropdownMenuItem>
+                        )}
+                        {canUndo && (
+                          <DropdownMenuItem onClick={() => startUndo(charge)}>
+                            <Undo2 className="h-4 w-4" /> Desfazer {isEntrada ? "recebimento" : "pagamento"}
+                          </DropdownMenuItem>
+                        )}
+                        {hasHistory && (
+                          <DropdownMenuItem onClick={() => setHistoryCharge(charge)}>
+                            <History className="h-4 w-4" /> Histórico de pagamentos
                           </DropdownMenuItem>
                         )}
                         {canStop && origin && (
@@ -288,6 +345,37 @@ export function ChargesList({
           remaining={markingCharge.remaining}
           accounts={accounts}
           onOpenChange={(open) => !open && setMarkingCharge(null)}
+        />
+      )}
+
+      {historyCharge && (
+        <PaymentHistoryDialog
+          charge={chargeById.get(historyCharge.id) ?? historyCharge}
+          payments={paymentsByCharge.get(historyCharge.id) ?? []}
+          reversals={reversalsByCharge.get(historyCharge.id) ?? []}
+          accountName={(id) => (id ? accountById.get(id)?.name ?? null : null)}
+          linkByPayment={links.byBusinessPayment}
+          personalLinkByPayment={links.byPersonalPayment}
+          canEdit={permissions.canEdit && !lockedChargeIds.has(historyCharge.id)}
+          onUndo={(p) => {
+            setHistoryCharge(null);
+            setUndoing(p);
+          }}
+          onOpenChange={(o) => !o && setHistoryCharge(null)}
+        />
+      )}
+
+      {undoing && (
+        <UndoPaymentDialog
+          scope={scope}
+          payment={undoing}
+          charge={chargeById.get(undoing.charge_id)}
+          accountName={undoing.account_id ? accountById.get(undoing.account_id)?.name ?? null : null}
+          businessLink={links.byBusinessPayment.get(undoing.id)}
+          personalLink={links.byPersonalPayment.get(undoing.id)}
+          locked={lockedChargeIds.has(undoing.charge_id)}
+          onOpenChange={(o) => !o && setUndoing(null)}
+          onSaved={() => router.refresh()}
         />
       )}
 

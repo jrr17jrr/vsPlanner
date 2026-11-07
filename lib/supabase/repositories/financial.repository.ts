@@ -5,6 +5,7 @@ import type {
   FinancialCharge,
   FinancialOrigin,
   FinancialPayment,
+  FinancialPaymentReversal,
   FinancialPersonalLink,
   FinancialReferenceType,
 } from "@/types/database.types";
@@ -178,4 +179,19 @@ export async function listFinancialPersonalLinks(spaceId: string): Promise<Finan
     throw error;
   }
   return (data ?? []) as FinancialPersonalLink[];
+}
+
+/** Pagamentos desfeitos do space (migration 20261111100000). Sem a migration, vazio. */
+export async function listFinancialPaymentReversals(spaceId: string): Promise<FinancialPaymentReversal[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await (supabase as unknown as import("@supabase/supabase-js").SupabaseClient)
+    .from("financial_payment_reversals")
+    .select("*")
+    .eq("space_id", spaceId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (["42P01", "PGRST205"].includes(String(error.code)) || /financial_payment_reversals/.test(error.message ?? "")) return [];
+    throw error;
+  }
+  return (data ?? []) as FinancialPaymentReversal[];
 }

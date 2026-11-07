@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmptyState } from "@/components/shared/empty-state";
 import { AsyncConfirmDialog } from "@/components/shared/async-confirm-dialog";
-import { deletePaymentAction } from "@/lib/supabase/financial-actions";
+import { UndoPaymentDialog } from "@/components/visionario/financeiro/undo-payment-dialog";
 import { unlinkPersonalAccountAction } from "@/lib/supabase/financial-personal-link-actions";
 import { LinkPersonalDialog } from "@/components/visionario/financeiro/link-personal-dialog";
 import { EditPersonalCategoryDialog } from "@/components/visionario/financeiro/edit-personal-category-dialog";
 import { PERSONAL_PAYER_NAME, activeLinksIndex } from "@/lib/finance/personal-link";
 import { PAYMENT_METHOD_LABEL } from "@/lib/finance-labels";
 import { formatCurrency, formatDate, formatMonthYear, currentMonthKeySaoPaulo } from "@/lib/format";
-import type { Client, FinancialAccount, FinancialCharge, FinancialKind, FinancialCategory, FinancialPayment, FinancialPersonalLink } from "@/types/database.types";
+import type { Client, FinancialAccount, FinancialCharge, FinancialKind, FinancialCategory, FinancialPayment, FinancialPaymentReversal, FinancialPersonalLink } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
 
 /**
@@ -31,10 +31,13 @@ export function MovementsList({
   canEdit,
   personalLinks = [],
   categories = [],
+  reversals = [],
 }: {
   personalLinks?: FinancialPersonalLink[];
   /** Categorias do space — no Pessoal permitem trocar a categoria da saída. */
   categories?: FinancialCategory[];
+  /** Pagamentos desfeitos — trava os lançamentos "Sem devolução". */
+  reversals?: FinancialPaymentReversal[];
   scope: FinancialScope;
   charges: FinancialCharge[];
   payments: FinancialPayment[];
@@ -49,6 +52,7 @@ export function MovementsList({
   const [linking, setLinking] = useState<FinancialPayment | null>(null);
   const [recategorizing, setRecategorizing] = useState<FinancialPayment | null>(null);
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const lockedChargeIds = useMemo(() => new Set(reversals.filter((r) => r.mode === "sem_devolucao" && r.adjustment_charge_id).map((r) => r.adjustment_charge_id!)), [reversals]);
   const [unlinking, setUnlinking] = useState<FinancialPersonalLink | null>(null);
   const router = useRouter();
   const links = useMemo(() => activeLinksIndex(personalLinks), [personalLinks]);
@@ -182,7 +186,7 @@ export function MovementsList({
                       <Link2Off className="h-3.5 w-3.5" />
                     </Button>
                   )}
-                  {canEdit && !personalLink && (
+                  {canEdit && !personalLink && !lockedChargeIds.has(p.charge_id) && (
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setUndoing(p)} aria-label="Desfazer pagamento">
                       <Undo2 className="h-3.5 w-3.5" />
                     </Button>
@@ -212,17 +216,16 @@ export function MovementsList({
       )}
 
       {undoing && (
-        <AsyncConfirmDialog
-          open
+        <UndoPaymentDialog
+          scope={scope}
+          payment={undoing}
+          charge={chargeById.get(undoing.charge_id)}
+          accountName={undoing.account_id ? accountById.get(undoing.account_id)?.name ?? null : null}
+          businessLink={links.byBusinessPayment.get(undoing.id)}
+          personalLink={links.byPersonalPayment.get(undoing.id)}
+          locked={lockedChargeIds.has(undoing.charge_id)}
           onOpenChange={(open) => !open && setUndoing(null)}
-          title="Desfazer este pagamento?"
-          description={
-            links.byBusinessPayment.get(undoing.id)
-              ? `O pagamento é cancelado, a despesa volta a ficar em aberto e ${formatCurrency(Number(undoing.amount))} voltam para ${links.byBusinessPayment.get(undoing.id)!.account_name} (Financeiro Pessoal) — a mesma conta de onde saíram. Fica registrado no histórico.`
-              : "O lançamento de caixa é removido, o saldo da conta volta ao que era e a cobrança volta a ficar em aberto. Fica registrado no histórico. Use se registrou por engano."
-          }
-          confirmLabel="Desfazer"
-          onConfirm={() => deletePaymentAction(scope, undoing.id)}
+          onSaved={() => router.refresh()}
         />
       )}
 

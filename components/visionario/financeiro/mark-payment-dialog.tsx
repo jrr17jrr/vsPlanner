@@ -240,23 +240,50 @@ export function MarkPaymentDialog({
               </div>
             )}
 
-            {validValue && diff !== 0 && (
-              <div className="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+              <div className="flex items-start justify-between gap-3">
                 <div className="text-sm">
-                  <p className="font-medium text-foreground">Quitar esta cobrança</p>
+                  <p className="font-medium text-foreground">Quitar a dívida com este pagamento</p>
                   <p className="text-xs text-muted-foreground">
-                    {settle
-                      ? diff < 0
-                        ? `A diferença de ${formatCurrency(-diff)} vira desconto e a cobrança fica ${verb}.`
-                        : `A diferença de ${formatCurrency(diff)} vira acréscimo (juros/extra) e a cobrança fica ${verb}.`
-                      : diff < 0
-                        ? `Pagamento parcial — continuam em aberto ${formatCurrency(-diff)}.`
-                        : "Desligado, o valor não pode passar do que está em aberto."}
+                    {!validValue
+                      ? "Informe o valor efetivamente pago."
+                      : diff === 0
+                        ? `O valor cobre o que está em aberto — a cobrança fica ${verb}.`
+                        : settle
+                          ? diff < 0
+                            ? `A diferença de ${formatCurrency(-diff)} vira desconto e a dívida fica quitada.`
+                            : `A diferença de ${formatCurrency(diff)} vira acréscimo (juros/extra) e a dívida fica quitada.`
+                          : diff < 0
+                            ? `Pagamento parcial — continuam em aberto ${formatCurrency(-diff)}. A diferença não vira desconto.`
+                            : "Desligado, o valor não pode passar do que está em aberto."}
                   </p>
                 </div>
-                <Switch checked={settle} onCheckedChange={setSettle} disabled={pending} aria-label="Quitar esta cobrança" />
+                <Switch checked={settle} onCheckedChange={setSettle} disabled={pending} aria-label="Quitar a dívida com este pagamento" />
               </div>
-            )}
+              {validValue && (
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-3">
+                  {(
+                    [
+                      ["Valor original", Number(charge.original_amount)],
+                      ...(Number(charge.amount) - remaining > 0 ? [["Já pago", Math.round((Number(charge.amount) - remaining) * 100) / 100]] : []),
+                      ["Em aberto", remaining],
+                      ["Valor pago agora", value],
+                      ...(settle && diff < 0 ? [["Desconto", -diff]] : []),
+                      ...(settle && diff > 0 ? [["Acréscimo", diff]] : []),
+                      ["Restante após", settle || diff >= 0 ? 0 : -diff],
+                    ] as [string, number][]
+                  ).map(([label, v]) => (
+                    <div key={label}>
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="font-semibold tabular-nums text-foreground">{formatCurrency(v)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {validValue && moveAccount && (
+                <p className="text-[11px] text-muted-foreground">Da conta sai/entra apenas o valor realmente {verb}: {formatCurrency(value)}.</p>
+              )}
+            </div>
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="pay-notes">Observação</Label>
