@@ -62,3 +62,6 @@ export function findPersonalDuplicateCandidates<T extends PaymentLike>(
     .filter((p) => daysBetween(p.payment_date, target.payment_date) <= windowDays)
     .sort((a, b) => daysBetween(a.payment_date, target.payment_date) - daysBetween(b.payment_date, target.payment_date));
 }
+
+/** Categoria usada quando nenhuma é escolhida (criada pelo banco se não existir). */
+export const PERSONAL_DEFAULT_CATEGORY = "Pagamentos da Visionário Dev";

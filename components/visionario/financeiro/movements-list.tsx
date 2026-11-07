@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownCircle, ArrowUpCircle, Link2, Link2Off, Undo2, Wallet } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, Link2, Link2Off, Tag, Undo2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -10,10 +10,11 @@ import { AsyncConfirmDialog } from "@/components/shared/async-confirm-dialog";
 import { deletePaymentAction } from "@/lib/supabase/financial-actions";
 import { unlinkPersonalAccountAction } from "@/lib/supabase/financial-personal-link-actions";
 import { LinkPersonalDialog } from "@/components/visionario/financeiro/link-personal-dialog";
+import { EditPersonalCategoryDialog } from "@/components/visionario/financeiro/edit-personal-category-dialog";
 import { PERSONAL_PAYER_NAME, activeLinksIndex } from "@/lib/finance/personal-link";
 import { PAYMENT_METHOD_LABEL } from "@/lib/finance-labels";
 import { formatCurrency, formatDate, formatMonthYear, currentMonthKeySaoPaulo } from "@/lib/format";
-import type { Client, FinancialAccount, FinancialCharge, FinancialKind, FinancialPayment, FinancialPersonalLink } from "@/types/database.types";
+import type { Client, FinancialAccount, FinancialCharge, FinancialKind, FinancialCategory, FinancialPayment, FinancialPersonalLink } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
 
 /**
@@ -29,8 +30,11 @@ export function MovementsList({
   clients,
   canEdit,
   personalLinks = [],
+  categories = [],
 }: {
   personalLinks?: FinancialPersonalLink[];
+  /** Categorias do space — no Pessoal permitem trocar a categoria da saída. */
+  categories?: FinancialCategory[];
   scope: FinancialScope;
   charges: FinancialCharge[];
   payments: FinancialPayment[];
@@ -43,6 +47,8 @@ export function MovementsList({
   const [accountFilter, setAccountFilter] = useState("todas");
   const [undoing, setUndoing] = useState<FinancialPayment | null>(null);
   const [linking, setLinking] = useState<FinancialPayment | null>(null);
+  const [recategorizing, setRecategorizing] = useState<FinancialPayment | null>(null);
+  const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const [unlinking, setUnlinking] = useState<FinancialPersonalLink | null>(null);
   const router = useRouter();
   const links = useMemo(() => activeLinksIndex(personalLinks), [personalLinks]);
@@ -131,6 +137,8 @@ export function MovementsList({
             const businessLink = links.byBusinessPayment.get(p.id);
             const personalLink = links.byPersonalPayment.get(p.id);
             const canLink = scope !== "pessoal" && !isIn && p.payer_label === "junior" && !businessLink;
+            const canRecategorize = scope === "pessoal" && !isIn && !!charge;
+            const categoryName = charge?.category_id ? categoryById.get(charge.category_id)?.name : undefined;
             return (
               <li key={p.id} className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <div className="flex min-w-0 items-center gap-2">
@@ -144,6 +152,7 @@ export function MovementsList({
                     <p className="text-xs text-muted-foreground">
                       {formatDate(p.payment_date)} · {PAYMENT_METHOD_LABEL[p.payment_method]} · {(p.payer_label === "guilherme" ? "Pago por Guilherme" : p.payer_label === "junior" ? `Pago por ${PERSONAL_PAYER_NAME} · ${businessLink ? `${businessLink.account_name} (Financeiro Pessoal)` : p.account_id ? accountById.get(p.account_id)?.name ?? "Conta" : "Sem conta"}` : p.account_id ? accountById.get(p.account_id)?.name ?? "Conta" : "Sem conta")}
                       {client && ` · ${client.name}`}
+                      {scope === "pessoal" && !isIn && ` · ${categoryName ?? "Sem categoria"}`}
                     </p>
                     {businessLink && (
                       <p className="mt-0.5 flex items-center gap-1 text-xs text-primary"><Link2 className="h-3 w-3 shrink-0" /> Descontado de {businessLink.account_name} no Financeiro Pessoal</p>
@@ -158,6 +167,11 @@ export function MovementsList({
                     {isIn ? "+" : "−"}
                     {formatCurrency(Number(p.amount))}
                   </span>
+                  {canEdit && canRecategorize && (
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setRecategorizing(p)} aria-label="Alterar categoria" title="Alterar categoria">
+                      <Tag className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   {canEdit && canLink && (
                     <Button variant="outline" size="sm" className="h-8 gap-1 px-2 text-xs" onClick={() => setLinking(p)} aria-label="Vincular à conta pessoal">
                       <Link2 className="h-3.5 w-3.5" /> Conta pessoal
@@ -220,6 +234,20 @@ export function MovementsList({
           description={`A despesa continua paga por ${PERSONAL_PAYER_NAME}, mas ${formatCurrency(Number(unlinking.amount))} ${unlinking.link_mode === "existente" ? "deixam de estar ligados ao lançamento pessoal (o lançamento continua lá)" : `voltam para ${unlinking.account_name} (Financeiro Pessoal)`}.`}
           confirmLabel="Desvincular"
           onConfirm={() => unlinkPersonalAccountAction(scope, unlinking.id)}
+        />
+      )}
+
+      {recategorizing && chargeById.get(recategorizing.charge_id) && (
+        <EditPersonalCategoryDialog
+          charge={chargeById.get(recategorizing.charge_id)!}
+          payment={recategorizing}
+          accountName={recategorizing.account_id ? accountById.get(recategorizing.account_id)?.name ?? null : null}
+          categories={categories
+            .filter((c) => c.kind === "saida" && (c.is_active || c.id === chargeById.get(recategorizing.charge_id)?.category_id))
+            .map((c) => ({ id: c.id, name: c.name }))}
+          linkedToBusiness={links.byPersonalPayment.has(recategorizing.id)}
+          onOpenChange={(open) => !open && setRecategorizing(null)}
+          onSaved={() => router.refresh()}
         />
       )}
 

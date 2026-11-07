@@ -116,6 +116,32 @@ describe("migration 20261110100000 — pagamento da Visionário Dev com conta pe
     expect(await balance(nubank)).toBe(1000);
   });
 
+  it("trocar a categoria do lançamento pessoal não altera valor, conta, data nem vínculo; desfazer segue devolvendo", async () => {
+    const { db, pjr, nubank, charge, balance } = await setup();
+    const c = await charge("Chat GPT", 103.4);
+    const { payment_id } = (await db.query<{ r: { payment_id: string } }>(
+      `select fin_pay_with_personal_account($1, 103.40, '2026-11-06', 'credito', $2, true) as r`, [c, nubank])).rows[0].r;
+    const link = (await db.query<{ personal_charge_id: string; personal_payment_id: string }>(`select personal_charge_id, personal_payment_id from financial_personal_links`)).rows[0];
+    const snapshot = async () => (await db.query(`select amount::float8 as amount, account_id, payment_date::text as d, charge_id from financial_payments where id = $1`, [link.personal_payment_id])).rows[0];
+    const before = await snapshot();
+    const totalPayments = async () => (await db.query<{ n: number }>(`select count(*)::int as n from financial_payments`)).rows[0].n;
+    const n0 = await totalPayments();
+
+    const cat = (await db.query<{ id: string }>(`insert into financial_categories (space_id, kind, name, created_by) values ($1, 'saida', 'Ferramentas de trabalho', $2) returning id`, [pjr, JR])).rows[0].id;
+    // Mesmo UPDATE que a Server Action faz: só category_id da cobrança (e da origem única).
+    await db.query(`update financial_charges set category_id = $2 where id = $1 and space_id = $3`, [link.personal_charge_id, cat, pjr]);
+    await db.query(`update financial_origins set category_id = $2 where id = (select origin_id from financial_charges where id = $1) and origin_type = 'unico'`, [link.personal_charge_id, cat]);
+
+    expect(await snapshot()).toEqual(before);
+    expect(await totalPayments()).toBe(n0);
+    expect(await balance(nubank)).toBe(896.6);
+    expect((await db.query(`select status from financial_personal_links`)).rows[0]).toEqual({ status: "ativo" });
+    expect((await db.query(`select cat.name from financial_charges c join financial_categories cat on cat.id = c.category_id where c.id = $1`, [link.personal_charge_id])).rows[0]).toEqual({ name: "Ferramentas de trabalho" });
+
+    await db.query(`delete from financial_payments where id = $1`, [payment_id]);
+    expect(await balance(nubank)).toBe(1000);
+  });
+
   it("falha no débito pessoal não deixa a despesa paga na empresa (atômico)", async () => {
     const { db, guiAcc, charge, balance } = await setup();
     const c = await charge("Hostinger", 50);

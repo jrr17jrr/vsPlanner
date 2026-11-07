@@ -404,7 +404,7 @@ export function FinanceiroPageClient({
       )}
 
       {tab === "movimentacoes" && (
-        <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} personalLinks={personalLinks} />
+        <MovementsList scope={scope} charges={charges} payments={payments} accounts={accounts} clients={clients} canEdit={permissions.canEdit} personalLinks={personalLinks} categories={categories} />
       )}
       {tab === "a_receber" && (
         <ChargesList {...listProps} kind="entrada" onCreate={() => setDialog({ kind: "entrada", pending: true })} selectedMonth={selectedMonth} />

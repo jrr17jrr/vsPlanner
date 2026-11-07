@@ -28,6 +28,7 @@ import type {
 } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
 import { usePersonalAccounts } from "@/components/visionario/financeiro/use-personal-accounts";
+import { PersonalCategoryPicker } from "@/components/visionario/financeiro/personal-category-picker";
 import { PERSONAL_PAYER_NAME } from "@/lib/finance/personal-link";
 
 interface Props {
@@ -139,6 +140,7 @@ function MovementForm({
   const [recordOnly, setRecordOnly] = useState(false);
   const [payerLabel, setPayerLabel] = useState<"junior" | "empresa">("empresa");
   const [personalAccountId, setPersonalAccountId] = useState("");
+  const [personalCategoryId, setPersonalCategoryId] = useState("");
   const juniorPays = scope === "visionario" && kind === "saida" && payerLabel === "junior";
   const personal = usePersonalAccounts(scope, juniorPays && settled && !recordOnly);
   // Júnior sem acesso às contas pessoais (outro membro logado): só registra.
@@ -212,6 +214,7 @@ function MovementForm({
       accountId: isSettled && !recordOnly && !juniorPays ? accountId : undefined,
       recordOnly: isSettled && (recordOnly || juniorRecordOnly),
       personalAccountId: isSettled && !recordOnly && juniorPays && !juniorRecordOnly ? personalAccountId : undefined,
+      personalCategoryId: isSettled && !recordOnly && juniorPays && !juniorRecordOnly && personalCategoryId ? personalCategoryId : undefined,
       payerLabel: scope === "visionario" && kind === "saida" && payerLabel !== "empresa" ? payerLabel : undefined,
       paymentDate: isSettled ? paymentDate : undefined,
       notes: notes || undefined,
@@ -477,6 +480,9 @@ function MovementForm({
                           {personal.accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name} · saldo {formatCurrency(a.balance)}</SelectItem>)}
                         </SelectContent>
                       </Select>}
+                </div>}
+                {!recordOnly && juniorPays && personal.allowed && personal.accounts.length > 0 && <div className="sm:col-span-2">
+                  <PersonalCategoryPicker categories={personal.categories} value={personalCategoryId} onChange={setPersonalCategoryId} onCreated={personal.addCategory} disabled={pending} />
                 </div>}
                 {!recordOnly && !juniorPays && <div className="flex flex-col gap-1.5">
                   <Label>Conta</Label>

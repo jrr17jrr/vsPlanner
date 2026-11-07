@@ -266,6 +266,8 @@ export type MovementFormInput = {
    * PESSOAL (migration 20261110100000) — a empresa não movimenta conta.
    */
   personalAccountId?: string;
+  /** Categoria da saída no Pessoal (vazio = "Pagamentos da Visionário Dev"). */
+  personalCategoryId?: string;
   /** Data real do pagamento quando `settled` (padrão: a própria data da movimentação). */
   paymentDate?: string;
 
@@ -368,6 +370,7 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
       paymentDate: input.paymentDate && DATE_RE.test(input.paymentDate) ? input.paymentDate : input.dueDate,
       paymentMethod: input.paymentMethod!,
       personalAccountId: input.personalAccountId!,
+      personalCategoryId: input.personalCategoryId || undefined,
       settle: true,
     });
     revalidateFinancialViews(scope);
@@ -413,6 +416,8 @@ export type RegisterPaymentInput = {
   recordOnly?: boolean;
   /** Pago pelo Ricardo Júnior descontando de uma conta do Financeiro Pessoal. */
   personalAccountId?: string;
+  /** Categoria da saída no Pessoal (vazio = "Pagamentos da Visionário Dev"). */
+  personalCategoryId?: string;
   notes?: string;
   /**
    * true = este pagamento QUITA a cobrança mesmo com valor diferente do
@@ -455,6 +460,7 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
       paymentDate: input.paymentDate,
       paymentMethod: input.paymentMethod,
       personalAccountId: input.personalAccountId,
+      personalCategoryId: input.personalCategoryId || undefined,
       settle: input.settle,
       notes: input.notes,
     });

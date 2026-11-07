@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { findPersonalDuplicatesAction, linkPaymentToPersonalAccountAction, type PersonalDuplicateCandidate } from "@/lib/supabase/financial-personal-link-actions";
 import { usePersonalAccounts } from "@/components/visionario/financeiro/use-personal-accounts";
+import { PersonalCategoryPicker } from "@/components/visionario/financeiro/personal-category-picker";
 import { PERSONAL_PAYER_NAME } from "@/lib/finance/personal-link";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { FinancialPayment } from "@/types/database.types";
@@ -39,6 +40,7 @@ export function LinkPersonalDialog({
   const [pickedAccountId, setAccountId] = useState("");
   const [checked, setChecked] = useState<{ accountId: string; candidates: PersonalDuplicateCandidate[]; failed?: boolean } | null>(null);
   const [choice, setChoice] = useState<string>("novo");
+  const [categoryId, setCategoryId] = useState("");
   const [pending, setPending] = useState(false);
   const amount = Number(payment.amount);
 
@@ -75,6 +77,7 @@ export function LinkPersonalDialog({
     const result = await linkPaymentToPersonalAccountAction(scope, payment.id, accountId, {
       existingPersonalPaymentId: choice === "novo" ? undefined : choice,
       detachBusinessAccount: !!payment.account_id,
+      personalCategoryId: choice === "novo" && categoryId ? categoryId : undefined,
     });
     setPending(false);
     if (result.error) return toast.error(result.error);
@@ -139,6 +142,10 @@ export function LinkPersonalDialog({
                   <span>São gastos diferentes — descontar {formatCurrency(amount)} agora</span>
                 </label>
               </div>
+            )}
+
+            {ready && choice === "novo" && (
+              <PersonalCategoryPicker categories={personal.categories} value={categoryId} onChange={setCategoryId} onCreated={personal.addCategory} disabled={pending} />
             )}
 
             {ready && checked.candidates.length === 0 && selected && (

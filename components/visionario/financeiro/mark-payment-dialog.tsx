@@ -13,6 +13,7 @@ import { PAYMENT_METHOD_LABEL } from "@/lib/finance-labels";
 import { PERSONAL_PAYER_NAME } from "@/lib/finance/personal-link";
 import { formatCurrency, formatDate, parseMoneyInput as parseMoney, todayKeySaoPaulo } from "@/lib/format";
 import { usePersonalAccounts } from "@/components/visionario/financeiro/use-personal-accounts";
+import { PersonalCategoryPicker } from "@/components/visionario/financeiro/personal-category-picker";
 import type { FinancialAccount, FinancialCharge, FinancialPaymentMethod } from "@/types/database.types";
 import type { FinancialScope } from "@/lib/space-slugs";
 
@@ -51,6 +52,7 @@ export function MarkPaymentDialog({
   const [paymentMethod, setPaymentMethod] = useState<FinancialPaymentMethod>("pix");
   const [accountId, setAccountId] = useState(activeAccounts[0]?.id ?? "");
   const [personalAccountId, setPersonalAccountId] = useState("");
+  const [personalCategoryId, setPersonalCategoryId] = useState("");
   const [settle, setSettle] = useState(true);
   const [notes, setNotes] = useState("");
   const [payerLabel, setPayerLabel] = useState<"junior" | "empresa">("empresa");
@@ -86,7 +88,7 @@ export function MarkPaymentDialog({
       accountId: juniorPays ? "" : accountId,
       recordOnly,
       ...(payerChoice ? { payerLabel } : {}),
-      ...(juniorPays && !recordOnly ? { personalAccountId } : {}),
+      ...(juniorPays && !recordOnly ? { personalAccountId, personalCategoryId: personalCategoryId || undefined } : {}),
       settle,
       notes: notes || undefined,
     });
@@ -226,6 +228,13 @@ export function MarkPaymentDialog({
                           : `Saldo de ${selectedPersonal.name}: ${formatCurrency(selectedPersonal.balance)} → ${formatCurrency(selectedPersonal.balance - value)}. A movimentação pessoal indicará que pagou “${charge.description}” da Visionário Dev.`}
                       </p>
                     )}
+                    <PersonalCategoryPicker
+                      categories={personal.categories}
+                      value={personalCategoryId}
+                      onChange={setPersonalCategoryId}
+                      onCreated={personal.addCategory}
+                      disabled={pending}
+                    />
                   </>
                 )}
               </div>

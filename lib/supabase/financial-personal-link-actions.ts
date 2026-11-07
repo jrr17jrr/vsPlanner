@@ -6,10 +6,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revalidateFinancialViews } from "@/lib/supabase/finance-core";
 import { isMissingPersonalLinkSchema } from "@/lib/supabase/repositories/financial.repository";
 import { PERSONAL_LINK_MIGRATION_MESSAGE, canPayWithPersonalAccounts, findPersonalDuplicateCandidates } from "@/lib/finance/personal-link";
-import { listFinancialAccounts, listFinancialCharges, listFinancialPayments } from "@/lib/supabase/repositories/financial.repository";
+import { listFinancialAccounts, listFinancialCategories, listFinancialCharges, listFinancialPayments } from "@/lib/supabase/repositories/financial.repository";
 import { accountBalance } from "@/lib/financial-calc";
 import type { PersonalAccountOption } from "@/types/database.types";
-import { payChargeWithPersonalAccountCore, type PersonalPaymentInput } from "@/lib/supabase/finance-personal-core";
+import { applyCategoryToLinkedDebit, payChargeWithPersonalAccountCore, setPersonalChargeCategory, type PersonalPaymentInput } from "@/lib/supabase/finance-personal-core";
 import type { FinancialScope } from "@/lib/space-slugs";
 
 /**
@@ -36,27 +36,81 @@ function revalidateBoth(scope: FinancialScope) {
  * (as mesmas contas já cadastradas — nunca cria conta). Só para o próprio
  * Ricardo Júnior; para os demais volta `allowed: false`.
  */
-export async function listMyPersonalAccountsAction(scope: FinancialScope): Promise<{ allowed: boolean; accounts: PersonalAccountOption[]; error?: string }> {
-  if (scope === "pessoal") return { allowed: false, accounts: [] };
+export async function listMyPersonalAccountsAction(
+  scope: FinancialScope
+): Promise<{ allowed: boolean; accounts: PersonalAccountOption[]; categories: PersonalCategoryOption[]; error?: string }> {
+  if (scope === "pessoal") return { allowed: false, accounts: [], categories: [] };
   const { profile, space } = await requireScopedModulePermission(scope, "financeiro", "edit");
-  if (!canPayWithPersonalAccounts(profile, space)) return { allowed: false, accounts: [] };
+  if (!canPayWithPersonalAccounts(profile, space)) return { allowed: false, accounts: [], categories: [] };
   const { space: personal } = await requirePersonalSpace();
   try {
-    const [accounts, charges, payments] = await Promise.all([
+    const [accounts, charges, payments, categories] = await Promise.all([
       listFinancialAccounts(personal.id),
       listFinancialCharges(personal.id),
       listFinancialPayments(personal.id),
+      listFinancialCategories(personal.id),
     ]);
     const kinds = new Map(charges.map((c) => [c.id, c.kind]));
     return {
       allowed: true,
+      categories: categories.filter((c) => c.kind === "saida" && c.is_active).map((c) => ({ id: c.id, name: c.name })),
       accounts: accounts
         .filter((a) => a.is_active)
         .map((a) => ({ id: a.id, name: a.name, balance: accountBalance(a, payments, kinds), initial_balance_date: a.initial_balance_date })),
     };
   } catch (e) {
-    return { allowed: true, accounts: [], error: e instanceof Error ? e.message : "Não foi possível carregar as contas pessoais." };
+    return { allowed: true, accounts: [], categories: [], error: e instanceof Error ? e.message : "Não foi possível carregar as contas pessoais." };
   }
+}
+
+export type PersonalCategoryOption = { id: string; name: string };
+
+/**
+ * Cria (ou reaproveita, se já existir com o mesmo nome) uma categoria de
+ * DESPESA no Financeiro Pessoal de quem está logado. Chamável tanto do
+ * financeiro da empresa quanto do Pessoal — sempre grava no Pessoal.
+ */
+export async function createPersonalExpenseCategoryAction(name: string): Promise<{ category?: PersonalCategoryOption; error?: string }> {
+  const clean = typeof name === "string" ? name.trim().replace(/s+/g, " ") : "";
+  if (!clean) return { error: "Dê um nome para a categoria." };
+  if (clean.length > 80) return { error: "Nome muito longo (até 80 caracteres)." };
+  const { profile, space } = await requireScopedModulePermission("pessoal", "financeiro", "create");
+  const supabase = await createSupabaseServerClient();
+  const { data: existing } = await supabase
+    .from("financial_categories")
+    .select("id, name, is_active")
+    .eq("space_id", space.id)
+    .eq("kind", "saida")
+    .ilike("name", clean.replace(/[\\%_]/g, (m) => `\\${m}`))
+    .limit(1);
+  const found = existing?.[0];
+  if (found) {
+    if (!found.is_active) await supabase.from("financial_categories").update({ is_active: true }).eq("id", found.id).eq("space_id", space.id);
+    return { category: { id: found.id, name: found.name } };
+  }
+  const { data, error } = await supabase
+    .from("financial_categories")
+    .insert({ space_id: space.id, kind: "saida", name: clean, created_by: profile.id })
+    .select("id, name")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Não foi possível criar a categoria." };
+  revalidateFinancialViews("pessoal");
+  return { category: { id: data.id, name: data.name } };
+}
+
+/**
+ * Financeiro Pessoal → trocar a categoria de uma saída (inclusive as que
+ * pagaram despesas da Visionário Dev). Só a categoria muda: valor, conta,
+ * data do pagamento e vínculo com a empresa continuam iguais.
+ */
+export async function updatePersonalMovementCategoryAction(chargeId: string, categoryId: string): Promise<ActionState> {
+  if (!categoryId) return { error: "Escolha a categoria." };
+  const { space } = await requireScopedModulePermission("pessoal", "financeiro", "edit");
+  const supabase = await createSupabaseServerClient();
+  const result = await setPersonalChargeCategory(supabase as unknown as SupabaseClient, space.id, chargeId, categoryId);
+  if (result.error) return { error: result.error };
+  revalidateFinancialViews("pessoal");
+  return { success: "Categoria atualizada. Valor, conta, data e vínculo não foram alterados." };
 }
 
 export async function payChargeWithPersonalAccountAction(scope: FinancialScope, chargeId: string, input: PersonalPaymentInput): Promise<ActionState> {
@@ -143,7 +197,7 @@ export async function linkPaymentToPersonalAccountAction(
   scope: FinancialScope,
   businessPaymentId: string,
   personalAccountId: string,
-  options: { existingPersonalPaymentId?: string; detachBusinessAccount?: boolean } = {}
+  options: { existingPersonalPaymentId?: string; detachBusinessAccount?: boolean; personalCategoryId?: string } = {}
 ): Promise<ActionState> {
   if (scope === "pessoal") return { error: "Disponível apenas no financeiro da empresa." };
   const { space } = await requireScopedModulePermission(scope, "financeiro", "edit");
@@ -159,7 +213,13 @@ export async function linkPaymentToPersonalAccountAction(
     p_detach_business_account: options.detachBusinessAccount === true,
   });
   if (error) return { error: rpcError(error) };
+  let categoryWarning = "";
+  if (!options.existingPersonalPaymentId && options.personalCategoryId) {
+    const cat = await applyCategoryToLinkedDebit(supabase as unknown as SupabaseClient, businessPaymentId, options.personalCategoryId);
+    if (cat.error) categoryWarning = ` A categoria escolhida não foi aplicada (${cat.error}); ficou em "Pagamentos da Visionário Dev".`;
+  }
   revalidateBoth(scope);
+  if (categoryWarning) return { success: "Pagamento vinculado e descontado da conta pessoal." + categoryWarning };
   return {
     success: options.existingPersonalPaymentId
       ? "Pagamento vinculado ao lançamento pessoal existente — nada foi descontado de novo."
