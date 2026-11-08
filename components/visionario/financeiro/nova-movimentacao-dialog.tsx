@@ -30,6 +30,8 @@ import type { FinancialScope } from "@/lib/space-slugs";
 import { usePersonalAccounts } from "@/components/visionario/financeiro/use-personal-accounts";
 import { PersonalCategoryPicker } from "@/components/visionario/financeiro/personal-category-picker";
 import { PERSONAL_PAYER_NAME } from "@/lib/finance/personal-link";
+import { buildInstallmentPlan, type InstallmentValueMode } from "@/lib/finance/installments";
+import { FirstDueField, InstallmentPreview, ValueModeToggle } from "@/components/financeiro/installments/installment-fields";
 
 interface Props {
   scope: FinancialScope;
@@ -127,6 +129,7 @@ function MovementForm({
 
   const [tipo, setTipo] = useState<FinancialOriginType>("unico");
   const [installmentCount, setInstallmentCount] = useState("3");
+  const [valueMode, setValueMode] = useState<InstallmentValueMode>("total");
 
   const [frequency, setFrequency] = useState<FinancialRecurrenceFrequency>("mensal");
   const [interval, setInterval_] = useState("2");
@@ -161,6 +164,11 @@ function MovementForm({
   const discount = parseMoneyInput(discountAmount) || 0;
   const addition = parseMoneyInput(additionAmount) || 0;
   const final = original - discount + addition;
+  const count = parseInt(installmentCount, 10) || 0;
+  const installmentPlan = useMemo(
+    () => (tipo === "parcelado" ? buildInstallmentPlan({ mode: valueMode, amount: original, count, firstDue: dueDate, discount, addition }) : null),
+    [tipo, valueMode, original, count, dueDate, discount, addition]
+  );
 
   function handleClientChange(id: string) {
     setClientId(id === "nenhum" ? "" : id);
@@ -180,7 +188,8 @@ function MovementForm({
     if (!description.trim()) return toast.error("Descreva a movimentação.");
     if (!original || original <= 0) return toast.error("Informe o valor.");
     if (!dueDate) return toast.error("Escolha a data.");
-    if (final <= 0) return toast.error("O valor final precisa ser maior que zero.");
+    if (tipo !== "parcelado" && final <= 0) return toast.error("O valor final precisa ser maior que zero.");
+    if (tipo === "parcelado" && !installmentPlan) return toast.error("Revise valor, quantidade (2 a 120) e primeiro vencimento do parcelamento.");
     // Recorrente: cada competência nasce pendente e é paga individualmente.
     const isSettled = tipo === "unico" ? settled : false;
     const usesDay = tipo === "recorrente" && frequency !== "semanal";
@@ -197,13 +206,15 @@ function MovementForm({
       referenceTypeId: referenceTypeId || undefined,
       categoryId: categoryId || undefined,
       supplierName: supplierName || undefined,
-      originalAmount: original,
+      // Parcelado por valor da parcela: o total é calculado (parcela × quantidade), nunca ajustado em silêncio.
+      originalAmount: tipo === "parcelado" && installmentPlan ? installmentPlan.gross : original,
       discountAmount: discount || undefined,
       additionAmount: addition || undefined,
       dueDate,
-      competencyDate: tipo === "recorrente" ? undefined : competencyDate || undefined,
+      competencyDate: tipo === "unico" ? competencyDate || undefined : undefined,
       tipo,
-      installmentCount: tipo === "parcelado" ? parseInt(installmentCount, 10) : undefined,
+      installmentCount: tipo === "parcelado" ? count : undefined,
+      installmentAmounts: tipo === "parcelado" && installmentPlan ? installmentPlan.installments.map((i) => i.amount) : undefined,
       recurrenceFrequency: tipo === "recorrente" ? frequency : undefined,
       recurrenceInterval: tipo === "recorrente" && (frequency === "a_cada_x_meses" || frequency === "customizado") ? parseInt(interval, 10) : undefined,
       recurrenceEndType: tipo === "recorrente" ? (hasEndDate ? "em_data" : "nunca") : undefined,
@@ -331,7 +342,7 @@ function MovementForm({
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="flex flex-col gap-1.5">
-            <Label>Valor original *</Label>
+            <Label>{tipo === "parcelado" ? (valueMode === "total" ? "Valor total da dívida *" : "Valor de cada parcela *") : "Valor original *"}</Label>
             <Input inputMode="decimal" value={originalAmount} onChange={(e) => setOriginalAmount(e.target.value)} disabled={pending} placeholder="0,00" />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -343,9 +354,11 @@ function MovementForm({
             <Input inputMode="decimal" value={additionAmount} onChange={(e) => setAdditionAmount(e.target.value)} disabled={pending} placeholder="0,00" />
           </div>
         </div>
+        {tipo !== "parcelado" && (
         <p className="text-sm text-muted-foreground">
           Valor final: <span className="font-medium text-foreground">{final.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
         </p>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <Label>Tipo</Label>
@@ -359,14 +372,16 @@ function MovementForm({
         </div>
 
         {tipo === "parcelado" && (
-          <div className="flex flex-col gap-1.5">
-            <Label>Número de parcelas</Label>
-            <Input type="number" min={2} value={installmentCount} onChange={(e) => setInstallmentCount(e.target.value)} disabled={pending} />
-            <p className="text-xs text-muted-foreground">
-              {installmentCount && original > 0
-                ? `${installmentCount}x de ${(final / (parseInt(installmentCount, 10) || 1)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`
-                : null}
-            </p>
+          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+            <ValueModeToggle mode={valueMode} onChange={setValueMode} disabled={pending} />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="mov-installments">Quantidade de parcelas *</Label>
+                <Input id="mov-installments" type="number" inputMode="numeric" min={2} max={120} value={installmentCount} onChange={(e) => setInstallmentCount(e.target.value)} disabled={pending} />
+              </div>
+              <FirstDueField id="mov-first-due" value={dueDate} onChange={setDueDate} today={todayKeySaoPaulo()} disabled={pending} />
+            </div>
+            <InstallmentPreview plan={installmentPlan} />
           </div>
         )}
 
@@ -418,11 +433,11 @@ function MovementForm({
           </div>
         )}
 
-        {tipo !== "recorrente" && (
+        {tipo === "unico" && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label>
-              {tipo === "parcelado" ? "Vencimento da 1ª parcela" : settled ? "Data" : "Vencimento"} *
+              {settled ? "Data" : "Vencimento"} *
             </Label>
             <div className="flex gap-2">
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />

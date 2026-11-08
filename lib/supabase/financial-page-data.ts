@@ -15,6 +15,8 @@ import {
 } from "@/lib/supabase/repositories/financial.repository";
 import { listClients, listAllClientServices, listServices } from "@/lib/supabase/repositories/clients.repository";
 import { ensureFinancialDefaults, ensureRecurringChargesForSpace } from "@/lib/supabase/finance-core";
+import { listCardsData, materializeSubscriptions } from "@/lib/supabase/repositories/credit-cards.repository";
+import { EMPTY_CARDS_DATA } from "@/lib/finance/credit-card";
 import type { FinancialScope } from "@/lib/space-slugs";
 import type { Space } from "@/types/database.types";
 
@@ -52,10 +54,13 @@ export async function loadFinanceiroPageData(scope: FinancialScope) {
     const supabase = await createSupabaseServerClient();
     await ensureFinancialDefaults(supabase, space.id, profile.id);
     await ensureRecurringChargesForSpace(supabase, space.id, profile.id);
+    // Cartões (só no Pessoal): cobranças de assinatura que já venceram, uma vez cada.
+    if (scope === "pessoal") await materializeSubscriptions(space.id).catch(() => undefined);
   }
 
-  const [charges, payments, accounts, categories, referenceTypes, origins, clients, clientServices, services, personalLinks, reversals] =
+  const [cards, charges, payments, accounts, categories, referenceTypes, origins, clients, clientServices, services, personalLinks, reversals] =
     await Promise.all([
+      scope === "pessoal" ? listCardsData(space.id) : Promise.resolve(EMPTY_CARDS_DATA),
       listFinancialCharges(space.id),
       listFinancialPayments(space.id),
       listFinancialAccounts(space.id),
@@ -81,6 +86,7 @@ export async function loadFinanceiroPageData(scope: FinancialScope) {
     services,
     personalLinks,
     reversals,
+    cards,
     permissions: { canCreate, canEdit, canDelete },
   };
 }

@@ -196,3 +196,65 @@ export function previousRange(from: string, to: string): { from: string; to: str
 }
 
 export const SUGGESTED_EXPENSE_CATEGORIES = ["Alimentação", "Cursos", "Transporte", "Assinaturas", "Saúde", "Lazer", "Compras", "Moradia", "Outros"] as const;
+
+// ---------------------------------------------------------------------------
+// Cartões de crédito (migration 20261113100000) — sem dupla contagem
+// ---------------------------------------------------------------------------
+
+/** Lançamento sintético de compra no cartão (não é editável como cobrança). */
+export const CARD_ITEM_PREFIX = "card-item:";
+
+type CardSpendingData = {
+  invoices: { id: string; reference_month: string; due_date: string; charge_id: string | null }[];
+  purchases: { id: string; description: string; category_id: string | null; status: string; purchase_type: string }[];
+  items: { id: string; purchase_id: string; invoice_id: string; item_type: string; installment_number: number | null; installment_total: number | null; amount: number; description: string | null; status: string; created_by: string; created_at: string }[];
+};
+
+/**
+ * Base "competência": a fatura do cartão (cobrança única no A pagar) é
+ * trocada pelas COMPRAS que a compõem, cada uma na categoria dela e no mês
+ * da fatura em que entrou (parcelas mês a mês; estorno abate). Base "pago":
+ * fica o pagamento real da fatura (dinheiro que saiu da conta). Assim o
+ * mesmo gasto nunca aparece duas vezes.
+ */
+export function cardAwareCharges(charges: FinancialCharge[], cards: CardSpendingData | null | undefined, basis: SpendingBasis): FinancialCharge[] {
+  if (!cards || basis !== "competencia" || cards.items.length === 0) return charges;
+  const invoiceById = new Map(cards.invoices.map((i) => [i.id, i]));
+  const purchaseById = new Map(cards.purchases.map((p) => [p.id, p]));
+  const invoiceCharges = new Set([...cards.invoices.map((i) => i.charge_id).filter(Boolean), ...charges.filter((c) => c.card_invoice_id).map((c) => c.id)]);
+  const synthetic: FinancialCharge[] = [];
+  for (const it of cards.items) {
+    if (it.status !== "ativo") continue;
+    const inv = invoiceById.get(it.invoice_id);
+    const p = purchaseById.get(it.purchase_id);
+    if (!inv || !p || p.status !== "ativa") continue;
+    const suffix = it.item_type === "parcela" && (it.installment_total ?? 1) > 1 ? ` (${it.installment_number}/${it.installment_total})` : "";
+    synthetic.push({
+      id: `${CARD_ITEM_PREFIX}${it.id}`,
+      space_id: "",
+      origin_id: `card-purchase:${p.id}`,
+      kind: "saida",
+      description: `${it.item_type === "parcela" ? p.description : it.description ?? `Estorno · ${p.description}`}${suffix} · cartão`,
+      client_id: null,
+      client_service_id: null,
+      reference_type_id: null,
+      category_id: p.category_id,
+      supplier_name: null,
+      installment_number: it.installment_number,
+      installment_total: it.installment_total,
+      original_amount: Number(it.amount),
+      discount_amount: 0,
+      addition_amount: 0,
+      amount: Number(it.amount),
+      due_date: inv.due_date,
+      competency_date: inv.reference_month,
+      status: "ativo",
+      notes: null,
+      created_by: it.created_by,
+      updated_by: null,
+      created_at: it.created_at,
+      updated_at: it.created_at,
+    });
+  }
+  return [...charges.filter((c) => !invoiceCharges.has(c.id)), ...synthetic];
+}

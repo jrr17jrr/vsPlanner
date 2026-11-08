@@ -38,14 +38,17 @@ const STATUS_MAP: Record<string, { label: string; variant: Variant }> = {
 export function StatusBadge({
   status,
   className,
+  label,
 }: {
   status: string;
   className?: string;
+  /** Texto próprio mantendo a cor do status (ex.: "Paga" no feminino). */
+  label?: string;
 }) {
   const meta = STATUS_MAP[status] ?? { label: status, variant: "outline" as Variant };
   return (
     <Badge variant={meta.variant} className={cn(className)}>
-      {meta.label}
+      {label ?? meta.label}
     </Badge>
   );
 }

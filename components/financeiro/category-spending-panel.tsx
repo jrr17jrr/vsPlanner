@@ -19,6 +19,8 @@ import {
   previousRange,
   shiftMonth,
   summarizeSpending,
+  cardAwareCharges,
+  CARD_ITEM_PREFIX,
   SUGGESTED_EXPENSE_CATEGORIES,
   UNCATEGORIZED,
   yearRange,
@@ -66,7 +68,10 @@ export function CategorySpendingPanel({
   referenceTypes,
   canEdit,
   canCreate,
+  cards,
 }: {
+  /** Cartões: compras entram por categoria no lugar da fatura (sem dupla contagem). */
+  cards?: Parameters<typeof cardAwareCharges>[1];
   charges: FinancialCharge[];
   payments: FinancialPayment[];
   categories: FinancialCategory[];
@@ -104,10 +109,11 @@ export function CategorySpendingPanel({
   }, [mode, month, compareMonth, year, from, to]);
 
   const filters = { ...range, basis, originType, categoryId: categoryId === "todas" ? null : categoryId };
+  const effectiveCharges = useMemo(() => cardAwareCharges(charges, cards, basis), [charges, cards, basis]);
   const summary = useMemo(
-    () => summarizeSpending({ charges, payments, categories, origins }, filters, compare),
+    () => summarizeSpending({ charges: effectiveCharges, payments, categories, origins }, filters, compare),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [charges, payments, categories, origins, range.from, range.to, basis, originType, categoryId, compare.from, compare.to]
+    [effectiveCharges, payments, categories, origins, range.from, range.to, basis, originType, categoryId, compare.from, compare.to]
   );
   const visible = summary.categories.filter((c) => c.total > 0);
   const top = visible.slice(0, 5);
@@ -249,11 +255,11 @@ export function CategorySpendingPanel({
                     <p className="text-[11px] text-muted-foreground">
                       {formatDate(e.date)} · {detailCategory?.name}
                       {e.paymentMethods.length > 0 && ` · ${e.paymentMethods.map((m) => PAYMENT_METHOD_LABEL[m as FinancialPaymentMethod] ?? m).join(", ")}`}
-                      {basis === "competencia" && !paidCharges.has(e.charge.id) && " · a pagar"}
+                      {basis === "competencia" && !paidCharges.has(e.charge.id) && !e.charge.id.startsWith(CARD_ITEM_PREFIX) && " · a pagar"}
                     </p>
                   </div>
                   <span className="shrink-0 text-sm font-medium tabular-nums">{formatCurrency(e.amount)}</span>
-                  {canEdit && (
+                  {canEdit && !e.charge.id.startsWith(CARD_ITEM_PREFIX) && (
                     <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label={`Editar ${e.charge.description}`} onClick={() => setEditing(e.charge)}>
                       <Pencil className="h-4 w-4" />
                     </Button>

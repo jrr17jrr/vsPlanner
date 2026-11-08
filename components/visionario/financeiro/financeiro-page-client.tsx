@@ -36,6 +36,8 @@ import { ChargesList } from "@/components/visionario/financeiro/charges-list";
 import { MovementsList } from "@/components/visionario/financeiro/movements-list";
 import { FinancialConfigManager } from "@/components/visionario/financeiro/financial-config-manager";
 import { CategorySpendingPanel } from "@/components/financeiro/category-spending-panel";
+import { CardsPanel } from "@/components/financeiro/cards/cards-panel";
+import { EMPTY_CARDS_DATA, type CardsData } from "@/lib/finance/credit-card";
 import {
   accountBalance,
   calculateMRR,
@@ -126,9 +128,12 @@ export function FinanceiroPageClient({
   services,
   personalLinks = [],
   reversals = [],
+  cards = EMPTY_CARDS_DATA,
   permissions,
   initialTab = "visao",
 }: {
+  /** Cartões de crédito (só no Pessoal). */
+  cards?: CardsData;
   personalLinks?: FinancialPersonalLink[];
   reversals?: FinancialPaymentReversal[];
   initialTab?: Tab;
@@ -144,7 +149,7 @@ export function FinanceiroPageClient({
   services: Service[];
   permissions: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }) {
-  const [tab, setTab] = useState<Tab>(initialTab === "categorias" && scope !== "pessoal" ? "visao" : initialTab);
+  const [tab, setTab] = useState<Tab>((initialTab === "categorias" || initialTab === "cartoes") && scope !== "pessoal" ? "visao" : initialTab);
   const router = useRouter();
   const [debtBusy, setDebtBusy] = useState(false);
   const [payDebt, setPayDebt] = useState(false);
@@ -203,6 +208,8 @@ export function FinanceiroPageClient({
     referenceTypes,
     origins,
     permissions,
+    cards: cards.cards,
+    onOpenCards: scope === "pessoal" ? () => setTab("cartoes") : undefined,
   };
 
   return (
@@ -242,6 +249,7 @@ export function FinanceiroPageClient({
           <TabsTrigger value="movimentacoes">Movimentações</TabsTrigger>
           <TabsTrigger value="a_receber">A receber</TabsTrigger>
           <TabsTrigger value="a_pagar">A pagar</TabsTrigger>
+          {scope === "pessoal" && <TabsTrigger value="cartoes">Cartões de crédito</TabsTrigger>}
           <TabsTrigger value="config">Contas e categorias</TabsTrigger>
         </ScrollableTabsList>
       </Tabs>
@@ -405,6 +413,7 @@ export function FinanceiroPageClient({
           referenceTypes={referenceTypes}
           canEdit={permissions.canEdit}
           canCreate={permissions.canCreate}
+          cards={cards.available ? cards : undefined}
         />
       )}
 
@@ -416,6 +425,9 @@ export function FinanceiroPageClient({
       )}
       {tab === "a_pagar" && (
         <ChargesList {...listProps} kind="saida" onCreate={() => setDialog({ kind: "saida", pending: true })} selectedMonth={selectedMonth} />
+      )}
+      {tab === "cartoes" && scope === "pessoal" && (
+        <CardsPanel data={cards} charges={charges} payments={payments} accounts={accounts} categories={categories} permissions={permissions} />
       )}
       {tab === "config" && (
         <FinancialConfigManager

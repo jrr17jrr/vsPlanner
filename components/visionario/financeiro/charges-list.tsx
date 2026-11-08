@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Ban, HandCoins, History, Lock, Pencil, MoreVertical, Plus, Repeat, StopCircle, Undo2 } from "lucide-react";
+import { CheckCircle2, Ban, CalendarClock, CreditCard, HandCoins, History, ListOrdered, Lock, Pencil, MoreVertical, Plus, Repeat, StopCircle, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Tabs, ScrollableTabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ import { EditChargeDialog } from "@/components/visionario/financeiro/edit-charge
 import { RecurrencesPanel } from "@/components/visionario/financeiro/recurrences-panel";
 import { UndoPaymentDialog } from "@/components/visionario/financeiro/undo-payment-dialog";
 import { PaymentHistoryDialog } from "@/components/visionario/financeiro/payment-history-dialog";
+import { InstallmentPlanDialog, RescheduleInstallmentDialog, installmentsOf } from "@/components/financeiro/installments/installment-dialogs";
+import type { CreditCard as Card } from "@/lib/finance/credit-card";
 import { activeLinksIndex } from "@/lib/finance/personal-link";
 import { isDueUpToMonth, listChargesForKind, pendingUpToMonth, type ReceivablePayable } from "@/lib/financial-calc";
 import { cancelChargeAction, stopRecurrenceAction } from "@/lib/supabase/financial-actions";
@@ -63,7 +65,13 @@ export function ChargesList({
   selectedMonth,
   personalLinks = [],
   reversals = [],
+  cards = [],
+  onOpenCards,
 }: {
+  /** Cartões do Pessoal (converter parcelamento em compra no cartão). */
+  cards?: Card[];
+  /** Abre a aba Cartões (cobranças que são faturas de cartão). */
+  onOpenCards?: () => void;
   personalLinks?: FinancialPersonalLink[];
   reversals?: FinancialPaymentReversal[];
   scope: FinancialScope;
@@ -85,6 +93,8 @@ export function ChargesList({
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
   const [historyCharge, setHistoryCharge] = useState<FinancialCharge | null>(null);
   const [undoing, setUndoing] = useState<FinancialPayment | null>(null);
+  const [planOrigin, setPlanOrigin] = useState<string | null>(null);
+  const [rescheduling, setRescheduling] = useState<FinancialCharge | null>(null);
   const router = useRouter();
   const links = useMemo(() => activeLinksIndex(personalLinks), [personalLinks]);
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -231,7 +241,10 @@ export function ChargesList({
             const hasHistory = chargePayments.length > 0 || (reversalsByCharge.get(charge.id)?.length ?? 0) > 0;
             const locked = lockedChargeIds.has(charge.id);
             const canUndo = permissions.canEdit && chargePayments.length > 0 && !locked;
-            const hasMenu = permissions.canEdit || (permissions.canDelete && open && row.paid === 0) || canStop || hasHistory;
+            const isCardInvoice = !!charge.card_invoice_id;
+            const isInstallment = !!charge.installment_number && origin?.origin_type === "parcelado";
+            const canReschedule = permissions.canEdit && open && !isCardInvoice && !locked;
+            const hasMenu = permissions.canEdit || (permissions.canDelete && open && row.paid === 0) || canStop || hasHistory || isInstallment;
             return (
               <li
                 key={charge.id}
@@ -245,6 +258,7 @@ export function ChargesList({
                     {!client && charge.supplier_name && <span>· {charge.supplier_name}</span>}
                     {category && <span>· {category.name}</span>}
                     {locked && <span className="inline-flex items-center gap-0.5 text-warning">· <Lock className="h-3 w-3" aria-hidden /> pagamento desfeito sem devolução</span>}
+                    {isCardInvoice && <span className="inline-flex items-center gap-0.5">· <CreditCard className="h-3 w-3" aria-hidden /> fatura de cartão</span>}
                     {info && (
                       <span className="inline-flex items-center gap-0.5">
                         · {origin?.origin_type === "recorrente" && <Repeat className="h-3 w-3" aria-hidden />}
@@ -286,9 +300,24 @@ export function ChargesList({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {permissions.canEdit && (
+                        {permissions.canEdit && !isCardInvoice && (
                           <DropdownMenuItem onClick={() => setEditingCharge(row)}>
                             <Pencil className="h-4 w-4" /> Editar cobrança
+                          </DropdownMenuItem>
+                        )}
+                        {isCardInvoice && onOpenCards && (
+                          <DropdownMenuItem onClick={onOpenCards}>
+                            <CreditCard className="h-4 w-4" /> Ver no cartão
+                          </DropdownMenuItem>
+                        )}
+                        {canReschedule && (
+                          <DropdownMenuItem onClick={() => setRescheduling(charge)}>
+                            <CalendarClock className="h-4 w-4" /> Alterar vencimento
+                          </DropdownMenuItem>
+                        )}
+                        {isInstallment && (
+                          <DropdownMenuItem onClick={() => setPlanOrigin(charge.origin_id)}>
+                            <ListOrdered className="h-4 w-4" /> Ver parcelamento
                           </DropdownMenuItem>
                         )}
                         {canUndo && (
@@ -306,7 +335,7 @@ export function ChargesList({
                             <StopCircle className="h-4 w-4" /> Encerrar recorrência
                           </DropdownMenuItem>
                         )}
-                        {permissions.canDelete && open && row.paid === 0 && (
+                        {permissions.canDelete && open && row.paid === 0 && !isCardInvoice && (
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -335,6 +364,28 @@ export function ChargesList({
           referenceTypes={referenceTypes}
           hasPayment={editingCharge.paid > 0}
           onOpenChange={(open) => !open && setEditingCharge(null)}
+        />
+      )}
+
+      {planOrigin && (
+        <InstallmentPlanDialog
+          scope={scope}
+          originId={planOrigin}
+          charges={charges}
+          payments={payments}
+          cards={scope === "pessoal" ? cards : []}
+          canEdit={permissions.canEdit}
+          onReschedule={(c) => setRescheduling(c)}
+          onOpenChange={(o) => !o && setPlanOrigin(null)}
+        />
+      )}
+
+      {rescheduling && (
+        <RescheduleInstallmentDialog
+          scope={scope}
+          charge={chargeById.get(rescheduling.id) ?? rescheduling}
+          installments={installmentsOf(rescheduling.origin_id, charges, payments)}
+          onOpenChange={(o) => !o && setRescheduling(null)}
         />
       )}
 

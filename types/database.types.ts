@@ -341,6 +341,8 @@ export type FinancialCharge = {
   due_date: string;
   competency_date: string | null;
   status: FinancialChargeStatus;
+  /** Cobrança que representa a fatura de um cartão (migration 20261113100000). */
+  card_invoice_id?: string | null;
   notes: string | null;
   created_by: string;
   updated_by: string | null;

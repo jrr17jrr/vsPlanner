@@ -253,6 +253,12 @@ export type MovementFormInput = {
 
   tipo: FinancialOriginType;
   installmentCount?: number;
+  /**
+   * Parcelado: valor exato de cada parcela, como mostrado na prévia (modo
+   * "valor de cada parcela" = todas iguais; total = soma). Sem ele, o total
+   * é dividido com os centavos na última parcela.
+   */
+  installmentAmounts?: number[];
 
   recurrenceFrequency?: FinancialRecurrenceFrequency;
   recurrenceInterval?: number;
@@ -312,6 +318,14 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
   if (input.tipo === "parcelado" && (!input.installmentCount || input.installmentCount < 2 || input.installmentCount > 120)) {
     return { error: "Parcelamento precisa ter de 2 a 120 parcelas." };
   }
+  if (input.tipo === "parcelado" && input.installmentAmounts) {
+    const amounts = input.installmentAmounts.map((a) => Math.round(a * 100) / 100);
+    if (amounts.length !== input.installmentCount || amounts.some((a) => !Number.isFinite(a) || a <= 0)) return { error: "Valores das parcelas inválidos." };
+    const sum = Math.round(amounts.reduce((s, a) => s + a, 0) * 100) / 100;
+    const expected = Math.round((input.originalAmount - (input.discountAmount ?? 0) + (input.additionAmount ?? 0)) * 100) / 100;
+    if (Math.abs(sum - expected) >= 0.01) return { error: "A soma das parcelas não confere com o total. Revise a prévia." };
+    input = { ...input, installmentAmounts: amounts };
+  }
   if (input.tipo === "recorrente" && !input.recurrenceFrequency) return { error: "Escolha a frequência da recorrência." };
   const usesDay = input.tipo === "recorrente" && input.recurrenceFrequency !== "semanal" && input.recurrenceDay !== undefined;
   if (usesDay && !(Number.isInteger(input.recurrenceDay) && input.recurrenceDay! >= 1 && input.recurrenceDay! <= 31)) {
@@ -364,6 +378,7 @@ export async function createMovementAction(scope: FinancialScope, input: Movemen
     firstDueDate,
     competencyDate: input.competencyDate || null,
     installmentCount: input.installmentCount,
+    installmentAmounts: input.tipo === "parcelado" ? input.installmentAmounts : undefined,
     recurrenceFrequency: input.recurrenceFrequency,
     recurrenceInterval: input.recurrenceInterval,
     recurrenceEndType: input.recurrenceEndType,
@@ -965,6 +980,10 @@ export async function updateChargeAction(
     updates.discountAmount !== undefined ||
     updates.additionAmount !== undefined ||
     updates.dueDate !== undefined;
+
+  if (charge.card_invoice_id && (touchesAmountOrDate || applyToFuture)) {
+    return { error: "Esta cobrança é a fatura de um cartão: o valor e o vencimento seguem as compras e o cartão (Financeiro → Cartões de crédito)." };
+  }
 
   if (hasPayment && touchesAmountOrDate) {
     return { error: "Esta cobrança já tem pagamento registrado — não é possível alterar valor/data. Só observações podem ser editadas." };

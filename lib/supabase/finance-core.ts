@@ -73,6 +73,8 @@ export type OriginSpec = {
   firstDueDate: string;
   competencyDate?: string | null;
   installmentCount?: number | null;
+  /** Parcelado: valores exatos de cada parcela (soma = total final). Sem ele, divide o total. */
+  installmentAmounts?: number[] | null;
   recurrenceFrequency?: FinancialRecurrenceFrequency | null;
   recurrenceInterval?: number | null;
   recurrenceEndType?: FinancialRecurrenceEndType | null;
@@ -222,7 +224,7 @@ export async function createOriginWithCharges(
   if (spec.tipo === "parcelado") {
     const count = spec.installmentCount ?? 2;
     const total = spec.amount - (spec.discountAmount ?? 0) + (spec.additionAmount ?? 0);
-    const parts = splitInstallments(total, count);
+    const parts = spec.installmentAmounts && spec.installmentAmounts.length === count ? spec.installmentAmounts : splitInstallments(total, count);
     const anchorDay = parseDateKey(spec.firstDueDate).d;
     let due = spec.firstDueDate;
     parts.forEach((amount, index) => {
