@@ -2,8 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { listMyDayBoardSubtasks, listPersonalSubtasks, listTaskOccurrences, listTasks } from "@/lib/supabase/repositories/personal.repository";
-import { addDaysToKey, MY_DAY_LOOKBACK_DAYS } from "@/lib/tasks";
+import { listActivityCompletions, listMyDayBoardSubtasks, listPersonalSubtasks, listTaskOccurrences, listTasks } from "@/lib/supabase/repositories/personal.repository";
+import { addDaysToKey, mergeLinkedRoutineCompletions, MY_DAY_LOOKBACK_DAYS } from "@/lib/tasks";
 import { UPCOMING_DAYS, buildMyDayBoard, type BoardInput, type MyDayBoard } from "@/lib/my-day-board";
 import { isMissingColumnError, type Subtask } from "@/lib/task-schedule";
 import type { Activity, CltTask, CltTaskOccurrence, PersonalWorkTask, Task, WorkItem } from "@/types/database.types";
@@ -64,12 +64,17 @@ export async function loadMyDayBoard(input: {
 }): Promise<MyDayBoardData> {
   const { userId, spaceId, todayKey } = input;
   const horizon = addDaysToKey(todayKey, UPCOMING_DAYS);
-  const [tasks, occurrences, subtasks, clt] = await Promise.all([
+  const from = addDaysToKey(todayKey, -MY_DAY_LOOKBACK_DAYS);
+  const linkedActivities = input.activities.filter((a) => a.task_id);
+  const [tasks, rawOccurrences, subtasks, clt, routineDone] = await Promise.all([
     listTasks(spaceId, { includeArchived: true }),
-    listTaskOccurrences(userId, addDaysToKey(todayKey, -MY_DAY_LOOKBACK_DAYS), todayKey),
+    listTaskOccurrences(userId, from, todayKey),
     listMyDayBoardSubtasks(userId, todayKey, horizon),
     loadCltTasks(userId, todayKey, input.access),
+    linkedActivities.length ? listActivityCompletions(userId, from, todayKey) : Promise.resolve([]),
   ]);
+  // Sessões da Rotina já feitas contam como execução da recorrente vinculada (lib/tasks.ts).
+  const occurrences = mergeLinkedRoutineCompletions(tasks, rawOccurrences, linkedActivities, routineDone);
   const boardInput: BoardInput = {
     todayKey, tasks, occurrences, subtasks, activities: input.activities,
     cltTasks: clt.rows, cltOccurrences: clt.occurrences, workItems: input.workItems, legacyWorkTasks: input.legacyWorkTasks,

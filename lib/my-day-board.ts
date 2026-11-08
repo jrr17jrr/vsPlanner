@@ -1,5 +1,6 @@
 import { activityOccursOn } from "@/lib/routine-real";
 import { subtaskSchedule, taskSchedule, type Subtask } from "@/lib/task-schedule";
+import { isRecurringSubtask, missedSubtaskDates, nextSubtaskOccurrence, resolveSubtaskForDay, SUBTASK_LOOKBACK_DAYS, subtaskOccursOn } from "@/lib/subtask-recurrence";
 import { addDaysToKey, getDayTaskEntries, getMissedDayTaskEntries, isRecurringTask, recurringTaskOccursOn, weekdayOfKey, type DayTaskEntry } from "@/lib/tasks";
 import type { Activity, CltTask, CltTaskOccurrence, PersonalWorkTask, Task, TaskOccurrence, WorkItem } from "@/types/database.types";
 
@@ -79,7 +80,8 @@ type Base = {
 export type BoardItem = Base &
   (
     | { source: "task"; task: Task; entry: DayTaskEntry | null; recurring: boolean }
-    | { source: "subtask"; subtask: Subtask; parent: Task }
+    /** `occurrenceDate` = execução (dia) de uma subtarefa recorrente; null = subtarefa comum. */
+    | { source: "subtask"; subtask: Subtask; parent: Task; occurrenceDate: string | null }
     | { source: "clt"; cltTask: CltTask; module: "clt" | "mkt"; occurrenceDate: string | null; companyName: string | null }
     | { source: "work"; workItem: WorkItem }
     | { source: "legacy"; workTask: PersonalWorkTask }
@@ -177,6 +179,38 @@ function taskItems(input: BoardInput, linked: Set<string>, horizon: string): Boa
   return out;
 }
 
+/**
+ * Subtarefa recorrente (programação própria, independente da tarefa
+ * principal): UMA linha — a execução de hoje (com aviso dos dias que
+ * ficaram pendentes), senão a pendência mais recente, senão a próxima
+ * execução. Concluir marca SÓ aquele dia.
+ */
+function recurringSubtaskItem(sub: Subtask, parent: Task, input: BoardInput, horizon: string): BoardItem | null {
+  const { todayKey } = input;
+  const missed = missedSubtaskDates(sub, todayKey, input.lookbackDays ?? SUBTASK_LOOKBACK_DAYS);
+  const time = time5(sub.scheduled_time);
+  const common = { source: "subtask" as const, parent, key: `sub:${sub.id}`, title: sub.title, description: sub.description ?? null, important: sub.priority === "importante", executionTime: time, deadlineDate: null, deadlineTime: null, areaLabel: null };
+  if (subtaskOccursOn(sub, todayKey)) {
+    const day = resolveSubtaskForDay(sub, todayKey);
+    return {
+      ...common, subtask: day, occurrenceDate: todayKey, status: day.is_done ? "concluida" : "hoje", executionDate: todayKey,
+      completedOn: day.is_done ? todayKey : null,
+      note: missed.length ? `Também ficou pendente em ${missed.slice(0, 3).map(ddmm).join(", ")}${missed.length > 3 ? "…" : ""}` : null,
+    };
+  }
+  if (sub.archived_at) return null;
+  if (missed.length) {
+    const date = missed[0];
+    return {
+      ...common, subtask: resolveSubtaskForDay(sub, date), occurrenceDate: date, status: "execucao_atrasada", executionDate: date, completedOn: null,
+      note: missed.length > 1 ? `${missed.length} dias pendentes na semana` : null,
+    };
+  }
+  const next = nextSubtaskOccurrence(sub, addDaysToKey(todayKey, 1));
+  if (!next || next > horizon) return null;
+  return { ...common, subtask: resolveSubtaskForDay(sub, next), occurrenceDate: null, status: "proxima", executionDate: next, completedOn: null, note: null };
+}
+
 function subtaskItems(input: BoardInput, linked: Set<string>, horizon: string): BoardItem[] {
   const parents = new Map(input.tasks.map((t) => [t.id, t]));
   const out: BoardItem[] = [];
@@ -185,12 +219,18 @@ function subtaskItems(input: BoardInput, linked: Set<string>, horizon: string): 
     if (!parent || parent.archived_at || linked.has(parent.id)) continue;
     // Tarefa principal concluída: as subtarefas saem do Meu Dia (não ficam "atrasadas").
     if (!isRecurringTask(parent) && parent.status === "concluida") continue;
+    if (isRecurringSubtask(sub)) {
+      const item = recurringSubtaskItem(sub, parent, input, horizon);
+      if (item) out.push(item);
+      continue;
+    }
+    if (sub.archived_at) continue;
     const s = subtaskSchedule(sub);
     const completedOn = spDateKey(sub.completed_at ?? null);
     const status = classifySchedule({ executionDate: s.executionDate, deadlineDate: s.deadlineDate, done: sub.is_done, completedOn }, input.todayKey, horizon);
     if (!status) continue;
     out.push({
-      source: "subtask", subtask: sub, parent, key: `sub:${sub.id}`, status,
+      source: "subtask", subtask: sub, parent, occurrenceDate: null, key: `sub:${sub.id}`, status,
       title: sub.title, description: sub.description ?? null, important: sub.priority === "importante",
       executionDate: s.executionDate, executionTime: s.executionTime, deadlineDate: s.deadlineDate, deadlineTime: s.deadlineTime,
       completedOn: sub.is_done ? completedOn : null, areaLabel: null, note: null,
@@ -335,4 +375,26 @@ export function buildMyDayBoard(input: BoardInput): MyDayBoard {
   }
   for (const section of ["hoje", "atrasadas", "proximas", "concluidas"] as const) board[section] = nestUnderParents(board[section].sort(SORTERS[section]));
   return board;
+}
+
+export const BOARD_SECTIONS: BoardSection[] = ["hoje", "atrasadas", "proximas", "concluidas"];
+
+/**
+ * Estado de "Expandir todas" / "Recolher todas" do Meu Dia: detalhes de
+ * cada linha (chave `seção:item`) e grupos recolhidos (`seção:group:id`).
+ * Só visual — nada é marcado, concluído ou reordenado.
+ */
+export function expandAllState(board: MyDayBoard, open: boolean): { rows: Record<string, boolean>; collapsedGroups: Record<string, boolean> } {
+  const rows: Record<string, boolean> = {};
+  const collapsedGroups: Record<string, boolean> = {};
+  for (const section of BOARD_SECTIONS) {
+    for (const row of groupSection(board[section])) {
+      if (row.kind === "group") {
+        collapsedGroups[`${section}:${row.key}`] = !open;
+        if (row.parentItem) rows[`${section}:${row.parentItem.key}`] = open;
+        for (const c of row.children) rows[`${section}:${c.key}`] = open;
+      } else rows[`${section}:${row.item.key}`] = open;
+    }
+  }
+  return { rows, collapsedGroups };
 }

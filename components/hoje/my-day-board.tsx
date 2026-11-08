@@ -4,18 +4,21 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarClock, CheckCircle2, ChevronDown, ExternalLink, ListTree, Pencil, Repeat } from "lucide-react";
+import { CalendarClock, CheckCircle2, ChevronDown, ExternalLink, ListChecks, ListTree, Pencil, Repeat } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CARD_ACCENT, EmptySection, TaskSection, type SectionTone } from "@/components/shared/task-section";
 import { MoveDatePopover } from "@/components/shared/move-date-popover";
-import { Subtasks } from "@/components/shared/subtasks";
+import { Subtasks, type ExpandSignal } from "@/components/shared/subtasks";
+import { SubtaskChecklist } from "@/components/shared/subtask-checklist";
 import { ExpandableDescription } from "@/components/shared/expandable-description";
-import { groupSection, type BoardItem, type BoardSection, type MyDayBoard, type SectionRow } from "@/lib/my-day-board";
+import { expandAllState, groupSection, type BoardItem, type BoardSection, type MyDayBoard, type SectionRow } from "@/lib/my-day-board";
 import type { Subtask } from "@/lib/task-schedule";
 import { moveTaskDeadlineAction, rescheduleTaskExecutionAction, toggleTaskOccurrenceAction, toggleTaskStatusAction, togglePersonalWorkTaskStatusAction } from "@/lib/supabase/personal-actions";
-import { rescheduleSubtaskAction, setSubtaskDone } from "@/lib/supabase/subtask-actions";
+import { rescheduleSubtaskAction, setSubtaskDone, setSubtaskOccurrenceDone } from "@/lib/supabase/subtask-actions";
+import { checklistProgress } from "@/lib/checklist-priority";
+import { isRecurringSubtask } from "@/lib/subtask-recurrence";
 import { rescheduleCltTaskAction, toggleCltTaskOccurrenceAction, toggleCltTaskStatusAction } from "@/lib/supabase/clt-actions";
 import { updateWorkItemStatusAction } from "@/lib/supabase/work-items-actions";
 import { cn } from "@/lib/utils";
@@ -68,7 +71,20 @@ function Row({
   inGroup = false,
   group,
   flat = false,
+  open,
+  onOpenChange,
+  checklist = [],
+  blocking,
+  expandSignal,
 }: {
+  /** Aberto/fechado controlado pelo quadro (Expandir todas, checklist pendente). */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Itens do checklist desta subtarefa (registro original). */
+  checklist?: Subtask[];
+  /** Itens que impediram a conclusão — destacados. */
+  blocking?: string[];
+  expandSignal?: ExpandSignal;
   /** Subtarefa dentro do agrupamento da tarefa principal (não repete o nome da tarefa). */
   inGroup?: boolean;
   /** Dentro do card do grupo: sem caixa própria (o card é do grupo). */
@@ -83,11 +99,12 @@ function Row({
   onEdit?: (task: Task) => void;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const setOpen = (fn: (v: boolean) => boolean) => onOpenChange(fn(open));
   const [busy, start] = useTransition();
   const nested = item.source === "subtask";
   const overdue = item.status === "prazo_vencido" || item.status === "execucao_atrasada";
-  const canExpand = item.source === "task" || item.source === "clt" || !!item.description;
+  const canExpand = item.source === "task" || item.source === "clt" || !!item.description || checklist.length > 0;
+  const progress = checklist.length ? checklistProgress(checklist) : null;
 
   function run(action: () => Promise<{ error?: string; success?: string | boolean }>) {
     start(async () => {
@@ -100,7 +117,7 @@ function Row({
   // Reprogramar: muda só a execução (o prazo final nunca muda junto).
   const reschedule =
     item.source === "task" && !item.recurring ? (d: string) => run(() => rescheduleTaskExecutionAction(item.task.id, d))
-    : item.source === "subtask" ? (d: string) => run(() => rescheduleSubtaskAction("pessoal", item.parent.id, item.subtask.id, d))
+    : item.source === "subtask" && !item.occurrenceDate ? (d: string) => run(() => rescheduleSubtaskAction("pessoal", item.parent.id, item.subtask.id, d))
     : item.source === "clt" && !item.occurrenceDate ? (d: string) => run(() => rescheduleCltTaskAction(item.cltTask.id, d))
     : null;
   const changeDeadline = item.source === "task" && !item.recurring && item.status === "prazo_vencido" ? (d: string) => run(() => moveTaskDeadlineAction(item.task.id, d)) : null;
@@ -138,6 +155,9 @@ function Row({
             )}
           </div>
           {item.note && <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground"><Repeat className="h-3 w-3" />{item.note}</p>}
+          {progress && (
+            <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground"><ListChecks className="h-3 w-3" />Checklist <span className="tabular-nums text-foreground">{progress.done}/{progress.total}</span> concluídos</p>
+          )}
         </button>
         {canExpand && (
           <button type="button" onClick={() => setOpen((v) => !v)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary" aria-label={open ? "Fechar detalhes" : "Ver detalhes"}>
@@ -166,10 +186,13 @@ function Row({
       {open && (
         <div className={cn("space-y-2 border-t border-border/60 py-2.5", inGroup ? "pl-11 pr-1" : "px-3 sm:pl-12")}>
           {item.description && <ExpandableDescription text={item.description} />}
-          {item.source === "task" && (
-            <Subtasks embedded parentType="pessoal" parentId={item.task.id} initialItems={subtasks ?? []} initialOpen={!!subtasks?.length} onChanged={onChanged} />
+          {item.source === "subtask" && checklist.length > 0 && (
+            <SubtaskChecklist parentType="pessoal" parentId={item.parent.id} items={checklist} blocking={blocking} onChanged={onChanged} />
           )}
-          {item.source === "clt" && <Subtasks embedded parentType="clt" parentId={item.cltTask.id} onChanged={onChanged} />}
+          {item.source === "task" && (
+            <Subtasks embedded parentType="pessoal" parentId={item.task.id} initialItems={subtasks ?? []} initialOpen={!!subtasks?.length} onChanged={onChanged} expandSignal={expandSignal} />
+          )}
+          {item.source === "clt" && <Subtasks embedded parentType="clt" parentId={item.cltTask.id} onChanged={onChanged} expandSignal={expandSignal} />}
           <div className="flex flex-wrap gap-2">
             {item.source === "task" && onEdit && !item.task.archived_at && (
               <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => onEdit(item.task)}><Pencil className="h-3.5 w-3.5" /> Editar</Button>
@@ -231,16 +254,37 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
   const [showDone, setShowDone] = useState(true);
   // Agrupamentos recolhidos (por seção + tarefa principal). Começam abertos; recolher não muda nada nos dados.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Detalhes abertos por linha (seção + item) e itens de checklist que bloquearam uma conclusão.
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
+  const [blocking, setBlocking] = useState<Record<string, string[]>>({});
+  const [expandSignal, setExpandSignal] = useState<ExpandSignal | undefined>(undefined);
   const refresh = () => router.refresh();
+  const checklistOf = (item: BoardItem) => (item.source === "subtask" ? (subtasksByTask[item.parent.id] ?? []).filter((s) => s.parent_subtask_id === item.subtask.id) : []);
+
+  /** Expandir todas / Recolher todas: grupos, detalhes de cada linha e as subtarefas dentro delas. */
+  function expandAll(open: boolean) {
+    const { rows, collapsedGroups } = expandAllState(board, open);
+    setOpenRows(rows);
+    setCollapsed(collapsedGroups);
+    if (open) setShowDone(true);
+    setExpandSignal((s) => ({ open, version: (s?.version ?? 0) + 1 }));
+  }
 
   function toggler(item: BoardItem): (() => void) | null {
     const current = overrides[item.key] ?? item.status === "concluida";
     const next = !current;
-    let action: (() => Promise<{ error?: string }>) | null = null;
+    let action: (() => Promise<{ error?: string; pendingChecklist?: string[] }>) | null = null;
     if (item.source === "task") {
       if (item.recurring) action = item.entry ? () => toggleTaskOccurrenceAction(item.task.id, item.entry!.date, next) : null;
       else action = () => toggleTaskStatusAction(item.task.id, next ? "concluida" : "pendente");
-    } else if (item.source === "subtask") action = () => setSubtaskDone("pessoal", item.parent.id, item.subtask.id, next);
+    } else if (item.source === "subtask") {
+      // Recorrente: só a execução daquele dia. Comum: a própria subtarefa.
+      const sub = item;
+      action = sub.occurrenceDate
+        ? () => setSubtaskOccurrenceDone("pessoal", sub.parent.id, sub.subtask.id, sub.occurrenceDate!, next)
+        : isRecurringSubtask(sub.subtask) ? null // próxima execução: o dia ainda não chegou
+        : () => setSubtaskDone("pessoal", sub.parent.id, sub.subtask.id, next);
+    }
     else if (item.source === "clt") action = item.occurrenceDate ? () => toggleCltTaskOccurrenceAction(item.cltTask.id, item.occurrenceDate!, next) : () => toggleCltTaskStatusAction(item.cltTask.id, next);
     else if (item.source === "work") action = () => updateWorkItemStatusAction(item.workItem.id, next ? "concluido" : "pendente");
     else if (item.source === "legacy") action = () => togglePersonalWorkTaskStatusAction(item.workTask.id, next ? "concluida" : "pendente");
@@ -250,7 +294,21 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
       setOverrides((o) => ({ ...o, [item.key]: next }));
       start(async () => {
         const r = await run();
-        if (r?.error) { toast.error(r.error); setOverrides((o) => ({ ...o, [item.key]: current })); return; }
+        if (r?.error) {
+          toast.error(r.error);
+          setOverrides((o) => ({ ...o, [item.key]: current }));
+          // Checklist obrigatório pendente: abre o checklist da subtarefa e destaca o que falta.
+          const missing = r.pendingChecklist;
+          if (item.source === "subtask" && missing?.length) {
+            setBlocking((b) => ({ ...b, [item.subtask.id]: missing }));
+            setOpenRows((o) => {
+              const opened = { ...o };
+              for (const s of SECTIONS) opened[`${s.id}:${item.key}`] = true;
+              return opened;
+            });
+          }
+          return;
+        }
         router.refresh();
       });
     };
@@ -260,6 +318,10 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
 
   return (
     <div className="flex flex-col gap-8">
+      <div className="-mb-5 flex flex-wrap justify-end gap-1.5">
+        <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => expandAll(true)}>Expandir todas</Button>
+        <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => expandAll(false)}>Recolher todas</Button>
+      </div>
       {SECTIONS.map((section) => {
         const items = board[section.id];
         const collapsible = section.id === "concluidas";
@@ -297,6 +359,11 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
                     subtasks: item.source === "task" ? subtasksByTask[item.task.id] : undefined,
                     onEdit: onEditTask,
                     onChanged: refresh,
+                    open: !!openRows[`${section.id}:${item.key}`],
+                    onOpenChange: (v: boolean) => setOpenRows((o) => ({ ...o, [`${section.id}:${item.key}`]: v })),
+                    checklist: checklistOf(item),
+                    blocking: item.source === "subtask" ? blocking[item.subtask.id] : undefined,
+                    expandSignal,
                   });
                   if (row.kind === "item") return <Row key={row.item.key} {...rowProps(row.item)} />;
                   const id = `${section.id}:${row.key}`;

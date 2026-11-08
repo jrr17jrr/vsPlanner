@@ -40,14 +40,17 @@ function Segmented<T extends string>({
   options,
   onChange,
   disabled,
+  className,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; disabled?: boolean }[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  /** Colunas próprias (ex.: 2 no celular, 4 no PC); padrão = uma por opção. */
+  className?: string;
 }) {
   return (
-    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+    <div className={className ?? "grid gap-1.5"} style={className ? undefined : { gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
         <Button
           key={o.value}
@@ -55,8 +58,9 @@ function Segmented<T extends string>({
           size="sm"
           variant={value === o.value ? "default" : "outline"}
           onClick={() => onChange(o.value)}
-          disabled={disabled}
-          className="h-9"
+          disabled={disabled || o.disabled}
+          aria-pressed={value === o.value}
+          className="h-9 px-1 text-xs sm:text-sm"
         >
           {o.label}
         </Button>
@@ -64,7 +68,7 @@ function Segmented<T extends string>({
     </div>
   );
 }
-type WhenMode = "dia" | "semana" | "nenhum";
+type WhenMode = "dia" | "semana" | "nenhum" | "organizadora";
 
 function TaskForm({
   onOpenChange,
@@ -80,7 +84,7 @@ function TaskForm({
   const editingRecurring = !!task && isRecurringTask(task);
   const initial = task ? taskSchedule(task) : null;
   const initialMode: WhenMode = task
-    ? isRecurringTask(task) ? "semana" : task.kind === "dia" ? "dia" : "nenhum"
+    ? isRecurringTask(task) ? "semana" : task.kind === "organizadora" ? "organizadora" : task.kind === "dia" ? "dia" : "nenhum"
     : defaultKind === "dia" ? "dia" : "nenhum";
 
   const [title, setTitle] = useState(task?.title ?? "");
@@ -97,8 +101,11 @@ function TaskForm({
   const [description, setDescription] = useState(task?.description ?? "");
   const [pending, setPending] = useState(false);
 
-  const isRecurring = mode === "semana";
-  const hasExecution = mode !== "nenhum";
+  // Dias da semana sem nenhum dia marcado = tarefa organizadora (sem dia fixo, sem recorrência).
+  const noDaysSelected = mode === "semana" && weekdays.length === 0;
+  const organizer = mode === "organizadora" || noDaysSelected;
+  const isRecurring = mode === "semana" && !noDaysSelected;
+  const hasExecution = mode === "dia" || isRecurring;
 
   function toggleWeekday(day: number) {
     setWeekdays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
@@ -107,12 +114,13 @@ function TaskForm({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return toast.error("Dê um título para a tarefa.");
-    if (isRecurring && weekdays.length === 0) return toast.error("Escolha pelo menos um dia da semana.");
     if (mode === "dia" && !date) return toast.error("Escolha o dia de execução — ou marque “Sem dia definido”.");
     if (mode === "dia" && deadlineDate && deadlineDate < date) return toast.error("O prazo final não pode ser antes do dia de execução.");
 
-    const kind: TaskKind = hasExecution ? "dia" : "prazo";
-    const input: TaskFormInput = {
+    const kind: TaskKind = organizer ? "organizadora" : hasExecution ? "dia" : "prazo";
+    const input: TaskFormInput = organizer ? {
+      kind, title, description: description || undefined, priority, recurrence: "none", weekdays: [], reminderOffsets: [], notes: notes || undefined,
+    } : {
       kind,
       title,
       description: description || undefined,
@@ -164,20 +172,30 @@ function TaskForm({
               setMode(v);
               if (v === "dia" && !date) setDate(todayKey);
             }}
-            disabled={pending || editingRecurring}
+            disabled={pending}
+            className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
             options={[
-              { value: "dia", label: "Em um dia" },
+              // Recorrente só pode virar organizadora pela edição (parar de repetir = "Encerrar repetição").
+              { value: "dia", label: "Em um dia", disabled: editingRecurring },
               { value: "semana", label: "Dias da semana" },
-              { value: "nenhum", label: "Sem dia" },
+              { value: "nenhum", label: "Sem dia", disabled: editingRecurring },
+              { value: "organizadora", label: "Organizadora" },
             ]}
           />
-          {editingRecurring && (
+          {editingRecurring && !organizer && (
             <p className="text-[11px] text-muted-foreground">
-              Alterações valem a partir de hoje; dias anteriores ficam no histórico. Para parar de repetir, use “Encerrar repetição”.
+              Alterações valem a partir de hoje; dias anteriores ficam no histórico. Para parar de repetir, use “Encerrar repetição” — ou desmarque todos os dias para virar organizadora.
             </p>
           )}
           {mode === "nenhum" && (
             <p className="text-[11px] text-muted-foreground">Sem dia de execução — aparece em “Com prazo”.</p>
+          )}
+          {organizer && (
+            <p className="rounded-md bg-secondary/60 px-2 py-1.5 text-[11px] text-muted-foreground">
+              {noDaysSelected ? "Nenhum dia marcado: ao salvar, vira uma tarefa organizadora. " : ""}
+              Organizadora não tem dia fixo nem prazo: não aparece como obrigação diária e nunca fica atrasada. Serve para agrupar subtarefas — cada uma com a própria programação (sem data, num dia ou repetindo nos dias escolhidos).
+              {editingRecurring && " Os dias anteriores e as subtarefas continuam preservados."}
+            </p>
           )}
 
           {mode === "dia" && (
@@ -191,7 +209,7 @@ function TaskForm({
             </div>
           )}
 
-          {isRecurring && (
+          {mode === "semana" && (
             <div className="grid grid-cols-7 gap-1">
               {WEEKDAY_ORDER.map((day) => (
                 <Button
@@ -230,7 +248,7 @@ function TaskForm({
           )}
         </fieldset>
 
-        {!isRecurring && (
+        {!isRecurring && !organizer && (
           <fieldset className="flex flex-col gap-3 rounded-lg border border-border p-3">
             <legend className="px-1 text-sm font-medium">Prazo final</legend>
             <p className="-mt-1 text-[11px] text-muted-foreground">Até quando precisa estar pronta. Opcional e independente do dia de execução.</p>

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LinkedTaskPanel } from "@/components/tarefas/linked-task-panel";
 import { groupSubtasks, type Subtask } from "@/lib/task-schedule";
+import { resolveSubtasksForDay } from "@/lib/subtask-recurrence";
 import { cn } from "@/lib/utils";
 import type { Activity, Task } from "@/types/database.types";
 
@@ -41,7 +42,7 @@ export function LinkedRoutineItem({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const sections = groupSubtasks(subtasks, { todayKey, dateKey: date });
+  const sections = groupSubtasks(resolveSubtasksForDay(subtasks, date), { todayKey, dateKey: date });
   const pendingToday = sections.today.filter((e) => !e.subtask.is_done).length;
   const taskDone = task.recurrence !== "weekly" && task.status === "concluida";
 

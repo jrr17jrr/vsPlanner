@@ -23,9 +23,11 @@ describe("rascunho de subtarefa", () => {
   it("normaliza: horário só com data, horário limite só com prazo, lembretes só com execução", () => {
     expect(subtaskDraftToInput(draft({ title: " Gravar ", scheduledTime: "10:00", deadlineTime: "18:00", reminders: [15] }))).toEqual({
       title: "Gravar", description: "", dueDate: "", scheduledDate: null, scheduledTime: null, deadlineTime: null, priority: "normal", reminderOffsets: [],
+      recurrence: "none", weekdays: [], recurrenceStart: null, recurrenceUntil: null,
     });
     expect(subtaskDraftToInput(draft({ title: "A", scheduledDate: "2026-11-10", scheduledTime: "10:00", dueDate: "2026-11-12", deadlineTime: "18:00", reminders: [0, 60], priority: "importante" }), false)).toEqual({
       title: "A", description: undefined, dueDate: "2026-11-12", scheduledDate: "2026-11-10", scheduledTime: "10:00", deadlineTime: "18:00", priority: "importante", reminderOffsets: [0, 60],
+      recurrence: "none", weekdays: [], recurrenceStart: null, recurrenceUntil: null,
     });
   });
 

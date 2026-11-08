@@ -1,10 +1,10 @@
 "use client";
-import { Subtasks } from "@/components/shared/subtasks";
+import { Subtasks, type ExpandSignal } from "@/components/shared/subtasks";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, ListChecks, Repeat, MapPin, MoreVertical, Pencil, Trash2, CircleStop, CalendarDays, Flag } from "lucide-react";
+import { Plus, ListChecks, Repeat, MapPin, MoreVertical, Pencil, Trash2, CircleStop, CalendarDays, Flag, History, FolderTree } from "lucide-react";
 import { TaskCard } from "@/components/tarefas/task-card";
 import { EmptySection, TaskList, TaskSection, type SectionTone } from "@/components/shared/task-section";
 import { ExpandableDescription } from "@/components/shared/expandable-description";
@@ -14,21 +14,24 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shared/empty-state";
-import { DayTaskItem } from "@/components/tarefas/day-task-item";
+import { DayTaskItem, hasSubtaskHighlights } from "@/components/tarefas/day-task-item";
+import { ExecutionHistoryDialog } from "@/components/tarefas/execution-history-dialog";
 import { useTaskToggle } from "@/components/tarefas/use-task-toggle";
 import { useTaskDialogs } from "@/components/tarefas/use-task-dialogs";
 import { moveTaskDeadlineAction } from "@/lib/supabase/personal-actions";
 import { taskSchedule, type Subtask } from "@/lib/task-schedule";
 import {
+  buildDayTaskRows,
   formatWeekdays,
   getDayTaskEntries,
+  isOrganizerTask,
   getMissedDayTaskEntries,
   getUpcomingDayTaskEntries,
   groupDeadlineTasks,
   isRecurrenceEnded,
   isRecurringTask,
   TASKS_PAGE_LOOKBACK_DAYS,
-  type DayTaskEntry,
+  type DayTaskRow,
 } from "@/lib/tasks";
 import { formatDate, formatDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -52,6 +55,9 @@ export function TarefasPageClient({
   todayKey: string;
 }) {
   const [tab, setTab] = useState<Tab>("dia");
+  const [expandSignal, setExpandSignal] = useState<ExpandSignal | undefined>(undefined);
+  const [historyTask, setHistoryTask] = useState<Task | null>(null);
+  const expandAll = (open: boolean) => setExpandSignal((s) => ({ open, version: (s?.version ?? 0) + 1 }));
   const toggle = useTaskToggle();
   const dialogs = useTaskDialogs(todayKey);
   const router = useRouter();
@@ -60,6 +66,9 @@ export function TarefasPageClient({
   const todayEntries = getDayTaskEntries(tasks, occurrences, todayKey, todayKey).sort((a,b)=>byPriority(a.task,b.task));
   const missed = getMissedDayTaskEntries(tasks, occurrences, todayKey, TASKS_PAGE_LOOKBACK_DAYS).sort((a,b)=>byPriority(a.task,b.task));
   const upcoming = getUpcomingDayTaskEntries(tasks, todayKey).sort((a,b)=>byPriority(a.task,b.task));
+  // UMA linha por tarefa: recorrente com vários dias pendentes vira um card só (agrupamento visual).
+  const rows = buildDayTaskRows(todayEntries, missed);
+  const organizers = tasks.filter((t) => isOrganizerTask(t) && !t.archived_at).sort(byPriority);
   const recurring = tasks.filter(isRecurringTask).sort(byPriority);
   const activeRecurring = recurring.filter((t) => !isRecurrenceEnded(t, todayKey));
   const endedRecurring = recurring.filter((t) => isRecurrenceEnded(t, todayKey));
@@ -73,21 +82,46 @@ export function TarefasPageClient({
     .sort((a, b) => (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at));
 
   const pendingDeadlineCount = deadlines.overdue.length + deadlines.dueToday.length + deadlines.upcoming.length + deadlines.noDate.length;
-  const dayTabEmpty = todayEntries.length === 0 && missed.length === 0 && upcoming.length === 0 && recurring.length === 0;
+  const dayTabEmpty = todayEntries.length === 0 && missed.length === 0 && upcoming.length === 0 && recurring.length === 0 && organizers.length === 0;
 
-  function renderEntry(entry: DayTaskEntry, withActions = true) {
+  function renderRow(row: DayTaskRow) {
+    const entry = row.primary;
     const recurringTask = entry.recurring;
     return (
       <DayTaskItem
-        key={entry.key}
+        key={row.key}
         entry={entry}
         subtasks={subtasksByTask[entry.task.id] ?? []}
         done={toggle.isEntryDone(entry)}
         onToggle={() => toggle.toggleEntry(entry)}
-        onEdit={withActions && !entry.task.archived_at ? () => dialogs.openEdit(entry.task) : undefined}
-        onEndRecurrence={withActions && recurringTask && !isRecurrenceEnded(entry.task, todayKey) ? () => dialogs.askEnd(entry.task) : undefined}
-        onDelete={withActions && !entry.task.archived_at ? () => dialogs.askDelete(entry.task) : undefined}
+        pending={row.pending}
+        isPendingDone={toggle.isEntryDone}
+        onTogglePending={(e) => toggle.toggleEntry(e)}
+        onHistory={recurringTask ? () => setHistoryTask(entry.task) : undefined}
+        onEdit={!entry.task.archived_at ? () => dialogs.openEdit(entry.task) : undefined}
+        onEndRecurrence={recurringTask && !isRecurrenceEnded(entry.task, todayKey) ? () => dialogs.askEnd(entry.task) : undefined}
+        onDelete={!entry.task.archived_at ? () => dialogs.askDelete(entry.task) : undefined}
+        expandSignal={expandSignal}
       />
+    );
+  }
+
+  /** Organizadora: sem checkbox, sem data, nunca "atrasada" — só o card com as subtarefas (cada uma com a própria programação). */
+  function renderOrganizer(task: Task) {
+    const subtasks = subtasksByTask[task.id] ?? [];
+    return (
+      <TaskCard
+        key={task.id}
+        title={task.title}
+        done={false}
+        important={task.priority === "importante"}
+        onEdit={() => dialogs.openEdit(task)}
+        onDelete={() => dialogs.askDelete(task)}
+        meta={<span className="inline-flex items-center gap-1"><FolderTree className="h-3 w-3" />Organizadora · sem dia fixo</span>}
+      >
+        <ExpandableDescription text={task.description} className="mt-1" />
+        <Subtasks embedded parentType="pessoal" parentId={task.id} initialItems={subtasks} initialOpen={hasSubtaskHighlights(subtasks, todayKey)} onChanged={refresh} expandSignal={expandSignal} />
+      </TaskCard>
     );
   }
 
@@ -119,7 +153,7 @@ export function TarefasPageClient({
         }
       >
         <ExpandableDescription text={task.description} className="mt-1" />
-        <Subtasks embedded parentType="pessoal" parentId={task.id} initialItems={subtasks} onChanged={refresh} />
+        <Subtasks embedded parentType="pessoal" parentId={task.id} initialItems={subtasks} onChanged={refresh} expandSignal={expandSignal} />
       </TaskCard>
     );
   }
@@ -145,6 +179,12 @@ export function TarefasPageClient({
           </TabsTrigger>
           <TabsTrigger value="concluidas" className="flex-1 sm:flex-none">Concluídas</TabsTrigger>
         </TabsList>
+        {tab !== "concluidas" && (
+          <div className="mt-3 flex flex-wrap justify-end gap-1.5">
+            <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => expandAll(true)}>Expandir todas</Button>
+            <Button type="button" variant="ghost" size="sm" className="h-9 text-xs" onClick={() => expandAll(false)}>Recolher todas</Button>
+          </div>
+        )}
 
         <TabsContent value="dia" className="mt-5 flex flex-col gap-8">
           {dayTabEmpty ? (
@@ -160,17 +200,17 @@ export function TarefasPageClient({
             />
           ) : (
             <>
-              {missed.length > 0 && (
-                <Section title="Atrasadas" tone="danger" count={missed.length}>
-                  {missed.map((e) => renderEntry(e))}
+              {rows.overdue.length > 0 && (
+                <Section title="Atrasadas" tone="danger" count={rows.overdue.length}>
+                  {rows.overdue.map(renderRow)}
                 </Section>
               )}
 
-              <Section title="Hoje" tone="primary" count={todayEntries.length}>
-                {todayEntries.length === 0 ? (
+              <Section title="Hoje" tone="primary" count={rows.today.length}>
+                {rows.today.length === 0 ? (
                   <EmptySection>Nada marcado para hoje.</EmptySection>
                 ) : (
-                  todayEntries.map((e) => renderEntry(e))
+                  rows.today.map(renderRow)
                 )}
               </Section>
 
@@ -179,9 +219,15 @@ export function TarefasPageClient({
                   {upcoming.map((e) => (
                     <div key={e.key} className="flex flex-col gap-1.5">
                       <span className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{formatDate(e.date)}</span>
-                      {renderEntry(e)}
+                      {renderRow({ key: e.key, task: e.task, primary: e, pending: [] })}
                     </div>
                   ))}
+                </Section>
+              )}
+
+              {organizers.length > 0 && (
+                <Section title="Organizadoras" count={organizers.length}>
+                  {organizers.map(renderOrganizer)}
                 </Section>
               )}
 
@@ -194,6 +240,7 @@ export function TarefasPageClient({
                       onEdit={() => dialogs.openEdit(t)}
                       onEnd={() => dialogs.askEnd(t)}
                       onDelete={() => dialogs.askDelete(t)}
+                      onHistory={() => setHistoryTask(t)}
                     />
                   ))}
                   {endedRecurring.map((t) => (
@@ -257,6 +304,7 @@ export function TarefasPageClient({
       </Tabs>
 
       {dialogs.dialogs}
+      <ExecutionHistoryDialog task={historyTask} occurrences={occurrences} todayKey={todayKey} onOpenChange={(o) => !o && setHistoryTask(null)} />
     </div>
   );
 }
@@ -276,12 +324,14 @@ function RecurringRow({
   onEdit,
   onEnd,
   onDelete,
+  onHistory,
 }: {
   task: Task;
   ended?: boolean;
   onEdit?: () => void;
   onEnd?: () => void;
   onDelete: () => void;
+  onHistory?: () => void;
 }) {
   return (
     <div className={cn("flex items-start gap-3 rounded-xl border border-border/70 bg-card px-3 py-2.5 shadow-sm shadow-black/10", ended && "opacity-60")}>
@@ -316,6 +366,11 @@ function RecurringRow({
           {onEdit && (
             <DropdownMenuItem onClick={onEdit}>
               <Pencil className="h-4 w-4" /> Editar
+            </DropdownMenuItem>
+          )}
+          {onHistory && (
+            <DropdownMenuItem onClick={onHistory}>
+              <History className="h-4 w-4" /> Histórico de execuções
             </DropdownMenuItem>
           )}
           {onEnd && (

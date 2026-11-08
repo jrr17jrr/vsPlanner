@@ -4,6 +4,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ReminderOccurrence, ReminderPreferences, ReminderTable, ReminderTask } from "@/lib/push/reminders";
 import type { ReminderActivityRow, ReminderSubtaskRow, ReminderTaskRow, ScheduleReminderInput } from "@/lib/push/schedule-reminders";
 import { resolveNotificationPrefs, type NotificationPrefs } from "@/lib/notification-prefs";
+import { expandRecurringSubtaskReminders } from "@/lib/push/recurring-subtask-reminders";
+import type { Subtask, SubtaskOccurrence } from "@/lib/task-schedule";
 
 /**
  * Leitura do ESTADO ATUAL dos registros que geram lembretes (usado pela rota
@@ -51,6 +53,18 @@ export async function loadScheduleSources(db: SupabaseClient, today: string, use
   }
   if (subRes.error) throw subRes.error;
   const rawSubs = (subRes.data ?? []) as Array<ReminderSubtaskRow>;
+
+  // Subtarefas com recorrência própria (migration 20261112100000): uma "linha
+  // virtual" por dia de hoje/amanhã com execução ainda não concluída — o resto
+  // do agendador trata como uma subtarefa com data. Sem a migration: nada.
+  const recRes = await scoped(db, "task_subtasks", "*", userId).eq("recurrence", "weekly").is("archived_at", null);
+  if (recRes.error && !isMissingColumn(recRes.error.code)) throw recRes.error;
+  const recurringSubs = recRes.error ? [] : ((recRes.data ?? []) as unknown as Subtask[]);
+  if (recurringSubs.length) {
+    const occ = await db.from("task_subtask_occurrences").select("subtask_id,occurrence_date,status,completed_at").in("subtask_id", recurringSubs.map((s) => s.id)).gte("occurrence_date", today).lte("occurrence_date", to);
+    if (occ.error && !["42P01", "PGRST205"].includes(String(occ.error.code))) throw occ.error;
+    rawSubs.push(...(expandRecurringSubtaskReminders(recurringSubs, (occ.data ?? []) as SubtaskOccurrence[], [today, to]) as unknown as ReminderSubtaskRow[]));
+  }
 
   // Título e estado da tarefa-pai (subtarefa de tarefa concluída/excluída não notifica).
   const parents = new Map<string, { title: string; closed: boolean }>();

@@ -332,3 +332,103 @@ export function getImportantAttentionTasks(myDay: MyDayTasks): AttentionTask[] {
   }
   return items;
 }
+
+/** Tarefa sem dia fixo e sem recorrência — só organiza subtarefas (migration 20261112100000). */
+export function isOrganizerTask(task: Pick<Task, "kind">): boolean {
+  return task.kind === "organizadora";
+}
+
+/**
+ * Uma linha da aba "Do dia" — UMA por tarefa, mesmo quando uma recorrente
+ * tem várias execuções pendentes. O agrupamento é só visual: cada execução
+ * continua com a própria data e o próprio estado (`primary` + `pending`),
+ * nada é juntado nem concluído junto.
+ */
+export type DayTaskRow = {
+  key: string;
+  task: Task;
+  /** Execução mostrada no cabeçalho (hoje; ou a pendência mais recente). */
+  primary: DayTaskEntry;
+  /** Outras execuções pendentes de dias anteriores (mais recente primeiro). */
+  pending: DayTaskEntry[];
+};
+
+export function buildDayTaskRows(today: DayTaskEntry[], missed: DayTaskEntry[]): { today: DayTaskRow[]; overdue: DayTaskRow[] } {
+  const missedByTask = new Map<string, DayTaskEntry[]>();
+  const overdue: DayTaskRow[] = [];
+  for (const e of missed) {
+    if (!e.recurring) {
+      overdue.push({ key: e.key, task: e.task, primary: e, pending: [] });
+      continue;
+    }
+    (missedByTask.get(e.task.id) ?? missedByTask.set(e.task.id, []).get(e.task.id)!).push(e);
+  }
+  const byRecent = (a: DayTaskEntry, b: DayTaskEntry) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  const todayRows = today.map<DayTaskRow>((e) => {
+    const pending = e.recurring ? (missedByTask.get(e.task.id) ?? []).sort(byRecent) : [];
+    if (e.recurring) missedByTask.delete(e.task.id);
+    return { key: `row:${e.task.id}`, task: e.task, primary: e, pending };
+  });
+  for (const [taskId, entries] of missedByTask) {
+    if (entries[0].task.archived_at) continue;
+    const [primary, ...pending] = entries.sort(byRecent);
+    overdue.push({ key: `row:${taskId}`, task: primary.task, primary, pending });
+  }
+  return { today: todayRows, overdue };
+}
+
+export type ExecutionHistoryEntry = { date: string; done: boolean; title: string };
+
+/**
+ * Histórico de execuções de uma recorrente (mais recente primeiro) até hoje:
+ * dias gravados + dias em que a definição gerava execução sem marcação.
+ */
+export function taskExecutionHistory(task: Task, occurrences: TaskOccurrence[], todayKey: string, days = TASKS_PAGE_LOOKBACK_DAYS): ExecutionHistoryEntry[] {
+  const byDate = new Map(occurrences.filter((o) => o.task_id === task.id).map((o) => [o.occurrence_date, o]));
+  const out: ExecutionHistoryEntry[] = [];
+  for (let d = todayKey, i = 0; i <= days; i++, d = addDaysToKey(d, -1)) {
+    const occ = byDate.get(d);
+    if (!occ && !recurringTaskOccursOn(task, d)) continue;
+    out.push({ date: d, done: occ?.status === "concluida", title: occ?.title ?? task.title });
+  }
+  return out;
+}
+
+/**
+ * CORREÇÃO das execuções "voltando" como pendentes: tarefa recorrente
+ * vinculada à Rotina era concluída no Meu Dia pelo card da Rotina, que só
+ * grava `activity_completions` — `task_occurrences` ficava pendente e a
+ * página Tarefas mostrava os dias já feitos como atrasados (um card por
+ * dia). Agora as duas ações se sincronizam; esta função cobre o histórico
+ * gravado antes da correção, sem alterar nada no banco: sessão da Rotina
+ * concluída no dia = execução da tarefa recorrente concluída naquele dia.
+ */
+export function mergeLinkedRoutineCompletions(
+  tasks: Task[],
+  occurrences: TaskOccurrence[],
+  activities: Array<{ id: string; task_id?: string | null }>,
+  completions: Array<{ activity_id: string; occurrence_date: string; completed_at?: string | null }>,
+): TaskOccurrence[] {
+  const recurring = new Map(tasks.filter(isRecurringTask).map((t) => [t.id, t]));
+  const taskOfActivity = new Map(activities.filter((a) => a.task_id && recurring.has(a.task_id)).map((a) => [a.id, a.task_id!]));
+  if (taskOfActivity.size === 0) return occurrences;
+  const byKey = new Map(occurrences.map((o) => [occurrenceKey(o.task_id, o.occurrence_date), o]));
+  for (const c of completions) {
+    const taskId = taskOfActivity.get(c.activity_id);
+    if (!taskId) continue;
+    const task = recurring.get(taskId)!;
+    const key = occurrenceKey(taskId, c.occurrence_date);
+    const existing = byKey.get(key);
+    if (existing?.status === "concluida") continue;
+    if (!existing && !recurringTaskOccursOn(task, c.occurrence_date)) continue;
+    byKey.set(key, {
+      ...(existing ?? {
+        id: `routine:${key}`, task_id: taskId, space_id: task.space_id, user_id: task.user_id, occurrence_date: c.occurrence_date,
+        title: task.title, scheduled_time: task.scheduled_time, location: task.location, priority: task.priority, created_at: "", updated_at: "",
+      }),
+      status: "concluida",
+      completed_at: existing?.completed_at ?? c.completed_at ?? null,
+    });
+  }
+  return [...byKey.values()];
+}

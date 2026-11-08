@@ -426,8 +426,12 @@ export type PersonalAccountOption = { id: string; name: string; balance: number;
  */
 export type TaskPriority = "normal" | "importante";
 export type TaskStatus = "pendente" | "concluida";
-/** 'prazo' = concluir ATÉ `due_date`; 'dia' = fazer NAQUELE dia (migration 013). */
-export type TaskKind = "prazo" | "dia";
+/**
+ * 'prazo' = concluir ATÉ `due_date`; 'dia' = fazer NAQUELE dia (migration 013);
+ * 'organizadora' = sem dia fixo e sem recorrência — só agrupa subtarefas
+ * (migration 20261112100000). Nunca gera execução nem fica atrasada.
+ */
+export type TaskKind = "prazo" | "dia" | "organizadora";
 export type TaskRecurrence = "none" | "weekly";
 
 export type Task = {

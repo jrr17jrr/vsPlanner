@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requirePersonalSpace } from "@/lib/supabase/dal";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { todayKeySaoPaulo } from "@/lib/format";
-import { addDaysToKey, isRecurringTask, pastRecurringDates, recurringTaskOccursOn } from "@/lib/tasks";
+import { addDaysToKey, isRecurringTask, pastRecurringDates, recurringTaskOccursOn, weekdayOfKey } from "@/lib/tasks";
+import { activityOccursOn } from "@/lib/routine-real";
 import {
   ACTIVITY_LINK_COLUMNS,
   isMissingColumnError,
@@ -67,6 +68,13 @@ type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_KEY = /^\d{2}:\d{2}(:\d{2})?$/;
 
+const ORGANIZER_NEEDS_MIGRATION =
+  "Tarefa organizadora precisa da migração 20261112100000_organizer_tasks_subtask_recurrence.sql aplicada no Supabase.";
+/** Banco ainda com a constraint antiga de kind (migration 20261112100000 pendente). */
+function friendlyTaskError(error: { message: string }): string {
+  return /tasks_kind_check/.test(error.message) ? ORGANIZER_NEEDS_MIGRATION : error.message;
+}
+
 function revalidateTaskPaths() {
   revalidatePath("/tarefas");
   revalidatePath("/hoje");
@@ -78,11 +86,23 @@ function revalidateTaskPaths() {
 function normalizeTaskInput(input: TaskFormInput): { error: string } | { values: TaskUpdate } {
   const title = input.title.trim();
   if (!title) return { error: "Título é obrigatório." };
-  if (input.kind !== "prazo" && input.kind !== "dia") return { error: "Tipo de tarefa inválido." };
+  if (input.kind !== "prazo" && input.kind !== "dia" && input.kind !== "organizadora") return { error: "Tipo de tarefa inválido." };
   if (input.priority !== "normal" && input.priority !== "importante") return { error: "Prioridade inválida." };
   if (input.date && !DATE_KEY.test(input.date)) return { error: "Data inválida." };
   if (input.deadlineDate && !DATE_KEY.test(input.deadlineDate)) return { error: "Prazo final inválido." };
   if ((input.time && !TIME_KEY.test(input.time)) || (input.deadlineTime && !TIME_KEY.test(input.deadlineTime))) return { error: "Horário inválido." };
+
+  // Organizadora: sem dia fixo, sem recorrência, sem prazo — só agrupa subtarefas
+  // (cada uma com a própria programação). Nunca gera execução nem fica atrasada.
+  if (input.kind === "organizadora") {
+    return {
+      values: {
+        kind: "organizadora", title, description: input.description?.trim() || null,
+        due_date: null, scheduled_time: null, deadline_date: null, deadline_time: null, reminder_offsets: [],
+        location: null, priority: input.priority, recurrence: "none", weekdays: [], notes: input.notes?.trim() || null,
+      },
+    };
+  }
 
   const recurring = input.kind === "dia" && input.recurrence === "weekly";
   const weekdays = recurring
@@ -184,7 +204,7 @@ export async function createTaskAction(input: TaskFormInput): Promise<ActionStat
     if (stripped.lost) warning = MISSING_SCHEDULE_WARNING;
   }
 
-  if (error || !data) return { error: error?.message ?? "Erro ao criar tarefa." };
+  if (error || !data) return { error: error ? friendlyTaskError(error) : "Erro ao criar tarefa." };
   revalidateTaskPaths();
   return { success: "Tarefa criada.", id: data.id, warning };
 }
@@ -201,9 +221,19 @@ export async function updateTaskAction(taskId: string, input: TaskFormInput): Pr
 
   const todayKey = todayKeySaoPaulo();
 
-  if (isRecurringTask(existing)) {
+  if (isRecurringTask(existing) && update.kind === "organizadora") {
+    // Recorrente → organizadora: congela os dias passados (concluídos e
+    // pendentes ficam no histórico com o snapshot antigo) e para de gerar
+    // execuções. Subtarefas, checklists e histórico são preservados.
+    const freezeError = await freezePastOccurrences(supabase, existing, todayKey);
+    if (freezeError) return { error: freezeError };
+    update.recurrence_start = null;
+    update.recurrence_until = null;
+    update.status = "pendente";
+    update.completed_at = null;
+  } else if (isRecurringTask(existing)) {
     if (update.recurrence !== "weekly") {
-      return { error: "Tarefa recorrente não deixa de repetir pela edição. Use “Encerrar repetição”." };
+      return { error: "Tarefa recorrente não deixa de repetir pela edição. Use “Encerrar repetição” — ou transforme em tarefa organizadora (sem dias)." };
     }
     const freezeError = await freezePastOccurrences(supabase, existing, todayKey);
     if (freezeError) return { error: freezeError };
@@ -213,6 +243,9 @@ export async function updateTaskAction(taskId: string, input: TaskFormInput): Pr
     if (existing.recurrence_until && existing.recurrence_until < start) {
       update.recurrence_until = addDaysToKey(start, -1);
     }
+  } else if (update.kind === "organizadora") {
+    update.status = "pendente";
+    update.completed_at = null;
   } else if (update.recurrence === "weekly") {
     // Virou recorrente: estado passa a ser por dia, a partir de hoje.
     update.recurrence_start = todayKey;
@@ -228,9 +261,9 @@ export async function updateTaskAction(taskId: string, input: TaskFormInput): Pr
     ({ error } = await supabase.from("tasks").update(stripped.values).eq("id", taskId).eq("user_id", profile.id));
     if (stripped.lost) warning = MISSING_SCHEDULE_WARNING;
   }
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyTaskError(error) };
   revalidateTaskPaths();
-  return { success: "Tarefa atualizada.", warning };
+  return { success: update.kind === "organizadora" && isRecurringTask(existing) ? "Virou tarefa organizadora. Os dias anteriores continuam no histórico." : "Tarefa atualizada.", warning };
 }
 
 /** Conclui/reabre uma tarefa NÃO recorrente (com prazo ou do dia). */
@@ -267,21 +300,38 @@ export async function toggleTaskOccurrenceAction(taskId: string, occurrenceDate:
   const task = await getOwnTask(supabase, taskId, profile.id);
   if (!task || !isRecurringTask(task)) return { error: "Tarefa recorrente não encontrada." };
 
+  const writeError = await writeTaskOccurrence(supabase, task, profile.id, occurrenceDate, done);
+  if (writeError) return { error: writeError };
+  // Mesmo dia na Rotina vinculada: a sessão acompanha a execução (nunca diverge).
+  const syncError = await syncLinkedRoutineSessions(supabase, task.id, profile.id, occurrenceDate, done);
+  if (syncError) return { error: syncError };
+
+  revalidateTaskPaths();
+  revalidatePath("/rotina");
+  return { success: done ? "Concluída." : "Reaberta." };
+}
+
+/**
+ * Grava o estado de UM dia de uma recorrente (upsert idempotente por
+ * task_id + data; snapshot preservado se o dia já tinha linha).
+ */
+async function writeTaskOccurrence(supabase: SupabaseServer, task: Task, userId: string, occurrenceDate: string, done: boolean): Promise<string | null> {
+  const taskId = task.id;
   const { data: existing, error: existingError } = await supabase
     .from("task_occurrences")
     .select("id")
     .eq("task_id", taskId)
     .eq("occurrence_date", occurrenceDate)
     .maybeSingle();
-  if (existingError) return { error: existingError.message };
-  if (!existing && !recurringTaskOccursOn(task, occurrenceDate)) return { error: "Esta tarefa não acontece nesse dia." };
+  if (existingError) return existingError.message;
+  if (!existing && !recurringTaskOccursOn(task, occurrenceDate)) return "Esta tarefa não acontece nesse dia.";
 
   if (!existing) {
     const { error } = await supabase.from("task_occurrences").upsert(
       {
         task_id: task.id,
         space_id: task.space_id,
-        user_id: profile.id,
+        user_id: userId,
         occurrence_date: occurrenceDate,
         title: task.title,
         scheduled_time: task.scheduled_time,
@@ -290,7 +340,7 @@ export async function toggleTaskOccurrenceAction(taskId: string, occurrenceDate:
       },
       { onConflict: "task_id,occurrence_date", ignoreDuplicates: true }
     );
-    if (error) return { error: error.message };
+    if (error) return error.message;
   }
 
   const { error } = await supabase
@@ -298,11 +348,20 @@ export async function toggleTaskOccurrenceAction(taskId: string, occurrenceDate:
     .update({ status: done ? "concluida" : "pendente", completed_at: done ? new Date().toISOString() : null })
     .eq("task_id", taskId)
     .eq("occurrence_date", occurrenceDate)
-    .eq("user_id", profile.id);
-  if (error) return { error: error.message };
+    .eq("user_id", userId);
+  return error?.message ?? null;
+}
 
-  revalidateTaskPaths();
-  return { success: done ? "Concluída." : "Reaberta." };
+/** Sessões da Rotina vinculadas à tarefa naquele dia acompanham a execução. */
+async function syncLinkedRoutineSessions(supabase: SupabaseServer, taskId: string, userId: string, date: string, done: boolean): Promise<string | null> {
+  const { data, error } = await supabase.from("activities").select("*").eq("task_id", taskId).eq("user_id", userId);
+  if (error) return isMissingColumnError(error) ? null : error.message;
+  const ids = ((data ?? []) as Activity[]).filter((a) => activityOccursOn(a, date, weekdayOfKey(date))).map((a) => a.id);
+  if (ids.length === 0) return null;
+  const res = done
+    ? await supabase.from("activity_completions").upsert(ids.map((activity_id) => ({ activity_id, user_id: userId, occurrence_date: date })), { onConflict: "activity_id,occurrence_date", ignoreDuplicates: true })
+    : await supabase.from("activity_completions").delete().in("activity_id", ids).eq("user_id", userId).eq("occurrence_date", date);
+  return res.error?.message ?? null;
 }
 
 /** Para de gerar novas ocorrências a partir de hoje. Histórico (inclusive o de hoje, se já concluído) fica. */
@@ -580,6 +639,20 @@ export async function toggleActivityCompletionAction(activityId: string, occurre
       .eq("user_id", profile.id)
       .eq("occurrence_date", occurrenceDate);
     if (error) return { error: error.message };
+  }
+
+  // Sessão de tarefa RECORRENTE vinculada = execução daquele dia da tarefa.
+  // Antes só a sessão era gravada e o dia ficava "pendente" em Tarefas.
+  const { data: activity } = await supabase.from("activities").select("task_id").eq("id", activityId).eq("user_id", profile.id).maybeSingle();
+  const linkedTaskId = (activity as { task_id?: string | null } | null)?.task_id;
+  if (linkedTaskId && DATE_KEY.test(occurrenceDate) && occurrenceDate <= todayKeySaoPaulo()) {
+    const task = await getOwnTask(supabase, linkedTaskId, profile.id);
+    if (task && isRecurringTask(task) && !task.archived_at) {
+      const writeError = await writeTaskOccurrence(supabase, task, profile.id, occurrenceDate, completed);
+      // Dia fora da recorrência: a sessão vale sozinha (não é erro).
+      if (writeError && writeError !== "Esta tarefa não acontece nesse dia.") return { error: writeError };
+      revalidateTaskPaths();
+    }
   }
 
   revalidatePath("/rotina");

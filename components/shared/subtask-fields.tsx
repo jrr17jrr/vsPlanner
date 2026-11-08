@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ReminderOffsetsPicker } from "@/components/shared/reminder-offsets-picker";
 import { SUBTASK_DESCRIPTION_MAX } from "@/lib/subtask-description";
 import { isBlankSubtaskDraft, type SubtaskDraft } from "@/lib/subtask-draft";
+import { formatWeekdays, WEEKDAY_ORDER, WEEKDAY_SHORT } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,26 +18,71 @@ import { cn } from "@/lib/utils";
  * celular e na seção "Subtarefas" do Criar tarefa. Nunca passa da largura
  * da tela: colunas `minmax(0,1fr)` e campos `min-w-0`.
  */
-export function SubtaskDetailsFields({ value, onChange, idPrefix, disabled, className }: {
+type ScheduleMode = "sem" | "data" | "semanal";
+
+export function SubtaskDetailsFields({ value, onChange, idPrefix, disabled, className, allowRecurrence = true }: {
   value: SubtaskDraft;
   onChange: (patch: Partial<SubtaskDraft>) => void;
   idPrefix: string;
   disabled?: boolean;
   className?: string;
+  /** Itens de checklist não repetem sozinhos (a repetição é da subtarefa). */
+  allowRecurrence?: boolean;
 }) {
   const field = "flex min-w-0 flex-col gap-1";
+  const weekly = allowRecurrence && value.recurrence === "weekly";
+  const mode: ScheduleMode = weekly ? "semanal" : value.scheduledDate ? "data" : "sem";
+  function setMode(next: ScheduleMode) {
+    if (next === "semanal") onChange({ recurrence: "weekly", scheduledDate: "", dueDate: "", deadlineTime: "" });
+    else if (next === "data") onChange({ recurrence: "none", weekdays: [], scheduledDate: value.scheduledDate || new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) });
+    else onChange({ recurrence: "none", weekdays: [], scheduledDate: "", scheduledTime: "", reminders: [] });
+  }
+  const toggleDay = (d: number) => onChange({ weekdays: value.weekdays.includes(d) ? value.weekdays.filter((x) => x !== d) : [...value.weekdays, d] });
   return (
     <div className={cn("grid grid-cols-2 gap-2", className)}>
-      <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-sd`}>Fazer no dia</Label><Input id={`${idPrefix}-sd`} type="date" value={value.scheduledDate} disabled={disabled} onChange={(e) => onChange({ scheduledDate: e.target.value })} /></div>
-      <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-st`}>Horário</Label><Input id={`${idPrefix}-st`} type="time" value={value.scheduledTime} disabled={disabled || !value.scheduledDate} onChange={(e) => onChange({ scheduledTime: e.target.value })} /></div>
+      {allowRecurrence && (
+        <div className="col-span-2 flex min-w-0 flex-col gap-1">
+          <Label className="text-xs">Programação</Label>
+          <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Programação da subtarefa">
+            {([["sem", "Sem data"], ["data", "Em um dia"], ["semanal", "Repetir"]] as const).map(([m, label]) => (
+              <Button key={m} type="button" size="sm" className="h-9 px-1 text-xs" disabled={disabled} variant={mode === m ? "default" : "outline"} aria-pressed={mode === m} onClick={() => setMode(m)}>{label}</Button>
+            ))}
+          </div>
+        </div>
+      )}
+      {weekly ? (
+        <>
+          <div className="col-span-2 flex min-w-0 flex-col gap-1">
+            <Label className="text-xs">Dias da semana</Label>
+            <div className="grid grid-cols-7 gap-1">
+              {WEEKDAY_ORDER.map((d) => (
+                <Button key={d} type="button" size="sm" className="h-9 px-0 text-xs" disabled={disabled} variant={value.weekdays.includes(d) ? "default" : "outline"} aria-pressed={value.weekdays.includes(d)} onClick={() => toggleDay(d)}>{WEEKDAY_SHORT[d]}</Button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {value.weekdays.length ? `Aparece no Meu Dia: ${formatWeekdays(value.weekdays)}. Cada dia é concluído separadamente.` : "Escolha os dias em que esta subtarefa se repete."}
+            </p>
+          </div>
+          <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-st`}>Horário</Label><Input id={`${idPrefix}-st`} type="time" value={value.scheduledTime} disabled={disabled} onChange={(e) => onChange({ scheduledTime: e.target.value })} /></div>
+          <div />
+          <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-rs`}>Início</Label><Input id={`${idPrefix}-rs`} type="date" value={value.recurrenceStart} disabled={disabled} onChange={(e) => onChange({ recurrenceStart: e.target.value })} /></div>
+          <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-ru`}>Término</Label><Input id={`${idPrefix}-ru`} type="date" value={value.recurrenceUntil} min={value.recurrenceStart || undefined} disabled={disabled} onChange={(e) => onChange({ recurrenceUntil: e.target.value })} /></div>
+          <p className="col-span-2 -mt-1 text-[11px] text-muted-foreground">Início em branco = hoje. Término em branco = sem fim. Dias anteriores ao início nunca ficam pendentes.</p>
+        </>
+      ) : (
+        <>
+      {(!allowRecurrence || mode === "data") && <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-sd`}>Fazer no dia</Label><Input id={`${idPrefix}-sd`} type="date" value={value.scheduledDate} disabled={disabled} onChange={(e) => onChange({ scheduledDate: e.target.value })} /></div>}
+      {(!allowRecurrence || mode === "data") && <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-st`}>Horário</Label><Input id={`${idPrefix}-st`} type="time" value={value.scheduledTime} disabled={disabled || !value.scheduledDate} onChange={(e) => onChange({ scheduledTime: e.target.value })} /></div>}
       <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-dd`}>Prazo final</Label><Input id={`${idPrefix}-dd`} type="date" value={value.dueDate} min={value.scheduledDate || undefined} disabled={disabled} onChange={(e) => onChange({ dueDate: e.target.value })} /></div>
       <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-dt`}>Horário limite</Label><Input id={`${idPrefix}-dt`} type="time" value={value.deadlineTime} disabled={disabled || !value.dueDate} onChange={(e) => onChange({ deadlineTime: e.target.value })} /></div>
+        </>
+      )}
       <div className="col-span-2 flex min-w-0 flex-col gap-1"><Label className="text-xs">Prioridade</Label><div className="grid grid-cols-2 gap-1.5">
         {(["normal", "importante"] as const).map((p) => <Button key={p} type="button" size="sm" className="h-9" disabled={disabled} variant={value.priority === p ? "default" : "outline"} aria-pressed={value.priority === p} onClick={() => onChange({ priority: p })}>{p === "normal" ? "Normal" : "Importante"}</Button>)}
       </div></div>
-      {value.scheduledDate
+      {value.scheduledDate || weekly
         ? <div className="col-span-2 flex min-w-0 flex-col gap-1"><Label className="text-xs">Lembretes</Label><ReminderOffsetsPicker value={value.reminders} onChange={(r) => onChange({ reminders: r })} hasTime={!!value.scheduledTime} disabled={disabled} /></div>
-        : <p className="col-span-2 text-[11px] text-muted-foreground">Escolha o dia de execução para configurar lembretes.</p>}
+        : <p className="col-span-2 text-[11px] text-muted-foreground">Escolha o dia de execução (ou a repetição) para configurar lembretes.</p>}
     </div>
   );
 }
@@ -74,7 +120,7 @@ export function DraftSubtasksEditor({ drafts, onChange, newDraft, disabled }: {
       </div>
       {drafts.map((d, i) => {
         const expanded = open.includes(i);
-        const summary = [d.scheduledDate && `fazer ${d.scheduledDate.split("-").reverse().slice(0, 2).join("/")}${d.scheduledTime ? " " + d.scheduledTime : ""}`, d.dueDate && `prazo ${d.dueDate.split("-").reverse().slice(0, 2).join("/")}`, d.priority === "importante" && "importante", d.reminders.length && `${d.reminders.length} lembrete(s)`].filter(Boolean).join(" · ");
+        const summary = [d.recurrence === "weekly" && `repete ${formatWeekdays(d.weekdays)}`, d.scheduledDate && `fazer ${d.scheduledDate.split("-").reverse().slice(0, 2).join("/")}${d.scheduledTime ? " " + d.scheduledTime : ""}`, d.dueDate && `prazo ${d.dueDate.split("-").reverse().slice(0, 2).join("/")}`, d.priority === "importante" && "importante", d.reminders.length && `${d.reminders.length} lembrete(s)`].filter(Boolean).join(" · ");
         return (
           <div key={i} className="min-w-0 rounded-md border border-border p-2">
             <div className="flex min-w-0 items-center gap-1">

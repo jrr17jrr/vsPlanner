@@ -60,6 +60,39 @@ export type Subtask = {
   priority?: SubtaskPriority | null;
   reminder_offsets?: number[] | null;
   completed_at?: string | null;
+  /**
+   * Recorrência PRÓPRIA da subtarefa (migration 20261112100000) — independente
+   * da tarefa principal. 'weekly' = estado por dia em
+   * `task_subtask_occurrences` (concluir segunda não conclui terça); `is_done`
+   * da linha não é usado. Regra em lib/subtask-recurrence.ts.
+   */
+  recurrence?: "none" | "weekly" | null;
+  weekdays?: number[] | null;
+  recurrence_start?: string | null;
+  recurrence_until?: string | null;
+  archived_at?: string | null;
+  /** Execuções gravadas (janela recente) — anexadas pelo servidor, não é coluna. */
+  occurrences?: SubtaskOccurrence[];
+  /** Calculado para o dia exibido (lib/subtask-recurrence.ts) — não é coluna. */
+  day?: SubtaskDayState;
+};
+
+/** Linha de `task_subtask_occurrences` (só os campos que o app usa). */
+export type SubtaskOccurrence = {
+  subtask_id: string;
+  occurrence_date: string;
+  status: "pendente" | "concluida";
+  completed_at: string | null;
+  title?: string | null;
+};
+
+/** Estado de uma subtarefa recorrente no dia exibido. */
+export type SubtaskDayState = {
+  date: string;
+  /** A definição gera execução nesse dia. */
+  occurs: boolean;
+  /** Próxima execução a partir do dia (inclusive), para "Próxima: qua 12/11". */
+  nextDate: string | null;
 };
 
 export type Schedule = {
@@ -197,8 +230,11 @@ export function groupSubtasks(subtasks: Subtask[], opts: { todayKey: string; now
       const bk = (b.state.deadlineOverdue ? b.schedule.deadlineDate : b.schedule.executionDate) ?? "";
       return ak.localeCompare(bk);
     });
-  const done = subtasks.filter((s) => s.is_done).length;
-  return { today, overdue, all, done, total: subtasks.length, progress: subtasks.length ? Math.round((done / subtasks.length) * 100) : 0 };
+  // Subtarefa recorrente sem execução no dia exibido (já resolvida por
+  // lib/subtask-recurrence.ts) não entra no progresso daquele dia.
+  const counted = subtasks.filter((s) => !s.day || s.day.occurs);
+  const done = counted.filter((s) => s.is_done).length;
+  return { today, overdue, all, done, total: counted.length, progress: counted.length ? Math.round((done / counted.length) * 100) : 0 };
 }
 
 /** Erro de coluna inexistente (migration ainda não aplicada). */

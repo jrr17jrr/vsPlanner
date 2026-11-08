@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, CircleStop, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { CalendarClock, CircleStop, FolderTree, History, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,11 +27,14 @@ export function TaskCard({
   onEndRecurrence,
   onMove,
   moveLabel = "Alterar data",
+  onHistory,
   children,
 }: {
   title: string;
   done: boolean;
-  onToggle: () => void;
+  /** Sem checkbox (tarefa organizadora: não se conclui, só agrupa subtarefas). */
+  onToggle?: () => void;
+  onHistory?: () => void;
   time?: string;
   accent?: keyof typeof CARD_ACCENT;
   important?: boolean;
@@ -44,14 +47,20 @@ export function TaskCard({
   moveLabel?: string;
   children?: React.ReactNode;
 }) {
-  const hasMenu = onEdit || onDelete || onEndRecurrence;
+  const hasMenu = onEdit || onDelete || onEndRecurrence || onHistory;
   return (
     <article className={cn("rounded-xl border border-l-[3px] border-border/70 bg-card px-3 py-2.5 shadow-sm shadow-black/10 transition-colors", CARD_ACCENT[accent], done && "opacity-70")}>
       <div className="flex items-start gap-2">
         {/* Área de toque de 44px em volta do checkbox (celular). */}
-        <label className="-my-1.5 -ml-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
-          <Checkbox checked={done} onCheckedChange={onToggle} aria-label={`${done ? "Reabrir" : "Concluir"}: ${title}`} className="h-5 w-5" />
-        </label>
+        {onToggle ? (
+          <label className="-my-1.5 -ml-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
+            <Checkbox checked={done} onCheckedChange={onToggle} aria-label={`${done ? "Reabrir" : "Concluir"}: ${title}`} className="h-5 w-5" />
+          </label>
+        ) : (
+          <span className="-my-1.5 -ml-2 flex h-11 w-11 shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
+            <FolderTree className="h-5 w-5" />
+          </span>
+        )}
         <div className="min-w-0 flex-1 pt-0.5">
           <p className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm font-medium leading-snug text-foreground", done && "text-muted-foreground")}>
             {time && <span className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-xs font-semibold tabular-nums text-primary">{time}</span>}
@@ -77,6 +86,7 @@ export function TaskCard({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {onEdit && <DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4" /> Editar</DropdownMenuItem>}
+                {onHistory && <DropdownMenuItem onClick={onHistory}><History className="h-4 w-4" /> Histórico de execuções</DropdownMenuItem>}
                 {onEndRecurrence && <DropdownMenuItem onClick={onEndRecurrence}><CircleStop className="h-4 w-4" /> Encerrar repetição</DropdownMenuItem>}
                 {onDelete && <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive"><Trash2 className="h-4 w-4" /> Excluir</DropdownMenuItem>}
               </DropdownMenuContent>
