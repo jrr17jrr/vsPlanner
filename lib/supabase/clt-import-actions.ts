@@ -9,13 +9,14 @@ import { validateImport, type ImportPreview, type MetricChange, type PeriodTarge
 import { informedColumns, planRowChanges, resolvePeriodTarget, type PeriodRow } from "@/lib/import/period-target";
 import { BASE_TO_AD_KEY, EXTRA_IMPORT_KEYS, EXTRA_IMPORT_LABEL, METRIC_KEYS, hasExtraMetrics, type ImportBundle } from "@/lib/import/types";
 import { AD_METRICS, type AdMetricKey } from "@/lib/clt/ad-result-update";
-import { AD_RATES_MIGRATION, AD_RESULTS_MIGRATION_EXTRA, prepareAdResultUpdate, type PreparedAdUpdate } from "@/lib/supabase/clt-ad-results-core";
+import { AD_RATES_MIGRATION, AD_RESULTS_MIGRATION_EXTRA, AD_VIDEO_V2_MIGRATION, prepareAdResultUpdate, type PreparedAdUpdate } from "@/lib/supabase/clt-ad-results-core";
+import { isVideoV2Key } from "@/lib/clt/result-metrics";
 
 /** Coluna ausente no banco: qual migration falta (taxas → 20261108100000; engajamento/vídeo → 20261106100000). */
-const migrationHint = (cols: Record<string, unknown>) => ("hook_rate" in cols || "hold_rate" in cols ? `${AD_RATES_MIGRATION} ${AD_RESULTS_MIGRATION_EXTRA}` : AD_RESULTS_MIGRATION_EXTRA);
+const migrationHint = (cols: Record<string, unknown>) => [Object.keys(cols).some(isVideoV2Key) ? AD_VIDEO_V2_MIGRATION : "", "hook_rate" in cols || "hold_rate" in cols ? AD_RATES_MIGRATION : "", AD_RESULTS_MIGRATION_EXTRA].filter(Boolean).join(" ");
 import { buildImportPayload } from "@/lib/import/plan";
 import { collectInfoTargets, countInfoChanges, INFO_TABLE, planInfoChanges, withoutNewColumns, type InfoTarget } from "@/lib/import/info-plan";
-import { INFO_MIGRATION } from "@/lib/clt/registered-info";
+import { INFO_MIGRATION, isPostLinkColumn, POST_LINKS_MIGRATION } from "@/lib/clt/registered-info";
 import { buildSnapshot } from "@/lib/import/snapshot";
 import { assertCompanyInModule } from "@/lib/supabase/clt-scope";
 
@@ -244,6 +245,12 @@ async function saveInfo(db: SupabaseClient, userId: string, input: Input, bundle
   for (const op of ops) {
     const table = INFO_TABLE[op.level];
     let { error } = await db.from(table).update(op.update).eq("id", op.id).eq("user_id", userId);
+    // Só os links das publicações dependem da migration 20261117110000: grava o resto e avisa.
+    if (error && isMissingSchema(error.code) && Object.keys(op.update).some(isPostLinkColumn)) {
+      warning = ` Os links das publicações não foram gravados: ${POST_LINKS_MIGRATION}`;
+      const noLinks = Object.fromEntries(Object.entries(op.update).filter(([k]) => !isPostLinkColumn(k)));
+      error = Object.keys(noLinks).length ? (await db.from(table).update(noLinks).eq("id", op.id).eq("user_id", userId)).error : null;
+    }
     if (error && isMissingSchema(error.code)) {
       warning = ` Parte das informações cadastradas não foi gravada: ${INFO_MIGRATION}`;
       const legacy = withoutNewColumns(op.level, op.update);

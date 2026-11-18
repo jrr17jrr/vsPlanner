@@ -68,9 +68,14 @@ describe("reconhecimento das métricas do formulário manual", () => {
     expect(ad.extraMetrics).toEqual({ engagements: 1, reactions: 2, comments: 3, shares: 4, new_followers: 5, thruplays: 7, video_p75: 8, video_p100: 9, views: 10, video_plays_3s: 11 });
     expect(ad.metrics.linkClicks).toBe(6);
   });
-  it("'Publicações guardadas' é reconhecido, mas avisado como não suportado (sem coluna nova)", () => {
-    const b = bundleOf(`Campanha: X\nConjunto: S\nAnúncio: A\nPublicações guardadas: 12`);
-    expect(b.problems).toEqual([expect.objectContaining({ level: "warning", message: expect.stringContaining("ainda não é registrado") })]);
+  it("'Publicações guardadas' agora é gravado (migration 20261117110000), junto com 25/50/95% e tempo médio", () => {
+    const b = bundleOf(`Campanha: X\nConjunto: S\nAnúncio: A\nPublicações guardadas: 12\nReproduções de 25%: 900\nReproduções de 50%: 600\nReproduções de 95%: 120\nTempo médio de reprodução: 0:07`);
+    expect(b.problems).toEqual([]);
+    expect(b.campaigns[0]?.adSets[0]?.ads[0]?.extraMetrics).toEqual({ saves: 12, video_p25: 900, video_p50: 600, video_p95: 120, avg_watch_time: 7 });
+  });
+  it("JSON lê salvas, 25/50/95% e tempo médio", () => {
+    const b = bundleOf(JSON.stringify({ format: "vsplanner_v1", campaigns: [{ name: "X", ad_sets: [{ name: "S", ads: [{ name: "A", metrics: { saves: 4, video_p25: "1.200", video_p50: 800, video_p95: 90, avg_watch_time: "6,5" } }] }] }] }));
+    expect(b.campaigns[0]?.adSets[0]?.ads[0]?.extraMetrics).toMatchObject({ saves: 4, video_p25: 1200, video_p50: 800, video_p95: 90, avg_watch_time: 6.5 });
   });
   it("JSON também lê as métricas novas", () => {
     const b = bundleOf(JSON.stringify({ format: "vsplanner_v1", campaigns: [{ name: "X", ad_sets: [{ name: "S", ads: [{ name: "A", metrics: { thruplays: 5, reactions: "1.234", video_p100: 3 } }] }] }] }));

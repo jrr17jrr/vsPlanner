@@ -14,7 +14,9 @@ import { confirmSmartImportAction, previewSmartImportAction } from "@/lib/supaba
 import type { ImportIssue, ImportPreview, PreviewAd, PreviewCampaign } from "@/lib/import/validate";
 import { MONEY_METRICS, type Metrics } from "@/lib/import/types";
 import { columnLabel, informedColumns } from "@/lib/import/period-target";
-import { fmtRate, isRateKey } from "@/lib/clt/video-rates";
+import { fmtInformed, isInformedKey } from "@/lib/clt/video-rates";
+import { TemplateBar } from "@/components/importar/template-bar";
+import type { ImportTemplate } from "@/lib/import/templates";
 import { LEVEL_LABEL, type InfoChange } from "@/lib/import/info-plan";
 
 type Company = { id: string; name: string };
@@ -115,7 +117,7 @@ function InformedFallback({ preview }: { preview: ImportPreview }) {
   );
 }
 
-const fmtChange = (key: string, v: number | null) => v === null ? "não informado" : isRateKey(key) ? fmtRate(v) : key === "spend" || key === "revenue" ? money(v) : v.toLocaleString("pt-BR");
+const fmtChange = (key: string, v: number | null) => v === null ? "não informado" : isInformedKey(key) ? fmtInformed(key, v) : key === "spend" || key === "revenue" ? money(v) : v.toLocaleString("pt-BR");
 
 /**
  * Informações cadastradas (link, textos, CTA, destino, lances, idade…):
@@ -322,7 +324,7 @@ type LegacyHandler ={ detect: (content: string) => boolean; render: (content: st
  * `module` (Central de Importação): o servidor confere que a empresa é desse
  * módulo. `example`/`exampleJson`: exemplos editáveis do tipo escolhido.
  */
-export function SmartImporter({ companies = [], fixedCompany, title, legacy, onImported, module, example, exampleJson, initialMode = "json" }: { companies?: Company[]; fixedCompany?: Company; title?: string; legacy?: LegacyHandler; onImported?: () => void; module?: "clt" | "mkt"; example?: string; exampleJson?: string; initialMode?: Mode }) {
+export function SmartImporter({ companies = [], fixedCompany, title, legacy, onImported, module, example, exampleJson, initialMode = "json", templates = [] }: { companies?: Company[]; fixedCompany?: Company; title?: string; legacy?: LegacyHandler; onImported?: () => void; module?: "clt" | "mkt"; example?: string; exampleJson?: string; initialMode?: Mode; templates?: ImportTemplate[] }) {
   const textExample = example ?? TEXT_EXAMPLE;
   const [companyId, setCompanyId] = useState(fixedCompany?.id ?? "");
   const [schemaHint, setSchemaHint] = useState("");
@@ -414,6 +416,7 @@ export function SmartImporter({ companies = [], fixedCompany, title, legacy, onI
             {mode === "json" && <Input type="file" accept=".json,application/json" className="h-11" onChange={e => readFile(e.target.files?.[0])} />}
             {mode === "json" && fileName && <p className="text-xs text-muted-foreground">Arquivo: {fileName} — selecionar um arquivo NÃO importa nada.</p>}
             {mode === "json" && exampleJson && <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => { setContent(exampleJson); setFileName(""); invalidate(); }}>Ver exemplo de JSON válido</Button>}
+            {templates.length > 0 && <TemplateBar templates={templates} format={mode === "json" ? "json" : "text"} current={content} onInsert={(c) => { setContent(c); setFileName(""); invalidate(); }} />}
             <Textarea id={uid + "content"} value={content} onChange={e => { setContent(e.target.value); if (preview) invalidate(); }} rows={mode === "text" ? 14 : 8} spellCheck={false} placeholder={mode === "text" ? textExample : "Cole o JSON aqui ou envie o arquivo acima."} className="font-mono text-xs" />
             {mode === "text" && (
               <details className="text-xs text-muted-foreground">

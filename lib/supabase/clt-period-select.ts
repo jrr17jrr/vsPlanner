@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { EXTRA_COLUMNS } from "@/lib/clt/result-metrics";
+import { EXTRA_COLUMNS, VIDEO_V2_COLUMNS } from "@/lib/clt/result-metrics";
 import { RATE_COLUMNS } from "@/lib/clt/video-rates";
 
 /**
@@ -22,19 +22,20 @@ export async function selectAdPeriodMetrics(
   extraColumns: string,
   filter: Filter,
   options: { engagementVideo?: boolean } = {},
-): Promise<{ data: Record<string, unknown>[]; error: { code?: string; message: string } | null; engagementVideo: boolean; rates: boolean }> {
+): Promise<{ data: Record<string, unknown>[]; error: { code?: string; message: string } | null; engagementVideo: boolean; rates: boolean; videoV2: boolean }> {
   const client = db as SupabaseClient;
   // 0. + Taxas de Gancho/Retenção (migration 20261108100000) — sem ela, cai para o nível seguinte.
-  const tiers = [...(options.engagementVideo ? [`${baseColumns},${extraColumns},${EXTRA_COLUMNS},${RATE_COLUMNS}`, `${baseColumns},${extraColumns},${EXTRA_COLUMNS}`] : []), `${baseColumns},${extraColumns}`, baseColumns];
+  // -1. + salvas, 25/50/95% e tempo médio (migration 20261117110000).
+  const tiers = [...(options.engagementVideo ? [`${baseColumns},${extraColumns},${EXTRA_COLUMNS},${RATE_COLUMNS},${VIDEO_V2_COLUMNS}`, `${baseColumns},${extraColumns},${EXTRA_COLUMNS},${RATE_COLUMNS}`, `${baseColumns},${extraColumns},${EXTRA_COLUMNS}`] : []), `${baseColumns},${extraColumns}`, baseColumns];
   let last: { data: unknown[] | null; error: { code?: string; message: string } | null } = { data: [], error: null };
   for (let i = 0; i < tiers.length; i++) {
     last = await filter(client.from("clt_ad_period_metrics").select(tiers[i]));
     if (!last.error || !MISSING_COLUMN.includes(String(last.error.code))) {
-      const ev = !!options.engagementVideo && i <= 1 && !last.error;
-      return { data: (last.data ?? []) as Record<string, unknown>[], error: last.error, engagementVideo: ev, rates: ev && i === 0 };
+      const ev = !!options.engagementVideo && i <= 2 && !last.error;
+      return { data: (last.data ?? []) as Record<string, unknown>[], error: last.error, engagementVideo: ev, rates: ev && i <= 1, videoV2: ev && i === 0 };
     }
   }
-  return { data: (last.data ?? []) as Record<string, unknown>[], error: last.error, engagementVideo: false, rates: false };
+  return { data: (last.data ?? []) as Record<string, unknown>[], error: last.error, engagementVideo: false, rates: false, videoV2: false };
 }
 
 export const PERIOD_EXTRA_COLUMNS = "creative_id,source,views,thruplays,engagements";

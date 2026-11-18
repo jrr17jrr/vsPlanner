@@ -32,9 +32,12 @@ export const emptyMetrics = (): Metrics => ({ spend: null, conversations: null, 
  * `clt_ad_period_metrics` usadas pelo formulário "Atualizar resultados"
  * (lib/clt/ad-result-update.ts). Nenhuma coluna nova.
  */
-export const EXTRA_IMPORT_KEYS = ["engagements", "reactions", "comments", "shares", "new_followers", "views", "video_plays_3s", "thruplays", "video_p75", "video_p100", "hook_rate", "hold_rate"] as const;
+export const EXTRA_IMPORT_KEYS = ["engagements", "reactions", "comments", "shares", "new_followers", "views", "video_plays_3s", "thruplays", "video_p75", "video_p100", "hook_rate", "hold_rate",
+  // Migration 20261117110000.
+  "saves", "video_p25", "video_p50", "video_p95", "avg_watch_time"] as const;
 /** Percentuais informados (Taxa de Gancho/Retenção): decimais 0–100, nunca somados nem calculados. */
-export const RATE_IMPORT_KEYS = new Set<string>(["hook_rate", "hold_rate"]);
+/** Também o tempo médio de reprodução (segundos): informado, nunca somado. */
+export const RATE_IMPORT_KEYS = new Set<string>(["hook_rate", "hold_rate", "avg_watch_time"]);
 export type ExtraImportKey = (typeof EXTRA_IMPORT_KEYS)[number];
 export type ExtraMetrics = Partial<Record<ExtraImportKey, number | null>>;
 export const EXTRA_IMPORT_LABEL: Record<ExtraImportKey, string> = {
@@ -42,6 +45,7 @@ export const EXTRA_IMPORT_LABEL: Record<ExtraImportKey, string> = {
   new_followers: "Novos seguidores", views: "Visualizações", video_plays_3s: "Reproduções de 3 segundos", thruplays: "ThruPlays",
   video_p75: "Visualizações de 75%", video_p100: "Visualizações de 100%",
   hook_rate: "Taxa de Gancho (%)", hold_rate: "Taxa de Retenção (%)",
+  saves: "Publicações salvas", video_p25: "Reproduções de 25%", video_p50: "Reproduções de 50%", video_p95: "Reproduções de 95%", avg_watch_time: "Tempo médio de reprodução (s)",
 };
 /** Métrica base do importador → chave do "Atualizar resultados". */
 export const BASE_TO_AD_KEY: Record<MetricKey, string> = {

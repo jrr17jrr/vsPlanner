@@ -1,6 +1,6 @@
 import type { ResultType } from "@/lib/clt/history";
 import { EXTRA_METRIC_KEYS, NEW_FOLLOWERS_LABEL, type ExtraMetricKey, type MetricSection } from "@/lib/clt/result-metrics";
-import { isRateKey, latestRates, parseRate, type RateKey } from "@/lib/clt/video-rates";
+import { AVG_WATCH_LABEL, isInformedKey, latestRates, parseInformed, type InformedKey } from "@/lib/clt/video-rates";
 
 /**
  * "Atualizar resultados" de UM anúncio — puro (sem I/O), usado pela ação do
@@ -20,7 +20,7 @@ import { isRateKey, latestRates, parseRate, type RateKey } from "@/lib/clt/video
  * Campo vazio = "não informado": não muda nada.
  */
 
-export type AdMetricKey = "spend" | "conversations" | "sales" | "revenue" | "impressions" | "reach" | "views" | "thruplays" | "engagements" | "link_clicks" | "leads" | ExtraMetricKey | RateKey;
+export type AdMetricKey = "spend" | "conversations" | "sales" | "revenue" | "impressions" | "reach" | "views" | "thruplays" | "engagements" | "link_clicks" | "leads" | ExtraMetricKey | InformedKey;
 
 /**
  * Campos do "Atualizar resultados", na ordem e na seção em que aparecem.
@@ -39,12 +39,18 @@ export const AD_METRICS: Array<{ key: AdMetricKey; label: string; money?: boolea
   { key: "comments", label: "Comentários", rowKey: "comments", section: "engajamento" },
   { key: "shares", label: "Compartilhamentos", rowKey: "shares", section: "engajamento" },
   { key: "new_followers", label: NEW_FOLLOWERS_LABEL, rowKey: "new_followers", section: "engajamento" },
+  { key: "saves", label: "Publicações salvas", rowKey: "saves", section: "engajamento" },
   { key: "link_clicks", label: "Cliques no link", rowKey: "link_clicks", section: "engajamento" },
   { key: "views", label: "Visualizações", rowKey: "views", section: "video" },
   { key: "video_plays_3s", label: "Reproduções de 3 segundos", rowKey: "video_plays_3s", section: "video" },
   { key: "thruplays", label: "ThruPlays", rowKey: "thruplays", section: "video" },
+  { key: "video_p25", label: "Reproduções de 25%", rowKey: "video_p25", section: "video" },
+  { key: "video_p50", label: "Reproduções de 50%", rowKey: "video_p50", section: "video" },
   { key: "video_p75", label: "Visualizações de 75%", rowKey: "video_p75", section: "video" },
+  { key: "video_p95", label: "Reproduções de 95%", rowKey: "video_p95", section: "video" },
   { key: "video_p100", label: "Visualizações de 100%", rowKey: "video_p100", section: "video" },
+  // Tempo médio (segundos) INFORMADO: substitui, nunca é somado (como as taxas).
+  { key: "avg_watch_time", label: AVG_WATCH_LABEL, rowKey: "avg_watch_time", section: "video", rate: true },
   // Percentuais INFORMADOS (Meta Ads): substituem o valor atual, nunca somados/calculados.
   { key: "hook_rate", label: "Taxa de Gancho (%)", rowKey: "hook_rate", section: "video", rate: true },
   { key: "hold_rate", label: "Taxa de Retenção (%)", rowKey: "hold_rate", section: "video", rate: true },
@@ -81,7 +87,7 @@ export function currentTotals(rows: CountedRow[]): Totals {
   const out = Object.fromEntries(AD_METRICS.map((m) => [m.key, null])) as Totals;
   const latest = latestRates(rows as Parameters<typeof latestRates>[0]);
   for (const m of AD_METRICS) {
-    if (isRateKey(m.key)) { out[m.key] = latest[m.key]?.value ?? null; continue; }
+    if (isInformedKey(m.key)) { out[m.key] = latest[m.key]?.value ?? null; continue; }
     for (const r of rows) {
       if (r.unknown?.includes(m.rowKey)) continue;
       const v = Number(r[m.rowKey] ?? 0);
@@ -164,9 +170,9 @@ export function planAdResultUpdate(input: {
     const v = input.values[m.key];
     if (v === undefined || v === null) continue;
     if (!Number.isFinite(v) || v < 0) return { error: `${m.label}: valor inválido.` };
-    if (isRateKey(m.key)) {
+    if (isInformedKey(m.key)) {
       // Percentual informado: substitui (em `delta` fica o valor novo, não uma diferença).
-      if (parseRate(v) === undefined) return { error: `${m.label}: informe um percentual entre 0 e 100 (até 2 casas decimais).` };
+      if (parseInformed(m.key, v) === undefined) return { error: m.key === "avg_watch_time" ? `${m.label}: informe os segundos (até 2 casas decimais).` : `${m.label}: informe um percentual entre 0 e 100 (até 2 casas decimais).` };
       if (prev[m.key] === v) continue;
       delta[m.key] = v; updated[m.key] = v; previous[m.key] = prev[m.key];
       continue;
@@ -180,7 +186,7 @@ export function planAdResultUpdate(input: {
   if (!Object.keys(updated).length) return { error: "Nenhum valor mudou." };
 
   // Taxa menor que a anterior não é "redução de total" (não há o que subtrair).
-  const decreasing = (Object.keys(delta) as AdMetricKey[]).some((k) => !isRateKey(k) && delta[k]! < 0);
+  const decreasing = (Object.keys(delta) as AdMetricKey[]).some((k) => !isInformedKey(k) && delta[k]! < 0);
   let adjust: UpdateRow | null;
   if (input.reference) {
     // Com período escolhido: só ajusta a atualização do MESMO período (nunca mexe em outro período sem você escolher).
@@ -200,7 +206,7 @@ export function planAdResultUpdate(input: {
     for (const m of AD_METRICS) {
       const base = num(adjust[m.key]);
       if (delta[m.key] === undefined) { values[m.key] = base; continue; }
-      if (isRateKey(m.key)) { values[m.key] = delta[m.key]!; continue; }
+      if (isInformedKey(m.key)) { values[m.key] = delta[m.key]!; continue; }
       const next = (base ?? 0) + delta[m.key]!;
       if (next < 0) return { error: `${m.label}: o novo total (${updated[m.key]}) é menor do que o já registrado por importações/lançamentos anteriores. Para reduzir, corrija a origem (reimporte o período).` };
       values[m.key] = isMoney(m.key) ? round2(next) : next;

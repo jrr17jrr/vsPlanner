@@ -1,5 +1,5 @@
 import { normalizeObjective } from "@/lib/clt/history";
-import { parseRate } from "@/lib/clt/video-rates";
+import { parseInformed } from "@/lib/clt/video-rates";
 import { parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 import { readJsonInfo } from "./info-fields";
 import { normalizeMetaId } from "@/lib/clt/registered-info";
@@ -48,7 +48,7 @@ function arr(o: Obj, keys: string[]): unknown[] | null {
   return Array.isArray(v) ? v : null;
 }
 
-const METRIC_ALIASES: Record<MetricKey, string[]> = {
+export const METRIC_ALIASES: Record<MetricKey, string[]> = {
   spend: ["spend_brl", "spend", "investimento", "gasto", "valor_gasto", "amount_spent", "spent"],
   conversations: ["whatsapp_conversations", "conversations", "conversas", "mensagens", "messages", "messaging_conversations_started"],
   sales: ["sales", "vendas"],
@@ -59,7 +59,7 @@ const METRIC_ALIASES: Record<MetricKey, string[]> = {
   leads: ["leads"],
 };
 const INTEGER_METRICS = new Set<MetricKey>(["conversations", "sales", "impressions", "reach", "linkClicks", "leads"]);
-const EXTRA_ALIASES: Record<ExtraImportKey, string[]> = {
+export const EXTRA_ALIASES: Record<ExtraImportKey, string[]> = {
   engagements: ["engagements", "post_engagement", "interacoes", "interações", "engajamento"],
   reactions: ["reactions", "post_reactions", "reacoes", "reações"],
   comments: ["comments", "comentarios", "comentários"],
@@ -72,6 +72,11 @@ const EXTRA_ALIASES: Record<ExtraImportKey, string[]> = {
   video_p100: ["video_p100", "video_p100_watched", "visualizacoes_100"],
   hook_rate: ["hook_rate", "taxa_de_gancho", "taxa_gancho", "hookRate"],
   hold_rate: ["hold_rate", "taxa_de_retencao", "taxa_retencao", "holdRate"],
+  saves: ["saves", "post_saves", "publicacoes_salvas", "salvamentos", "onsite_conversion.post_save"],
+  video_p25: ["video_p25", "video_p25_watched", "reproducoes_25", "visualizacoes_25"],
+  video_p50: ["video_p50", "video_p50_watched", "reproducoes_50", "visualizacoes_50"],
+  video_p95: ["video_p95", "video_p95_watched", "reproducoes_95", "visualizacoes_95"],
+  avg_watch_time: ["avg_watch_time", "video_avg_time_watched", "tempo_medio_reproducao", "tempo_medio"],
 };
 
 function readExtraMetrics(source: Obj | null, path: string, problems: ParseProblem[]): ExtraMetrics {
@@ -81,8 +86,9 @@ function readExtraMetrics(source: Obj | null, path: string, problems: ParseProbl
     const raw = pick(source, EXTRA_ALIASES[key]);
     if (raw === undefined) continue;
     const isRate = key === "hook_rate" || key === "hold_rate";
-    const value = isRate ? parseRate(raw) : parseBrInteger(raw);
-    if (value === undefined) problems.push({ path: `${path}.${key}`, message: isRate ? `Percentual inválido (0 a 100, até 2 casas): ${JSON.stringify(raw)}` : `Valor inválido: ${JSON.stringify(raw)}` });
+    const informed = isRate || key === "avg_watch_time";
+    const value = informed ? parseInformed(key, raw) : parseBrInteger(raw);
+    if (value === undefined) problems.push({ path: `${path}.${key}`, message: isRate ? `Percentual inválido (0 a 100, até 2 casas): ${JSON.stringify(raw)}` : key === "avg_watch_time" ? `Tempo médio inválido (segundos, ex.: 12,5 ou 0:12): ${JSON.stringify(raw)}` : `Valor inválido: ${JSON.stringify(raw)}` });
     else out[key] = value;
   }
   return out;

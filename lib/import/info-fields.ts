@@ -9,7 +9,7 @@ import type { ImportDetails, ImportInfo, ParseProblem } from "./types";
  */
 
 /** Apelidos (normalizados: minúsculas, sem acento, "_" ou espaço) → coluna. */
-const ALIASES: Record<InfoLevel, Record<string, string[]>> = {
+export const ALIASES: Record<InfoLevel, Record<string, string[]>> = {
   campaign: {
     bid_strategy: ["bid_strategy", "estrategia de lances", "estrategia de lance", "estrategia lances", "estrategia de licitacao", "estrategia"],
     buying_type: ["buying_type", "tipo de compra", "tipo compra"],
@@ -30,6 +30,10 @@ const ALIASES: Record<InfoLevel, Record<string, string[]>> = {
   ad: {
     asset_url: ["link", "link do anuncio", "link da publicacao", "link do post", "url", "url do anuncio", "ad_link", "post_url", "permalink", "permalink_url", "preview_url", "asset_url", "link do criativo"],
     post_id: ["post_id", "id do post", "id da publicacao", "publicacao"],
+    instagram_url: ["instagram_url", "link do instagram", "link da publicacao do instagram", "link do post do instagram", "publicacao do instagram", "post do instagram", "instagram", "instagram_permalink_url"],
+    reels_url: ["reels_url", "link do reels", "link do reel", "reels", "reel", "url do reels"],
+    facebook_url: ["facebook_url", "link do facebook", "link da publicacao do facebook", "link do post do facebook", "publicacao do facebook", "post do facebook", "facebook"],
+    destination_url: ["destination_url", "url de destino", "link de destino", "url destino", "url do destino", "website_url", "link_url", "url do site", "site de destino"],
     primary_text: ["texto principal", "texto", "texto do anuncio", "legenda", "primary_text", "body", "message"],
     headline: ["titulo", "title", "headline"],
     description: ["descricao", "description"],
@@ -118,8 +122,11 @@ export function readJsonInfo(level: InfoLevel, obj: Record<string, unknown>, kno
     if (col) { putInfo(info, level, col, v, `${path}.${k}`, problems); continue; }
     if (known.has(k) || known.has(nk)) continue;
     const scalar = (x: unknown) => typeof x === "string" || typeof x === "number" || typeof x === "boolean";
-    if (scalar(v) && !(typeof v === "string" && !v.trim())) details[k.slice(0, 60)] = typeof v === "string" ? v.slice(0, 1000) : (v as number | boolean);
-    else if (Array.isArray(v) && v.length && v.length <= 50 && v.every((x) => typeof x === "string" || typeof x === "number")) details[k.slice(0, 60)] = v as Array<string | number>;
+    // Campo sem coluna própria: guardado em "Outras informações" e AVISADO na prévia (nunca descartado em silêncio).
+    const kept = () => problems.push({ path: `${path}.${k}`, level: "warning", message: `Campo "${k}" não é um campo próprio do VS Planner — guardado em "Outras informações".` });
+    if (scalar(v) && !(typeof v === "string" && !v.trim())) { details[k.slice(0, 60)] = typeof v === "string" ? v.slice(0, 1000) : (v as number | boolean); kept(); }
+    else if (Array.isArray(v) && v.length && v.length <= 50 && v.every((x) => typeof x === "string" || typeof x === "number")) { details[k.slice(0, 60)] = v as Array<string | number>; kept(); }
+    else if (!(typeof v === "string" && !v.trim())) problems.push({ path: `${path}.${k}`, level: "warning", message: `Campo "${k}" não reconhecido — ignorado.` });
   }
   return { info, details };
 }

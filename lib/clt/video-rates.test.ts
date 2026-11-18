@@ -36,13 +36,14 @@ describe("valor atual do anúncio = registro mais recente (nunca soma nem média
     expect(latestRates(rows)).toEqual({
       hook_rate: { value: 40, start: "2026-10-16", end: "2026-10-31" },
       hold_rate: { value: 12.5, start: "2026-10-16", end: "2026-10-31" },
+      avg_watch_time: null,
     });
   });
   it("currentTotals usa a mais recente (não 70 = 30 + 40, nem 35 de média)", () => {
     expect(currentTotals(rows as unknown as CountedRow[])).toMatchObject({ hook_rate: 40, hold_rate: 12.5 });
   });
   it("sem nenhuma taxa: não informado", () => {
-    expect(latestRates([{ entry_date: "2026-10-01", hook_rate: null }])).toEqual({ hook_rate: null, hold_rate: null });
+    expect(latestRates([{ entry_date: "2026-10-01", hook_rate: null }])).toEqual({ hook_rate: null, hold_rate: null, avg_watch_time: null });
   });
 });
 

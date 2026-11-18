@@ -1,5 +1,5 @@
 import { mapAudienceType, inferAdFormat } from "./parse-json";
-import { parseRate } from "@/lib/clt/video-rates";
+import { parseInformed } from "@/lib/clt/video-rates";
 import { EXTRA_IMPORT_KEYS, RATE_IMPORT_KEYS, emptyMetrics, type ExtraImportKey, type ImportAd, type ImportAdSet, type ImportAudience, type ImportBundle, type ImportCampaign, type MetricKey, type ParseProblem } from "./types";
 import { normalizeKey, parseBrDate, parseBrDateTime, parseBrInteger, parseBrNumber, parseBrPeriod } from "./values";
 import { infoColumnFor, putAgeRange, putInfo } from "./info-fields";
@@ -22,7 +22,7 @@ type Field =
   | "company" | "period" | "audienceDef" | "audience" | "audienceType" | "externalKey" | "audienceKey" | "source"
   | "percentage" | "retention" | "location" | "radius" | "age" | "interests" | "size" | "notes"
   | "campaign" | "campaignId" | "objective" | "dailyBudget" | "start" | "end" | "status"
-  | "adSet" | "adSetId" | "ad" | "adId" | "format" | "postId" | "placements" | "savedPosts" | MetricKey | ExtraImportKey;
+  | "adSet" | "adSetId" | "ad" | "adId" | "format" | "postId" | "placements" | MetricKey | ExtraImportKey;
 
 const FIELD_ALIASES: Array<[Field, string[]]> = [
   ["company", ["empresa", "cliente"]],
@@ -77,7 +77,11 @@ const FIELD_ALIASES: Array<[Field, string[]]> = [
   // Sem apelidos curtos: "Retenção:" sozinho é a retenção (dias) dos públicos.
   ["hook_rate", ["taxa de gancho", "taxa de gancho (%)", "taxa gancho", "hook rate", "hook rate (%)"]],
   ["hold_rate", ["taxa de retencao", "taxa de retencao (%)", "taxa retencao", "hold rate", "hold rate (%)"]],
-  ["savedPosts", ["publicacoes guardadas", "publicacoes salvas", "salvamentos", "salvamentos da publicacao", "posts salvos"]],
+  ["saves", ["publicacoes guardadas", "publicacoes salvas", "salvamentos", "salvamentos da publicacao", "posts salvos", "salvos"]],
+  ["video_p25", ["reproducoes de 25%", "visualizacoes de 25%", "reproducoes do video ate 25%", "video assistido ate 25%", "25%"]],
+  ["video_p50", ["reproducoes de 50%", "visualizacoes de 50%", "reproducoes do video ate 50%", "video assistido ate 50%", "50%"]],
+  ["video_p95", ["reproducoes de 95%", "visualizacoes de 95%", "reproducoes do video ate 95%", "video assistido ate 95%", "95%"]],
+  ["avg_watch_time", ["tempo medio de reproducao", "tempo medio de reproducao do video", "tempo medio de visualizacao", "tempo medio assistido", "tempo medio", "tempo medio (s)", "tempo medio de reproducao (s)"]],
 ];
 const FIELD_BY_ALIAS = new Map<string, Field>();
 for (const [field, aliases] of FIELD_ALIASES) for (const a of aliases) FIELD_BY_ALIAS.set(a, field);
@@ -137,12 +141,27 @@ export function parseStructuredText(text: string): ImportBundle {
   };
 
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  /**
+   * Texto longo do anúncio (texto principal, descrição) em VÁRIAS linhas:
+   * as linhas seguintes que não começam com um campo conhecido continuam o
+   * texto — quebras de linha, emojis, hashtags e acentos são preservados.
+   */
+  let longText: { info: NonNullable<ImportAd["info"]>; col: string; blanks: number } | null = null;
+  const LONG_COLS = new Set(["primary_text", "description"]);
+  const isKnownKey = (k: string) => FIELD_BY_ALIAS.has(k) || !!(infoColumnFor("ad", k) || infoColumnFor("adSet", k) || infoColumnFor("campaign", k));
   lines.forEach((rawLine, index) => {
     const lineNo = index + 1;
     const line = rawLine.replace(/^\s*[-*•]\s+/, "").trim();
-    if (!line) return;
-    if (/^(-{3,}|={3,}|_{3,})$/.test(line)) { flushPending(lineNo); audience = null; campaign = null; adSet = null; ad = null; pendingAudienceName = null; pendingSetInfo = {}; return; }
+    if (!line) { if (longText) longText.blanks++; return; }
+    if (/^(-{3,}|={3,}|_{3,})$/.test(line)) { longText = null; flushPending(lineNo); audience = null; campaign = null; adSet = null; ad = null; pendingAudienceName = null; pendingSetInfo = {}; return; }
     const m = /^([^:=]{1,60})\s*[:=]\s*(.*)$/.exec(line);
+    if (longText && (!m || !isKnownKey(normalizeKey(m[1])))) {
+      const cur = String(longText.info[longText.col] ?? "");
+      longText.info[longText.col] = (cur ? `${cur}${"\n".repeat(longText.blanks + 1)}${rawLine.trimEnd()}` : rawLine.trim()).slice(0, 5000);
+      longText.blanks = 0;
+      return;
+    }
+    longText = null;
     if (!m) { problems.push({ path: `linha ${lineNo}`, level: "warning", message: `Linha não reconhecida (use "Campo: valor"): ${line.slice(0, 80)}` }); return; }
     const keyText = normalizeKey(m[1]);
     const value = m[2].trim();
@@ -154,7 +173,10 @@ export function parseStructuredText(text: string): ImportBundle {
       const col = (level && infoColumnFor(level, keyText)) ?? (!ad && !adSet ? infoColumnFor("campaign", keyText) : null);
       if (col) {
         const target = ad ?? adSet ?? campaign;
-        putInfo((target.info ??= {}), ad ? "ad" : adSet ? "adSet" : "campaign", col, value, where0, problems);
+        const info = (target.info ??= {});
+        // Valor na mesma linha da chave: "texto" exatamente como veio depois dos dois-pontos.
+        putInfo(info, ad ? "ad" : adSet ? "adSet" : "campaign", col, m[2].trim(), where0, problems);
+        if (ad && LONG_COLS.has(col)) longText = { info, col, blanks: 0 };
         return;
       }
       if (!ad && !adSet && infoColumnFor("adSet", keyText)) {
@@ -171,18 +193,13 @@ export function parseStructuredText(text: string): ImportBundle {
       return v ?? null;
     };
 
-    if (field === "savedPosts") {
-      // Sem coluna no banco (nem no formulário manual): reconhecido, mas não gravado.
-      problems.push({ path: where, level: "warning", message: `"${m[1].trim()}" ainda não é registrado pelo VS Planner (não existe esse campo nos resultados) — ignorado.` });
-      return;
-    }
     if (EXTRA_FIELDS.has(field)) {
       const key = field as ExtraImportKey;
       let v: number | null;
       if (RATE_IMPORT_KEYS.has(key)) {
-        // Percentual informado (ex.: "35,75%"): salvo exatamente como veio.
-        const r = parseRate(value);
-        if (r === undefined) problems.push({ path: where, message: `"${m[1].trim()}": informe um percentual entre 0 e 100, com até 2 casas decimais (ex.: 35,75%). Recebido: ${value}` });
+        // Percentual (ex.: "35,75%") ou tempo médio (segundos) informado: salvo exatamente como veio.
+        const r = parseInformed(key, value);
+        if (r === undefined) problems.push({ path: where, message: key === "avg_watch_time" ? `"${m[1].trim()}": informe os segundos (ex.: 12,5 ou 0:12). Recebido: ${value}` : `"${m[1].trim()}": informe um percentual entre 0 e 100, com até 2 casas decimais (ex.: 35,75%). Recebido: ${value}` });
         v = r ?? null;
       } else v = num(true);
       if (ad) { (ad.extraMetrics ??= {})[key] = v; return; }

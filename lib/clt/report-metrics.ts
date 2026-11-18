@@ -53,12 +53,16 @@ export const REPORT_METRICS: ReportMetricDef[] = [
   v("comments", "Comentários", "engajamento", (m) => m.comments, "int"),
   v("shares", "Compartilhamentos", "engajamento", (m) => m.shares, "int"),
   v("newFollowers", NEW_FOLLOWERS_LABEL, "engajamento", (m) => m.newFollowers, "int", { short: "Novos seguidores (anúncios)" }),
+  v("saves", "Publicações salvas", "engajamento", (m) => m.saves, "int", { short: "Salvas" }),
   v("linkClicks", "Cliques no link", "engajamento", (m) => m.linkClicks, "int"),
 
   v("views", "Visualizações", "video", (m) => m.views, "int"),
   v("video3s", "Reproduções de 3 segundos", "video", (m) => m.video3s, "int", { short: "Reproduções 3s" }),
   v("thruplays", "ThruPlays", "video", (m) => m.thruplays, "int"),
+  v("video25", "Reproduções de 25%", "video", (m) => m.video25, "int", { short: "25%" }),
+  v("video50", "Reproduções de 50%", "video", (m) => m.video50, "int", { short: "50%" }),
   v("video75", "Visualizações de 75%", "video", (m) => m.video75, "int", { short: "75%" }),
+  v("video95", "Reproduções de 95%", "video", (m) => m.video95, "int", { short: "95%" }),
   v("video100", "Visualizações de 100%", "video", (m) => m.video100, "int", { short: "100%" }),
   // Percentuais informados por anúncio: bloco (tabela por anúncio), nunca somados nem em média.
   { id: "taxasVideo", label: "Taxa de Gancho e Taxa de Retenção (por anúncio)", section: "video" },

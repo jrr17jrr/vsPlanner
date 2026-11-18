@@ -11,7 +11,10 @@ import { normalizeKey, parseBrDate, parseBrNumber, sameName } from "./values";
 export type ImportArea = "pessoal" | "clt" | "mkt";
 export type TaskImportType = "tarefas" | "rotinas";
 
-export type DraftSubtask = { title: string; dueDate?: string; description?: string; children: { title: string; dueDate?: string; description?: string }[] };
+/** Item do checklist de uma subtarefa (prioridade própria, opcional). */
+export type DraftChecklistItem = { title: string; dueDate?: string; scheduledDate?: string; description?: string; priority?: "normal" | "importante" };
+/** Subtarefa importada: prazo, "fazer no dia", prioridade, descrição e itens do checklist. */
+export type DraftSubtask = DraftChecklistItem & { children: DraftChecklistItem[] };
 
 export type DraftKind = "tarefa" | "rotina" | "campanha";
 
@@ -42,6 +45,14 @@ export type TaskDraft = {
   recognized: string[];
   /** Problemas de leitura (linha/campo desconhecido, data inválida...). */
   problems: string[];
+  /**
+   * Escolha na prévia: criar nova tarefa (padrão) ou ATUALIZAR uma existente
+   * (`targetId`) — acrescenta subtarefas/checklist e só muda os campos
+   * marcados em `updateFields` (lib/import/task-update.ts).
+   */
+  mode?: "create" | "update";
+  targetId?: string;
+  updateFields?: string[];
 };
 
 export type ParsedDrafts = { ok: true; drafts: TaskDraft[]; detected: "json" | "text" } | { ok: false; error: string };
@@ -160,17 +171,30 @@ function emptyDraft(kind: DraftKind): TaskDraft {
   return { kind, title: "", priority: "normal", weekdays: [], subtasks: [], recognized: [], problems: [] };
 }
 
-/** "Título | prazo: 07/11/2026 | descrição" */
-function parseSubtaskLine(text: string, todayKey: string, problems: string[]): { title: string; dueDate?: string; description?: string } {
+/**
+ * "Título | prazo: 07/11/2026 | fazer: 05/11 | prioridade: importante | descrição"
+ * ("| importante" sozinho também vale). O que não for data/prioridade vira descrição.
+ */
+function parseSubtaskLine(text: string, todayKey: string, problems: string[]): DraftChecklistItem {
   const [head, ...rest] = text.split("|").map((p) => p.trim());
-  const out: { title: string; dueDate?: string; description?: string } = { title: head };
+  const out: DraftChecklistItem = { title: head };
   for (const part of rest) {
     const m = /^([^:\d]+?)\s*:?\s*(\d.*)$/.exec(part);
     const key = m ? normalizeKey(m[1]) : "";
+    const kv = /^([^:]+):\s*(.+)$/.exec(part);
+    const pKey = kv ? normalizeKey(kv[1]) : "";
     if (m && ["prazo", "prazo final", "ate", "data", "vencimento"].includes(key)) {
       const d = parseLooseDate(m[2], todayKey);
       if (d) out.dueDate = d;
       else problems.push(`Subtarefa "${head}": data inválida "${m[2]}".`);
+    } else if (m && ["fazer", "fazer no dia", "execucao", "data de execucao", "dia"].includes(key)) {
+      const d = parseLooseDate(m[2], todayKey);
+      if (d) out.scheduledDate = d;
+      else problems.push(`Subtarefa "${head}": data de execução inválida "${m[2]}".`);
+    } else if ((kv && pKey === "prioridade") || parsePriority(part)) {
+      const p = parsePriority(kv && pKey === "prioridade" ? kv[2] : part);
+      if (p) out.priority = p;
+      else problems.push(`Subtarefa "${head}": prioridade não reconhecida "${kv?.[2] ?? part}" (use Normal ou Importante).`);
     } else if (part) {
       out.description = out.description ? `${out.description} ${part}` : part;
     }
@@ -211,7 +235,11 @@ export function parseTaskText(text: string, type: TaskImportType, todayKey: stri
       const indent = bullet[1].replace(/\t/g, "  ").length;
       const parsed = parseSubtaskLine(bullet[2].trim(), todayKey, d.problems);
       if (!parsed.title) continue;
-      if (indent >= 2 && d.subtasks.length) d.subtasks[d.subtasks.length - 1].children.push(parsed);
+      if (indent >= 2 && d.subtasks.length) {
+        d.subtasks[d.subtasks.length - 1].children.push(parsed);
+        // Tarefa → subtarefa → checklist: nível mais fundo entra como item do checklist (avisado, nada é descartado).
+        if (indent >= 4) d.problems.push(`"${parsed.title}" está num 3º nível: será um item do checklist de "${d.subtasks[d.subtasks.length - 1].title}".`);
+      }
       else d.subtasks.push({ ...parsed, children: [] });
       if (!d.recognized.includes("Subtarefas")) d.recognized.push("Subtarefas");
       continue;
@@ -323,7 +351,7 @@ function pick(o: Obj, keys: string[]): unknown {
 }
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : undefined);
 
-function jsonSubtask(raw: unknown, todayKey: string, problems: string[]): { title: string; dueDate?: string; description?: string } | null {
+function jsonSubtask(raw: unknown, todayKey: string, problems: string[]): DraftChecklistItem | null {
   if (typeof raw === "string") return raw.trim() ? { title: raw.trim() } : null;
   if (!isObj(raw)) return null;
   const title = str(pick(raw, ["title", "titulo", "nome"]));
@@ -331,8 +359,14 @@ function jsonSubtask(raw: unknown, todayKey: string, problems: string[]): { titl
   const dueRaw = pick(raw, ["dueDate", "due_date", "prazo", "prazo_final", "deadline"]);
   const dueDate = dueRaw === undefined ? undefined : parseLooseDate(dueRaw, todayKey);
   if (dueRaw !== undefined && !dueDate) problems.push(`Subtarefa "${title}": data inválida "${String(dueRaw)}".`);
+  const execRaw = pick(raw, ["scheduledDate", "scheduled_date", "fazer_no_dia", "data_execucao", "execucao"]);
+  const scheduledDate = execRaw === undefined ? undefined : parseLooseDate(execRaw, todayKey);
+  if (execRaw !== undefined && !scheduledDate) problems.push(`Subtarefa "${title}": data de execução inválida "${String(execRaw)}".`);
+  const prRaw = pick(raw, ["priority", "prioridade"]);
+  const priority = prRaw === undefined ? undefined : parsePriority(String(prRaw));
+  if (prRaw !== undefined && !priority) problems.push(`Subtarefa "${title}": prioridade não reconhecida "${String(prRaw)}".`);
   const description = str(pick(raw, ["description", "descricao"]));
-  return { title, dueDate, description };
+  return { title, dueDate, scheduledDate, priority, description };
 }
 
 function jsonDraft(raw: Obj, fallbackKind: DraftKind, todayKey: string): TaskDraft {
@@ -396,7 +430,20 @@ function jsonDraft(raw: Obj, fallbackKind: DraftKind, todayKey: string): TaskDra
         const parsed = jsonSubtask(s, todayKey, d.problems);
         if (!parsed) { d.problems.push("Subtarefa sem título foi ignorada."); continue; }
         const childrenRaw = isObj(s) ? pick(s, ["subtasks", "subtarefas", "checklist"]) : undefined;
-        const children = Array.isArray(childrenRaw) ? childrenRaw.map((c) => jsonSubtask(c, todayKey, d.problems)).filter((c): c is NonNullable<typeof c> => !!c) : [];
+        const children: DraftChecklistItem[] = [];
+        for (const c of Array.isArray(childrenRaw) ? childrenRaw : []) {
+          const item = jsonSubtask(c, todayKey, d.problems);
+          if (!item) continue;
+          children.push(item);
+          // 3º nível ou mais: entra como item do mesmo checklist (com aviso — nada é descartado).
+          const deeper = isObj(c) ? pick(c, ["subtasks", "subtarefas", "checklist"]) : undefined;
+          for (const g of Array.isArray(deeper) ? deeper : []) {
+            const grand = jsonSubtask(g, todayKey, d.problems);
+            if (!grand) continue;
+            children.push(grand);
+            d.problems.push(`"${grand.title}" está num 3º nível: será um item do checklist de "${parsed.title}".`);
+          }
+        }
         d.subtasks.push({ ...parsed, children });
       }
       if (d.subtasks.length) mark("Subtarefas");
@@ -462,7 +509,8 @@ export type ValidationContext = {
   /** Empresas do módulo (CLT ou MKT). Pessoal: vazio. */
   companies: { id: string; name: string }[];
   /** Registros já existentes, para apontar duplicados. */
-  existing: { title: string; companyId: string | null; kind: DraftKind; weekdays?: number[] }[];
+  /** `id`: tarefas que podem ser ATUALIZADAS pela importação (Pessoal e CLT/MKT). */
+  existing: { id?: string; title: string; companyId: string | null; kind: DraftKind; weekdays?: number[] }[];
 };
 
 export type ValidatedDraft = {
@@ -472,6 +520,8 @@ export type ValidatedDraft = {
   duplicate: boolean;
   /** Pode ser gravado (sem erros). */
   valid: boolean;
+  /** Tarefas existentes com o mesmo título (candidatas a "Atualizar tarefa existente"). */
+  matches: string[];
 };
 
 const AREA_ACCEPTS: Record<ImportArea, string[]> = {
@@ -531,13 +581,25 @@ export function validateDrafts(drafts: TaskDraft[], ctx: ValidationContext): Val
     const key = `${draft.kind}|${companyId ?? ""}|${normalizeKey(title)}`;
     const inFile = seen.get(key) ?? 0;
     seen.set(key, inFile + 1);
-    const inDb = ctx.existing.some((e) => e.kind === draft.kind && (e.companyId ?? null) === companyId && sameName(e.title, title)
+    const sameTitle = ctx.existing.filter((e) => e.kind === draft.kind && (e.companyId ?? null) === companyId && sameName(e.title, title)
       && (draft.kind !== "rotina" || !e.weekdays || !draft.weekdays.length || e.weekdays.some((d) => draft.weekdays.includes(d))));
+    const matches = draft.kind === "tarefa" ? sameTitle.map((e) => e.id).filter((id): id is string => !!id) : [];
+
+    // "Atualizar tarefa existente": acrescenta à tarefa escolhida (não cria outra — nunca é duplicado).
+    if (draft.mode === "update") {
+      if (draft.kind !== "tarefa") err("Só tarefas podem ser atualizadas pela importação.");
+      const target = ctx.existing.find((e) => e.id && e.id === draft.targetId && e.kind === "tarefa");
+      if (!target) err("Escolha a tarefa existente que será atualizada.");
+      else if ((target.companyId ?? null) !== companyId) err("A tarefa escolhida é de outra empresa — confira a empresa ou escolha outra tarefa.");
+      return { draft, companyId, issues, duplicate: false, valid: !issues.some((i) => i.level === "error"), matches };
+    }
+
+    const inDb = sameTitle.length > 0;
     const duplicate = inDb || inFile > 0;
-    if (inDb) warn("Já existe um registro com este título — ficou desmarcado; marque para criar mesmo assim.");
+    if (inDb) warn(matches.length ? "Já existe uma tarefa com este título — ficou desmarcada. Escolha “Atualizar tarefa existente” para acrescentar subtarefas e checklists, ou marque para criar outra." : "Já existe um registro com este título — ficou desmarcado; marque para criar mesmo assim.");
     else if (inFile > 0) warn("Repetido neste arquivo — ficou desmarcado.");
 
-    return { draft, companyId, issues, duplicate, valid: !issues.some((i) => i.level === "error") };
+    return { draft, companyId, issues, duplicate, valid: !issues.some((i) => i.level === "error"), matches };
   });
 }
 
@@ -626,7 +688,10 @@ export function sanitizeDraft(raw: unknown): TaskDraft {
   const kind: DraftKind = o.kind === "rotina" || o.kind === "campanha" ? o.kind : "tarefa";
   const sub = (s: unknown) => {
     const x = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
-    return { title: cleanStr(x.title, 300) ?? "", dueDate: cleanDate(x.dueDate), description: cleanStr(x.description, 10000) };
+    return {
+      title: cleanStr(x.title, 300) ?? "", dueDate: cleanDate(x.dueDate), scheduledDate: cleanDate(x.scheduledDate), description: cleanStr(x.description, 10000),
+      ...(x.priority === "importante" || x.priority === "normal" ? { priority: x.priority as "normal" | "importante" } : {}),
+    };
   };
   const subtasks = Array.isArray(o.subtasks)
     ? o.subtasks.slice(0, MAX_SUBTASKS + 1).map((s) => {
@@ -652,9 +717,15 @@ export function sanitizeDraft(raw: unknown): TaskDraft {
     endsOn: cleanDate(o.endsOn),
     dailyBudget: cleanMoney(o.dailyBudget),
     plannedAmount: cleanMoney(o.plannedAmount),
-    recognized: [],
+    // Rótulos dos campos lidos (só texto curto): dizem quais campos a pessoa informou (ex.: Prioridade).
+    recognized: Array.isArray(o.recognized) ? o.recognized.filter((r): r is string => typeof r === "string" && r.length <= 60).slice(0, 40) : [],
     problems: [],
   };
+  if (o.mode === "update") {
+    d.mode = "update";
+    d.targetId = cleanStr(o.targetId, 64);
+    d.updateFields = Array.isArray(o.updateFields) ? o.updateFields.filter((f): f is string => typeof f === "string" && f.length <= 30).slice(0, 10) : [];
+  }
   const sourceArea = cleanStr(o.sourceArea, 20);
   if (sourceArea) (d as TaskDraft & { sourceArea?: string }).sourceArea = normalizeKey(sourceArea);
   return d;

@@ -120,6 +120,7 @@ export type ReportMetrics = {
   reach: number; linkClicks: number; leads: number; engagements: number;
   /** Engajamento e vídeo (novos seguidores = atribuídos aos anúncios; não é o total do Instagram). */
   reactions: number; comments: number; shares: number; newFollowers: number; video3s: number; video75: number; video100: number;
+  saves: number; video25: number; video50: number; video95: number;
   deposito: number; credito: number; planned: number;
   /** Custo por mensagem: só investimento/conversas de campanhas/conjuntos de MENSAGENS. */
   msgSpend: number; msgMessages: number;
@@ -127,10 +128,10 @@ export type ReportMetrics = {
   partial: number;
 } & RatioBase;
 
-export const EMPTY_METRICS: ReportMetrics = { gasto: 0, faturamento: 0, resultado: 0, views: 0, impressions: 0, thruplays: 0, messages: 0, sales: 0, reach: 0, linkClicks: 0, leads: 0, engagements: 0, reactions: 0, comments: 0, shares: 0, newFollowers: 0, video3s: 0, video75: 0, video100: 0, deposito: 0, credito: 0, planned: 0, msgSpend: 0, msgMessages: 0, partial: 0, ...emptyRatio() };
+export const EMPTY_METRICS: ReportMetrics = { gasto: 0, faturamento: 0, resultado: 0, views: 0, impressions: 0, thruplays: 0, messages: 0, sales: 0, reach: 0, linkClicks: 0, leads: 0, engagements: 0, reactions: 0, comments: 0, shares: 0, newFollowers: 0, video3s: 0, video75: 0, video100: 0, saves: 0, video25: 0, video50: 0, video95: 0, deposito: 0, credito: 0, planned: 0, msgSpend: 0, msgMessages: 0, partial: 0, ...emptyRatio() };
 
 /** Campo de `ReportMetrics` de cada coluna nova. */
-const EXTRA_TO_METRIC: Record<ExtraMetricKey, keyof ReportMetrics> = { reactions: "reactions", comments: "comments", shares: "shares", new_followers: "newFollowers", video_plays_3s: "video3s", video_p75: "video75", video_p100: "video100" };
+const EXTRA_TO_METRIC: Record<ExtraMetricKey, keyof ReportMetrics> = { reactions: "reactions", comments: "comments", shares: "shares", new_followers: "newFollowers", video_plays_3s: "video3s", video_p75: "video75", video_p100: "video100", saves: "saves", video_p25: "video25", video_p50: "video50", video_p95: "video95" };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 

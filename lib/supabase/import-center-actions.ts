@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findOrBootstrapSpace, requirePersonalSpace } from "@/lib/supabase/dal";
 import { getModuleScope } from "@/lib/supabase/clt-scope";
-import { insertNestedSubtasks } from "@/lib/supabase/import-subtasks";
+import { insertChecklistItems, insertNestedSubtasks } from "@/lib/supabase/import-subtasks";
+import { planTaskUpdate, type ExistingSubtask, type ExistingTask, type FieldChange, type UpdatableField } from "@/lib/import/task-update";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { isMissingColumnError, stripScheduleColumns, TASK_SCHEDULE_COLUMNS, ACTIVITY_LINK_COLUMNS } from "@/lib/task-schedule";
@@ -58,9 +59,9 @@ async function loadContext(area: ImportArea, type: TaskImportType) {
       if (error) throw new Error(error.message);
       existing = (data ?? []).map((a: { title: string; weekdays: number[] | null }) => ({ title: a.title, companyId: null, kind: "rotina" as const, weekdays: a.weekdays ?? [] }));
     } else {
-      const { data, error } = await db.from("tasks").select("title").eq("user_id", profile.id).eq("space_id", space.id).is("archived_at", null);
+      const { data, error } = await db.from("tasks").select("id,title").eq("user_id", profile.id).eq("space_id", space.id).is("archived_at", null);
       if (error) throw new Error(error.message);
-      existing = (data ?? []).map((t: { title: string }) => ({ title: t.title, companyId: null, kind: "tarefa" as const }));
+      existing = (data ?? []).map((t: { id: string; title: string }) => ({ id: t.id, title: t.title, companyId: null, kind: "tarefa" as const }));
     }
   } else {
     const scope = await getModuleScope(supabase, profile.id, area);
@@ -68,8 +69,8 @@ async function loadContext(area: ImportArea, type: TaskImportType) {
     companies = scope.companies.map((c) => ({ id: c.id, name: c.name }));
     const ids = scope.companyIds;
     const tasksQuery = area === "mkt"
-      ? db.from("clt_tasks").select("title,company_id").eq("user_id", profile.id).eq("module", "mkt")
-      : db.from("clt_tasks").select("title,company_id").eq("user_id", profile.id);
+      ? db.from("clt_tasks").select("id,title,company_id,archived_at").eq("user_id", profile.id).eq("module", "mkt")
+      : db.from("clt_tasks").select("id,title,company_id,archived_at").eq("user_id", profile.id);
     const [tasks, campaigns] = await Promise.all([
       tasksQuery,
       ids.length ? db.from("clt_campaigns").select("name,company_id").eq("user_id", profile.id).in("company_id", ids) : Promise.resolve({ data: [], error: null }),
@@ -79,9 +80,10 @@ async function loadContext(area: ImportArea, type: TaskImportType) {
     const own = new Set(ids);
     existing = [
       // CLT: tarefas gerais (sem empresa) ou de empresas do CLT; MKT: só as do MKT.
-      ...((tasks.data ?? []) as { title: string; company_id: string | null }[])
+      ...((tasks.data ?? []) as { id: string; title: string; company_id: string | null; archived_at?: string | null }[])
         .filter((t) => (t.company_id ? own.has(t.company_id) : true))
-        .map((t) => ({ title: t.title, companyId: t.company_id, kind: "tarefa" as const })),
+        // Arquivadas contam como duplicado, mas não podem ser atualizadas.
+        .map((t) => ({ ...(t.archived_at ? {} : { id: t.id }), title: t.title, companyId: t.company_id, kind: "tarefa" as const })),
       ...((campaigns.data ?? []) as { name: string; company_id: string }[]).map((c) => ({ title: c.name, companyId: c.company_id, kind: "campanha" as const })),
     ];
   }
@@ -108,8 +110,78 @@ export async function taskImportContextAction(input: { area: ImportArea; type: T
   }
 }
 
-function subtasksOf(d: TaskDraft) {
-  return d.subtasks.map((s) => ({ title: s.title, dueDate: s.dueDate, description: s.description, subtasks: s.children }));
+function subtasksOf(d: Pick<TaskDraft, "subtasks">) {
+  return d.subtasks.map((s) => ({ title: s.title, dueDate: s.dueDate, scheduledDate: s.scheduledDate, priority: s.priority, description: s.description, subtasks: s.children }));
+}
+
+type TargetRow = Record<string, unknown> & { id: string; title: string };
+const hhmm = (v: unknown) => (typeof v === "string" && v ? v.slice(0, 5) : null);
+const s = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
+
+/** Tarefa existente → formato comum do planejador (lib/import/task-update.ts). */
+function toExisting(area: ImportArea, t: TargetRow): ExistingTask {
+  const recurring = t.recurrence === "weekly";
+  const values: ExistingTask["values"] = { description: s(t.description), priority: s(t.priority), notes: s(t.notes) };
+  if (!recurring && t.kind === "dia") { values.executionDate = s(t.due_date); values.time = hhmm(t.scheduled_time); if (area === "pessoal") values.deadlineDate = s(t.deadline_date); }
+  if (!recurring && t.kind === "prazo") values.deadlineDate = s(t.due_date);
+  return { id: t.id, title: t.title, companyId: area === "pessoal" ? null : (t.company_id as string | null) ?? null, recurring, values };
+}
+
+/** Tarefas escolhidas para atualizar + as subtarefas atuais (só do próprio usuário e da área). */
+async function loadTargets(db: Db, userId: string, area: ImportArea, ids: string[], allowed: Set<string>) {
+  const wanted = [...new Set(ids)].filter((id) => allowed.has(id)).slice(0, MAX_DRAFTS);
+  if (!wanted.length) return { tasks: new Map<string, ExistingTask>(), subtasks: new Map<string, ExistingSubtask[]>(), positions: new Map<string, number>() };
+  const table = area === "pessoal" ? "tasks" : "clt_tasks";
+  const parentType = area === "pessoal" ? "pessoal" : "clt";
+  const [tasks, subs] = await Promise.all([
+    db.from(table).select("*").eq("user_id", userId).in("id", wanted),
+    db.from("task_subtasks").select("*").eq("user_id", userId).eq("parent_type", parentType).in("parent_id", wanted).order("position"),
+  ]);
+  if (tasks.error) throw new Error(tasks.error.message);
+  if (subs.error) throw new Error(subs.error.message);
+  const out = new Map<string, ExistingTask>();
+  for (const t of (tasks.data ?? []) as TargetRow[]) if (!t.archived_at) out.set(t.id, toExisting(area, t));
+  const bySub = new Map<string, ExistingSubtask[]>();
+  const positions = new Map<string, number>();
+  for (const r of (subs.data ?? []) as Array<ExistingSubtask & { parent_id: string; position: number; archived_at?: string | null }>) {
+    if (r.archived_at) continue;
+    (bySub.get(r.parent_id) ?? bySub.set(r.parent_id, []).get(r.parent_id)!).push({ id: r.id, title: r.title, parent_subtask_id: r.parent_subtask_id });
+    const key = r.parent_subtask_id ? `sub:${r.parent_subtask_id}` : r.parent_id;
+    positions.set(key, Math.max(positions.get(key) ?? -1, Number(r.position) || 0));
+  }
+  return { tasks: out, subtasks: bySub, positions };
+}
+
+export type TaskImportTarget = { task: ExistingTask; subtasks: ExistingSubtask[] };
+
+/** Prévia do "Atualizar tarefa existente": a tarefa escolhida e as subtarefas atuais (só lê). */
+export async function taskImportTargetsAction(input: { area: ImportArea; ids: string[] }): Promise<{ error?: string; targets?: Record<string, TaskImportTarget> }> {
+  try {
+    if (input.area !== "pessoal" && input.area !== "clt" && input.area !== "mkt") throw new Error("Área inválida.");
+    if (!Array.isArray(input.ids)) throw new Error("Tarefas inválidas.");
+    const { profile, db, ctx } = await loadContext(input.area, "tarefas");
+    const allowed = new Set(ctx.existing.map((e) => e.id).filter((id): id is string => !!id));
+    const { tasks, subtasks } = await loadTargets(db, profile.id, input.area, input.ids.filter((x) => typeof x === "string"), allowed);
+    return { targets: Object.fromEntries([...tasks].map(([id, task]) => [id, { task, subtasks: subtasks.get(id) ?? [] }])) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Não foi possível carregar a tarefa." };
+  }
+}
+
+/** Colunas de cada campo atualizável (Pessoal × CLT/MKT; 'dia' × 'prazo'). */
+function fieldColumns(area: ImportArea, t: TargetRow, changes: FieldChange[]): { error?: string; values: Record<string, unknown> } {
+  const values: Record<string, unknown> = {};
+  for (const c of changes) {
+    if (c.field === "description" || c.field === "notes") values[c.field] = c.after;
+    else if (c.field === "priority") values.priority = c.after === "importante" ? "importante" : "normal";
+    else if (c.field === "time") values.scheduled_time = c.after;
+    else if (c.field === "executionDate") values.due_date = c.after;
+    else if (c.field === "deadlineDate") values[area === "pessoal" && t.kind === "dia" ? "deadline_date" : "due_date"] = c.after;
+  }
+  const exec = (values.due_date ?? t.due_date) as string | null;
+  const deadline = (values.deadline_date ?? t.deadline_date) as string | null;
+  if (area === "pessoal" && t.kind === "dia" && exec && deadline && deadline < exec) return { error: "O prazo final ficaria antes da data de execução.", values };
+  return { values };
 }
 
 /**
@@ -136,11 +208,42 @@ export async function confirmTaskImportAction(input: { area: ImportArea; type: T
     const today = todayKeySaoPaulo();
     let stopped = false;
     let lostSchedule = false;
+    // "Atualizar tarefa existente": tarefas e subtarefas atuais lidas do BANCO (nunca do navegador).
+    const updateIds = chosen.filter(({ v }) => v.draft.mode === "update" && v.draft.targetId).map(({ v }) => v.draft.targetId!);
+    const allowed = new Set(ctx.existing.map((e) => e.id).filter((id): id is string => !!id));
+    const targets = updateIds.length ? await loadTargets(db, profile.id, area, updateIds, allowed) : null;
+    const parentType = area === "pessoal" ? "pessoal" : "clt";
     for (const { v } of chosen) {
       const d = v.draft;
       if (stopped) { result.notProcessed.push(d.title); continue; }
       const fail = (message: string) => { result.failed.push({ title: d.title, message }); stopped = true; };
       const weekly = d.weekdays.length > 0;
+
+      if (d.mode === "update") {
+        const target = targets?.tasks.get(d.targetId ?? "");
+        if (!target) { fail("Tarefa existente não encontrada (recarregue e valide de novo)."); continue; }
+        const plan = planTaskUpdate(d, target, targets!.subtasks.get(target.id) ?? [], (d.updateFields ?? []) as UpdatableField[]);
+        if (plan.empty) { result.ignored.push({ title: d.title, reason: "nada novo para acrescentar à tarefa existente" }); continue; }
+        if (plan.chosenChanges.length) {
+          const { data: raw, error: readError } = await db.from(area === "pessoal" ? "tasks" : "clt_tasks").select("*").eq("id", target.id).eq("user_id", profile.id).maybeSingle();
+          if (readError || !raw) { fail(readError?.message ?? "Tarefa existente não encontrada."); continue; }
+          const cols = fieldColumns(area, raw as TargetRow, plan.chosenChanges);
+          if (cols.error) { fail(cols.error); continue; }
+          const { error } = await db.from(area === "pessoal" ? "tasks" : "clt_tasks").update(cols.values).eq("id", target.id).eq("user_id", profile.id);
+          if (error) { fail(isMissingColumnError(error) ? "Prazo final separado precisa da migração 20261102100000 aplicada no Supabase." : error.message); continue; }
+        }
+        // Só ACRESCENTA: subtarefas novas no fim da lista e itens novos no checklist das que já existem.
+        const subErr = await insertNestedSubtasks(db, profile.id, parentType, target.id, subtasksOf({ subtasks: plan.newSubtasks }), (targets!.positions.get(target.id) ?? -1) + 1);
+        if (subErr) { fail(subErr); continue; }
+        let itemErr: string | null = null;
+        for (const c of plan.newChecklist) {
+          itemErr = await insertChecklistItems(db, profile.id, parentType, target.id, c.subtaskId, c.items, (targets!.positions.get(`sub:${c.subtaskId}`) ?? -1) + 1);
+          if (itemErr) break;
+        }
+        if (itemErr) { fail(itemErr); continue; }
+        result.updated++;
+        continue;
+      }
 
       if (d.kind === "rotina") {
         const row: Record<string, unknown> = {

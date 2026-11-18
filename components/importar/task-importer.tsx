@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState, useTransition } from "react";
+import { useCallback, useId, useMemo, useRef, useState, useTransition } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, FileJson, PenLine, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -22,7 +22,10 @@ import {
   type TaskDraft,
   type TaskImportType,
 } from "@/lib/import/tasks";
-import { confirmTaskImportAction, taskImportContextAction, type TaskImportContext, type TaskImportResult } from "@/lib/supabase/import-center-actions";
+import { confirmTaskImportAction, taskImportContextAction, taskImportTargetsAction, type TaskImportContext, type TaskImportResult, type TaskImportTarget } from "@/lib/supabase/import-center-actions";
+import { TaskUpdatePanel } from "@/components/importar/task-update-panel";
+import { TemplateBar } from "@/components/importar/template-bar";
+import type { ImportTemplate } from "@/lib/import/templates";
 import { cn } from "@/lib/utils";
 
 type Format = "text" | "json";
@@ -47,7 +50,17 @@ function DraftCard({
   showCompany,
   onSelect,
   onChange,
+  companyId,
+  matches,
+  options,
+  target,
+  onNeedTarget,
 }: {
+  companyId: string | null;
+  matches: string[];
+  options: { id: string; title: string; companyId: string | null }[];
+  target: TaskImportTarget | undefined;
+  onNeedTarget: (id: string) => void;
   index: number;
   draft: TaskDraft;
   issues: { level: "error" | "warning"; message: string }[];
@@ -73,6 +86,7 @@ function DraftCard({
             <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">{KIND_LABEL[draft.kind]}</span>
             {draft.priority === "importante" && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] text-destructive">Importante</span>}
             {duplicate && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">Possível duplicado</span>}
+            {draft.mode === "update" && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] text-primary">Atualizar existente</span>}
             {!valid && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] text-destructive">{errors.length} erro(s)</span>}
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -89,6 +103,7 @@ function DraftCard({
       </div>
       {open && (
         <div className="space-y-3 border-t p-3">
+          {draft.kind === "tarefa" && <TaskUpdatePanel draft={draft} companyId={companyId} matches={matches} options={options} target={target} onChange={onChange} onNeedTarget={onNeedTarget} />}
           {draft.recognized.length > 0 && (
             <p className="text-xs text-muted-foreground">Campos reconhecidos: {draft.recognized.join(" · ")}</p>
           )}
@@ -161,7 +176,7 @@ function DraftCard({
  * instantânea no navegador; ao confirmar, o servidor refaz tudo
  * (lib/supabase/import-center-actions.ts).
  */
-export function TaskImporter({ area, type, areaLabel }: { area: ImportArea; type: TaskImportType; areaLabel: string }) {
+export function TaskImporter({ area, type, areaLabel, templates = [] }: { area: ImportArea; type: TaskImportType; areaLabel: string; templates?: ImportTemplate[] }) {
   const router = useRouter();
   const uid = useId();
   const [format, setFormat] = useState<Format>("text");
@@ -174,6 +189,18 @@ export function TaskImporter({ area, type, areaLabel }: { area: ImportArea; type
   const [result, setResult] = useState<TaskImportResult | null>(null);
   const [busy, start] = useTransition();
   const showCompany = area !== "pessoal";
+  // Tarefas existentes carregadas para "Atualizar tarefa existente" (por id).
+  const [targets, setTargets] = useState<Record<string, TaskImportTarget>>({});
+  const requested = useRef(new Set<string>());
+  const needTarget = useCallback((id: string) => {
+    if (requested.current.has(id)) return;
+    requested.current.add(id);
+    void taskImportTargetsAction({ area, ids: [id] }).then((r) => {
+      if (r.error) { toast.error(r.error); requested.current.delete(id); return; }
+      setTargets((t) => ({ ...t, ...(r.targets ?? {}) }));
+    });
+  }, [area]);
+  const options = useMemo(() => (context?.existing ?? []).filter((e) => e.kind === "tarefa" && e.id).map((e) => ({ id: e.id!, title: e.title, companyId: e.companyId })), [context]);
 
   const validated = useMemo(
     () => (drafts && context ? validateDrafts(drafts, { area, type, companies: context.companies, existing: context.existing }) : []),
@@ -217,9 +244,12 @@ export function TaskImporter({ area, type, areaLabel }: { area: ImportArea; type
       if (r.error || !r.context) { setError(r.error ?? "Falha ao montar a prévia."); return; }
       const v = validateDrafts(parsed.drafts, { area, type, ...r.context });
       setContext(r.context);
-      setDrafts(parsed.drafts);
+      // Tarefa que já existe (um único título igual): sugere "Atualizar tarefa existente" — só acrescenta, nada é substituído sem marcar.
+      const withModes = parsed.drafts.map((d, i) => (v[i].matches.length === 1 && d.kind === "tarefa" ? { ...d, mode: "update" as const, targetId: v[i].matches[0] } : d));
+      setDrafts(withModes);
+      const v2 = validateDrafts(withModes, { area, type, ...r.context });
       // Começa com os válidos e não duplicados marcados.
-      setSelected(new Set(v.map((x, i) => (x.valid && !x.duplicate ? i : -1)).filter((i) => i >= 0)));
+      setSelected(new Set(v2.map((x, i) => (x.valid && !x.duplicate ? i : -1)).filter((i) => i >= 0)));
     });
   }
 
@@ -237,7 +267,7 @@ export function TaskImporter({ area, type, areaLabel }: { area: ImportArea; type
       setResult(r);
       setDrafts(null);
       if (r.failed.length) toast.error(`Importação interrompida: ${r.failed[0].message}`);
-      else toast.success(`${r.created} registro(s) criado(s).`);
+      else toast.success(`${r.created} registro(s) criado(s)${r.updated ? ` e ${r.updated} tarefa(s) atualizada(s)` : ""}.`);
       router.refresh();
     });
   }
@@ -263,6 +293,8 @@ export function TaskImporter({ area, type, areaLabel }: { area: ImportArea; type
               {fileName && <p className="w-full text-xs text-muted-foreground">Arquivo: {fileName} — nada é gravado antes da confirmação.</p>}
             </div>
           )}
+
+          {templates.length > 0 && <TemplateBar templates={templates} format={format} current={content} onInsert={(c) => { setContent(c); setFileName(""); reset(); }} />}
 
           <div className="space-y-1.5">
             <Label htmlFor={uid + "content"}>{format === "text" ? "Escreva ou cole (o exemplo pode ser substituído)" : "Cole o JSON ou envie o arquivo"}</Label>
@@ -321,7 +353,12 @@ export function TaskImporter({ area, type, areaLabel }: { area: ImportArea; type
                   companies={context.companies}
                   showCompany={showCompany}
                   onSelect={(on) => setSelected((prev) => { const n = new Set(prev); if (on) n.add(i); else n.delete(i); return n; })}
-                  onChange={(patch) => update(i, patch)}
+                  onChange={(patch) => { update(i, patch); if (patch.mode === "update") setSelected((prev) => new Set(prev).add(i)); }}
+                  companyId={v.companyId}
+                  matches={v.matches}
+                  options={options}
+                  target={v.draft.targetId ? targets[v.draft.targetId] : undefined}
+                  onNeedTarget={needTarget}
                 />
               ))}
             </ul>

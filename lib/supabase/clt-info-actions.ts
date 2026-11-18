@@ -3,7 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { INFO_MIGRATION, isNewInfoColumn, normalizeInfoForm } from "@/lib/clt/registered-info";
+import { INFO_MIGRATION, isNewInfoColumn, isPostLinkColumn, normalizeInfoForm, POST_LINKS_MIGRATION } from "@/lib/clt/registered-info";
 
 /**
  * "Editar informações" do conjunto e do anúncio: atualiza SÓ as colunas de
@@ -48,6 +48,12 @@ export async function updateCltRegisteredInfoAction(input: { level: "adSet" | "a
 
   const run = (values: Record<string, unknown>) => db.from(table).update(values).eq("id", input.id).eq("user_id", userId).select("id");
   let { data, error } = await run(update);
+  // Migration 20261117110000 pendente (links das publicações): tenta sem essas colunas, sem perder o resto.
+  if (error && MISSING.has(String(error.code)) && Object.keys(update).some(isPostLinkColumn)) {
+    const linkCols = Object.keys(update).filter(isPostLinkColumn);
+    if (linkCols.some((k) => update[k] !== null)) return { error: `Nada foi salvo. ${POST_LINKS_MIGRATION}` };
+    ({ data, error } = await run(Object.fromEntries(Object.entries(update).filter(([k]) => !isPostLinkColumn(k)))));
+  }
   if (error && MISSING.has(String(error.code))) {
     // Migration 20261109100000 pendente: grava as colunas antigas se as novas estiverem vazias.
     const newCols = Object.keys(update).filter((k) => isNewInfoColumn(input.level, k));

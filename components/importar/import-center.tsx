@@ -9,6 +9,7 @@ import { TaskImporter } from "@/components/importar/task-importer";
 import { LegacyPlanningList, type LegacyPlanningItem } from "@/components/planejamento/planning-client";
 import { AREA_INFO, TYPE_INFO, TYPES_BY_AREA, availableAreas, type ImportAccess, type ImportTypeId } from "@/lib/import/center";
 import { SMART_EXAMPLES } from "@/lib/import/examples";
+import { importTemplates } from "@/lib/import/templates";
 import type { ImportArea } from "@/lib/import/tasks";
 import { cn } from "@/lib/utils";
 
@@ -135,10 +136,11 @@ export function ImportCenter({
                 example={SMART_EXAMPLES[type as keyof typeof SMART_EXAMPLES].text}
                 exampleJson={SMART_EXAMPLES[type as keyof typeof SMART_EXAMPLES].json}
                 initialMode="text"
+                templates={importTemplates(area, type)}
               />
             )
           ) : (
-            <TaskImporter key={`${area}-${type}`} area={area} type={type === "rotinas" ? "rotinas" : "tarefas"} areaLabel={AREA_INFO[area].label} />
+            <TaskImporter key={`${area}-${type}`} area={area} type={type === "rotinas" ? "rotinas" : "tarefas"} areaLabel={AREA_INFO[area].label} templates={importTemplates(area, type === "rotinas" ? "rotinas" : "tarefas")} />
           )}
         </section>
       )}

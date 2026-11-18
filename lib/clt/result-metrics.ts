@@ -13,9 +13,15 @@ import { formatMoneyPrecise } from "@/lib/format";
  */
 
 /** Colunas novas de `clt_ad_period_metrics` (migration 20261106100000). */
-export const EXTRA_METRIC_KEYS = ["reactions", "comments", "shares", "new_followers", "video_plays_3s", "video_p75", "video_p100"] as const;
+export const EXTRA_V1_KEYS = ["reactions", "comments", "shares", "new_followers", "video_plays_3s", "video_p75", "video_p100"] as const;
+/** Contagens da migration 20261117110000: publicações salvas e reproduções de 25/50/95%. */
+export const VIDEO_V2_COUNT_KEYS = ["saves", "video_p25", "video_p50", "video_p95"] as const;
+export const EXTRA_METRIC_KEYS = [...EXTRA_V1_KEYS, ...VIDEO_V2_COUNT_KEYS] as const;
 export type ExtraMetricKey = (typeof EXTRA_METRIC_KEYS)[number];
-export const EXTRA_COLUMNS = EXTRA_METRIC_KEYS.join(",");
+export const isVideoV2Key = (k: string) => (VIDEO_V2_COUNT_KEYS as readonly string[]).includes(k) || k === "avg_watch_time";
+/** Colunas lidas em cada nível (cada migration é um nível — sem a mais nova, as anteriores continuam funcionando). */
+export const EXTRA_COLUMNS = EXTRA_V1_KEYS.join(",");
+export const VIDEO_V2_COLUMNS = [...VIDEO_V2_COUNT_KEYS, "avg_watch_time"].join(",");
 
 export type MetricSection = "principal" | "engajamento" | "video";
 export const SECTION_TITLES: Record<MetricSection, string> = { principal: "Resultados principais", engajamento: "Engajamento", video: "Vídeo" };
@@ -152,13 +158,17 @@ export function levelCards(t: LevelTotals): Record<MetricSection | "custos", Lev
       n("comments", "Comentários"),
       n("shares", "Compartilhamentos"),
       n("new_followers", NEW_FOLLOWERS_LABEL),
+      n("saves", "Publicações salvas"),
       n("link_clicks", "Cliques no link"),
     ],
     video: [
       n("views", "Visualizações"),
       n("video_plays_3s", "Reproduções de 3 segundos"),
       n("thruplays", "ThruPlays"),
+      n("video_p25", "Reproduções de 25%"),
+      n("video_p50", "Reproduções de 50%"),
       n("video_p75", "Visualizações de 75%"),
+      n("video_p95", "Reproduções de 95%"),
       n("video_p100", "Visualizações de 100%"),
       card("cpthru", "Custo por ThruPlay", u("spent_amount", "thruplays") ? null : t.thruplays ? fmtMoney(t.spent / t.thruplays) : "—"),
     ],

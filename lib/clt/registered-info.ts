@@ -13,10 +13,15 @@ export const INFO_MIGRATION = "Aplique no Supabase a migration supabase/migratio
 export const NEW_INFO_COLUMNS = {
   campaign: ["bid_strategy", "buying_type", "details"],
   adSet: ["radius_km", "age_min", "age_max", "gender", "languages", "conversion_location", "performance_goal", "details"],
-  ad: ["primary_text", "headline", "description", "call_to_action", "destination", "details"],
+  ad: ["primary_text", "headline", "description", "call_to_action", "destination", "details", "instagram_url", "reels_url", "facebook_url", "destination_url"],
 } as const;
 export type InfoLevel = keyof typeof NEW_INFO_COLUMNS;
 export const isNewInfoColumn = (level: InfoLevel, col: string) => (NEW_INFO_COLUMNS[level] as readonly string[]).includes(col);
+
+/** Links das publicações e URL de destino do anúncio — migration 20261117110000 (nível próprio de compatibilidade). */
+export const POST_LINK_COLUMNS = ["instagram_url", "reels_url", "facebook_url", "destination_url"] as const;
+export const isPostLinkColumn = (col: string) => (POST_LINK_COLUMNS as readonly string[]).includes(col);
+export const POST_LINKS_MIGRATION = "Para salvar os links das publicações (Instagram, Reels, Facebook) e a URL de destino, aplique no Supabase a migration supabase/migrations/20261117110000_clt_ad_post_links_video_metrics.sql.";
 
 export type InfoKind = "text" | "long" | "id" | "url" | "money" | "number" | "integer" | "format";
 export type InfoField = { column: string; label: string; kind: InfoKind };
@@ -47,6 +52,10 @@ export const INFO_FIELDS: Record<InfoLevel, InfoField[]> = {
   ad: [
     { column: "format", label: "Formato", kind: "format" },
     { column: "asset_url", label: "Link do anúncio ou da publicação", kind: "url" },
+    { column: "instagram_url", label: "Link da publicação do Instagram", kind: "url" },
+    { column: "reels_url", label: "Link do Reels", kind: "url" },
+    { column: "facebook_url", label: "Link da publicação do Facebook", kind: "url" },
+    { column: "destination_url", label: "URL de destino do anúncio", kind: "url" },
     { column: "post_id", label: "ID da publicação", kind: "id" },
     { column: "primary_text", label: "Texto principal", kind: "long" },
     { column: "headline", label: "Título", kind: "text" },
@@ -184,7 +193,9 @@ type AdLike = {
   name: string; meta_ad_id?: string | null; format?: string | null; asset_url?: string | null; post_id?: string | null;
   primary_text?: string | null; headline?: string | null; description?: string | null; call_to_action?: string | null;
   destination?: string | null; notes?: string | null; details?: unknown;
+  instagram_url?: string | null; reels_url?: string | null; facebook_url?: string | null; destination_url?: string | null;
 };
+const linkRow = (key: string, label: string, raw: unknown) => { const v = text(raw); return row(key, label, v, { copy: true, href: safeHref(v) }); };
 export function adInfoRows(ad: AdLike): InfoRow[] {
   const url = text(ad.asset_url);
   return [
@@ -193,12 +204,17 @@ export function adInfoRows(ad: AdLike): InfoRow[] {
     // "outro" é o valor padrão do banco quando o formato não foi informado.
     row("format", "Formato", ad.format && ad.format !== "outro" ? FORMAT_LABEL[ad.format] ?? ad.format : null),
     row("asset_url", "Link do anúncio ou da publicação", url, { copy: true, href: safeHref(url) }),
+    // Cada anúncio tem os próprios links: publicação (Instagram/Reels/Facebook) ≠ URL de destino.
+    linkRow("instagram_url", "Link da publicação do Instagram", ad.instagram_url),
+    linkRow("reels_url", "Link do Reels", ad.reels_url),
+    linkRow("facebook_url", "Link da publicação do Facebook", ad.facebook_url),
     row("post_id", "ID da publicação", text(ad.post_id), { copy: true }),
     row("primary_text", "Texto principal", text(ad.primary_text), { long: true, copy: true }),
     row("headline", "Título", text(ad.headline), { copy: true }),
-    row("description", "Descrição", text(ad.description), { long: true }),
+    row("description", "Descrição", text(ad.description), { long: true, copy: true }),
     row("call_to_action", "Botão de chamada para ação", text(ad.call_to_action)),
     row("destination", "Destino do anúncio", text(ad.destination)),
+    linkRow("destination_url", "URL de destino do anúncio", ad.destination_url),
     row("notes", "Observações", text(ad.notes), { long: true }),
     ...detailRows(ad.details),
   ];

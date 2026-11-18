@@ -146,7 +146,7 @@ function InfoForm({ title, fields, onCancel, onSubmit, pending }: { title: strin
         {fields.map((x) => (
           <div key={x.name} className={"space-y-1 " + (x.kind === "long" || x.kind === "url" ? "sm:col-span-2" : "")}>
             <Label htmlFor={`info-${x.name}`}>{x.label}</Label>
-            {x.kind === "long" ? <Textarea id={`info-${x.name}`} name={x.name} defaultValue={x.value} rows={3} />
+            {x.kind === "long" ? <Textarea id={`info-${x.name}`} name={x.name} defaultValue={x.value} rows={x.name === "primary_text" || x.name === "description" ? 6 : 3} className="whitespace-pre-wrap" />
               : x.kind === "select" ? <select id={`info-${x.name}`} name={x.name} defaultValue={x.value} className="h-11 w-full rounded-md border bg-background px-2 text-sm">{x.options!.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
               : <Input id={`info-${x.name}`} name={x.name} defaultValue={x.value} placeholder={x.placeholder} inputMode={x.inputMode} className="h-11" />}
           </div>
@@ -205,6 +205,10 @@ export function AdInfoForm({ ad, onClose }: { ad: CltAdCreative; onClose: () => 
     { name: "meta_ad_id", label: "ID do anúncio na Meta", value: str(ad.meta_ad_id), inputMode: "numeric", placeholder: "Ex.: 120212345678901234" },
     { name: "format", label: "Formato", value: ad.format || "outro", kind: "select", options: Object.entries(FORMAT_LABEL) },
     { name: "asset_url", label: label("asset_url", "ad"), value: str(ad.asset_url), kind: "url", inputMode: "url", placeholder: "https://…" },
+    { name: "instagram_url", label: label("instagram_url", "ad"), value: str(ad.instagram_url), kind: "url", inputMode: "url", placeholder: "https://www.instagram.com/p/…" },
+    { name: "reels_url", label: label("reels_url", "ad"), value: str(ad.reels_url), kind: "url", inputMode: "url", placeholder: "https://www.instagram.com/reel/…" },
+    { name: "facebook_url", label: label("facebook_url", "ad"), value: str(ad.facebook_url), kind: "url", inputMode: "url", placeholder: "https://www.facebook.com/…" },
+    { name: "destination_url", label: label("destination_url", "ad"), value: str(ad.destination_url), kind: "url", inputMode: "url", placeholder: "Site, landing page ou link do WhatsApp" },
     { name: "post_id", label: label("post_id", "ad"), value: str(ad.post_id) },
     { name: "headline", label: label("headline", "ad"), value: str(ad.headline) },
     { name: "call_to_action", label: label("call_to_action", "ad"), value: str(ad.call_to_action), placeholder: "Ex.: Enviar mensagem" },

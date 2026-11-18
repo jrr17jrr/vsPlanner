@@ -2,7 +2,7 @@
 
 import { CollapsibleSection } from "@/components/trabalho/company/collapsible-section";
 import { levelCards, type LevelCard, type LevelTotals } from "@/lib/clt/result-metrics";
-import { fmtRate, RATE_KEYS, RATE_SHORT, type LatestRate, type RateKey } from "@/lib/clt/video-rates";
+import { fmtInformed, INFORMED_KEYS, RATE_SHORT, type InformedKey, type LatestRate } from "@/lib/clt/video-rates";
 
 export type CardSection = { id: string; title: string; cards: LevelCard[]; defaultOpen?: boolean; note?: string };
 
@@ -31,15 +31,15 @@ export function MetricCardSections({ sections }: { sections: CardSection[] }) {
 export const ENGAGEMENT_NOTE = "Novos seguidores atribuídos aos anúncios (Meta Ads) — não é o total de seguidores do Instagram. Cliques no link não contam como conversas.";
 export const COSTS_NOTE = "CPC = investimento ÷ cliques no link · CTR = cliques ÷ impressões · CPM = investimento ÷ impressões × 1000. Só entram registros que informaram os dois valores; sem base suficiente aparece “—”.";
 
-export const RATES_NOTE = "Taxa de Gancho e Taxa de Retenção são informadas (Meta Ads), salvas exatamente como digitadas e nunca calculadas nem somadas. No anúncio, vale a do registro mais recente.";
+export const RATES_NOTE = "Taxa de Gancho, Taxa de Retenção e tempo médio de reprodução são informados (Meta Ads), salvos exatamente como digitadas e nunca calculados nem somados. No anúncio, vale a do registro mais recente.";
 export const RATES_AGG_NOTE = "Taxa de Gancho e Taxa de Retenção são informadas por anúncio e não são somadas nem viram média — veja cada anúncio.";
 
 /** Cards das taxas informadas de UM anúncio (registro mais recente de cada uma). */
-export function rateCards(rates: Record<RateKey, LatestRate>): LevelCard[] {
-  return RATE_KEYS.map((k) => {
+export function rateCards(rates: Record<InformedKey, LatestRate>): LevelCard[] {
+  return INFORMED_KEYS.map((k) => {
     const r = rates[k];
     const when = r ? ` (${r.start === r.end ? r.end.split("-").reverse().join("/") : `${r.start.split("-").reverse().join("/")} a ${r.end.split("-").reverse().join("/")}`})` : "";
-    return { key: k, label: RATE_SHORT[k] + when, value: r ? fmtRate(r.value) : "não informado", muted: !r };
+    return { key: k, label: (k === "avg_watch_time" ? "Tempo médio de reprodução" : RATE_SHORT[k]) + when, value: r ? fmtInformed(k, r.value) : "não informado", muted: !r };
   });
 }
 
@@ -47,7 +47,7 @@ export function rateCards(rates: Record<RateKey, LatestRate>): LevelCard[] {
  * Totais de anúncio/conjunto/campanha em Principais (aberta), Engajamento, Vídeo e Custos e taxas.
  * `rates`: só na tela do ANÚNCIO (taxas informadas); nos agregados, só a observação.
  */
-export function LevelMetricSections({ t, rates }: { t: LevelTotals; rates?: Record<RateKey, LatestRate> }) {
+export function LevelMetricSections({ t, rates }: { t: LevelTotals; rates?: Record<InformedKey, LatestRate> }) {
   const c = levelCards(t);
   return <MetricCardSections sections={[
     { id: "principal", title: "Resultados principais", cards: c.principal, defaultOpen: true },
