@@ -1,28 +1,17 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { buildNewSubtaskRows, type NewSubtaskInput } from "@/lib/supabase/subtask-rows";
+import type { NewSubtaskInput } from "@/lib/supabase/subtask-rows";
+import { checkNewSubtasks, insertSubtasksOrRollback as insertNew } from "@/lib/supabase/subtask-create";
 import { INFO_MIGRATION, normalizeMetaId } from "@/lib/clt/registered-info";
 type State={error?:string;success?:string};
 type Db=import("@supabase/supabase-js").SupabaseClient;
 /** Módulos (clt/mkt) das empresas informadas; null se a coluna ainda não existe (tudo é CLT). */
 async function companyModules(s:unknown,userId:string,ids:string[]):Promise<Set<string>|null>{if(!ids.length)return new Set();const r=await (s as Db).from("clt_companies").select("id,module").eq("user_id",userId).in("id",ids);if(r.error)return null;return new Set((r.data||[]).map((x:{module:string})=>x.module));}
 async function ctx(){const s=await createSupabaseServerClient();const {data,error}=await s.auth.getUser();if(error||!data.user)throw new Error("Sessão inválida.");return{s,user:data.user};}
-/**
- * Subtarefas criadas junto com a(s) tarefa(s): UM insert (todas ou nenhuma).
- * Se falhar, desfaz as tarefas recém-criadas — nunca fica tarefa pela metade.
- */
-async function insertSubtasksOrRollback(s:unknown,userId:string,taskIds:string[],inputs:NewSubtaskInput[]):Promise<string|null>{
- if(!inputs.length||!taskIds.length)return null;
- const rows:Record<string,unknown>[]=[];
- for(const id of taskIds){const built=buildNewSubtaskRows({parentType:"clt",parentId:id,userId},inputs);if("error" in built)return built.error;rows.push(...built.rows);}
- const {error}=await (s as Db).from("task_subtasks").insert(rows);
- if(!error)return null;
- const undo=await (s as Db).from("clt_tasks").delete().in("id",taskIds).eq("user_id",userId);
- return undo.error?"As subtarefas não foram salvas ("+error.message+") e a tarefa criada não pôde ser desfeita automaticamente. Confira a lista de tarefas.":"Nada foi salvo: erro ao gravar as subtarefas ("+error.message+"). Tente novamente.";
-}
-/** Valida as subtarefas ANTES de criar a tarefa. */
-function checkSubtasks(userId:string,inputs:NewSubtaskInput[]|undefined):string|null{if(!inputs?.length)return null;if(inputs.length>50)return "Máximo de 50 subtarefas por vez.";const r=buildNewSubtaskRows({parentType:"clt",parentId:"",userId},inputs);return "error" in r?r.error:null;}
+// Subtarefas criadas junto: regra única em lib/supabase/subtask-create.ts (Pessoal e CLT/MKT).
+const insertSubtasksOrRollback=(s:unknown,userId:string,taskIds:string[],inputs:NewSubtaskInput[])=>insertNew(s as Db,userId,{type:"clt",table:"clt_tasks"},taskIds,inputs);
+const checkSubtasks=(userId:string,inputs:NewSubtaskInput[]|undefined)=>checkNewSubtasks(userId,"clt",inputs);
 function refresh(){["/trabalho","/trabalho/empresas","/trabalho/campanhas","/trabalho/tarefas"].forEach((path) => revalidatePath(path));revalidatePath("/trabalho/empresas/[id]","page");revalidatePath("/visionario/mkt","layout")}
 export async function saveCltCompanyAction(input:{id?:string;name:string;responsibleId?:string;email?:string;instagram?:string;responsiblePhone?:string;companyPhone?:string;website?:string;notes?:string;currentAdBalance:number;module?:"clt"|"mkt";companyKind?:"propria"|"cliente";clientId?:string|null;clientName?:string|null}):Promise<State>{
  const{s,user}=await ctx();if(!input.name.trim())return{error:"Nome é obrigatório."};

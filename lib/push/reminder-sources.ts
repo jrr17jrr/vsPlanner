@@ -57,7 +57,7 @@ export async function loadScheduleSources(db: SupabaseClient, today: string, use
   // Subtarefas com recorrência própria (migration 20261112100000): uma "linha
   // virtual" por dia de hoje/amanhã com execução ainda não concluída — o resto
   // do agendador trata como uma subtarefa com data. Sem a migration: nada.
-  const recRes = await scoped(db, "task_subtasks", "*", userId).eq("recurrence", "weekly").is("archived_at", null);
+  const recRes = await scoped(db, "task_subtasks", "*", userId).in("recurrence", ["weekly", "monthly"]).is("archived_at", null);
   if (recRes.error && !isMissingColumn(recRes.error.code)) throw recRes.error;
   const recurringSubs = recRes.error ? [] : ((recRes.data ?? []) as unknown as Subtask[]);
   if (recurringSubs.length) {

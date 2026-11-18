@@ -79,17 +79,24 @@ export async function loadMyDayBoard(input: {
     todayKey, tasks, occurrences, subtasks, activities: input.activities,
     cltTasks: clt.rows, cltOccurrences: clt.occurrences, workItems: input.workItems, legacyWorkTasks: input.legacyWorkTasks,
   };
+  // Subtarefas do CLT/MKT com data própria (só das tarefas que o Meu Dia já mostra).
+  if (clt.rows.length) {
+    const ids = new Set(clt.rows.map((r) => r.task.id));
+    boardInput.cltSubtasks = (await listMyDayBoardSubtasks(userId, todayKey, horizon, "clt")).filter((s) => ids.has(s.parent_id));
+  }
   const board = buildMyDayBoard(boardInput);
   const shownTaskIds = new Set<string>(board.linkedTaskIds);
+  const shownCltIds = new Set<string>();
   for (const s of ["hoje", "atrasadas", "proximas", "concluidas"] as const) {
     for (const i of board[s]) {
       if (i.source === "task") shownTaskIds.add(i.task.id);
-      if (i.source === "subtask") shownTaskIds.add(i.parent.id);
+      if (i.source === "subtask") (i.parentType === "clt" ? shownCltIds : shownTaskIds).add(i.parent.id);
     }
   }
-  const all = await listPersonalSubtasks([...shownTaskIds]);
+  // Lista completa (checklists) das tarefas exibidas — Pessoal e CLT/MKT (ids nunca coincidem entre tabelas).
+  const [all, cltAll] = await Promise.all([listPersonalSubtasks([...shownTaskIds]), listPersonalSubtasks([...shownCltIds], todayKey, "clt")]);
   const subtasksByTask: Record<string, Subtask[]> = {};
-  for (const s of all) (subtasksByTask[s.parent_id] ??= []).push(s);
+  for (const s of [...all, ...cltAll]) (subtasksByTask[s.parent_id] ??= []).push(s);
   const linked = new Set(board.linkedTaskIds);
   return { board, subtasksByTask, linkedTasks: tasks.filter((t) => linked.has(t.id) && !t.archived_at) };
 }

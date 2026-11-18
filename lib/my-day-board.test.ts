@@ -233,3 +233,50 @@ describe("agrupamento por tarefa principal (Meu Dia)", () => {
     expect(g.kind === "group" && g.children[0].status).toBe("prazo_vencido");
   });
 });
+
+describe("V2 — subtarefas pela própria data (Pessoal e CLT) e checklist", () => {
+  it("exemplo do pedido: tarefa com prazo 20/11, subtarefa 'Editar post' em 17/11 aparece em 17/11 com a tarefa como referência", () => {
+    const b = buildMyDayBoard({ todayKey: "2026-11-17", tasks: [task({ id: "semear", title: "Fazer posts da Semear", kind: "prazo", due_date: "2026-11-20" })], occurrences: [], activities: [],
+      subtasks: [sub({ id: "e", parent_id: "semear", title: "Editar post", scheduled_date: "2026-11-17" })] });
+    const rows = groupSection(b.hoje);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "group", parentItem: null, parent: expect.objectContaining({ title: "Fazer posts da Semear" }) });
+    expect(statusOf(b, "Fazer posts da Semear")).toEqual(["proxima"]);
+  });
+  it("CLT: subtarefa com data própria aparece sozinha (atrasada/hoje/próxima), agrupada na tarefa do CLT, sem duplicar", () => {
+    const parent = clt({ id: "c1", title: "Relatório IG Predial", kind: "prazo", due_date: "2026-11-20" });
+    const b = board({
+      cltTasks: [{ task: parent, module: "clt", companyName: "IG Predial" }],
+      cltSubtasks: [
+        sub({ id: "a", parent_type: "clt", parent_id: "c1", title: "Puxar métricas", scheduled_date: TODAY }),
+        sub({ id: "b", parent_type: "clt", parent_id: "c1", title: "Revisar textos", due_date: "2026-10-30" }),
+        sub({ id: "d", parent_type: "clt", parent_id: "c1", title: "Enviar", scheduled_date: "2026-11-04" }),
+      ],
+    });
+    expect(titles(b.hoje)).toEqual(["Puxar métricas"]);
+    expect(titles(b.atrasadas)).toEqual(["Revisar textos"]);
+    expect(titles(b.proximas)).toEqual(["Enviar"]);
+    const i = b.hoje[0];
+    expect(i.source === "subtask" && [i.parentType, i.areaLabel, i.parent.title]).toEqual(["clt", "CLT · IG Predial", "Relatório IG Predial"]);
+    const [g] = groupSection(b.hoje);
+    expect(g).toMatchObject({ kind: "group", key: "group:clt:c1", parentType: "clt", parentItem: null });
+  });
+  it("CLT: tarefa do dia + subtarefa no mesmo dia = UM card (a tarefa com a subtarefa dentro)", () => {
+    const b = board({ cltTasks: [{ task: clt({ id: "c2", title: "Postar", due_date: TODAY }), module: "mkt", companyName: null }], cltSubtasks: [sub({ id: "x", parent_type: "clt", parent_id: "c2", title: "Legenda", scheduled_date: TODAY })] });
+    const rows = groupSection(b.hoje);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind === "group" && [rows[0].parentItem?.key, rows[0].children.map((c) => c.title)]).toEqual(["clt:c2", ["Legenda"]]);
+  });
+  it("CLT concluída ou arquivada: subtarefas saem do Meu Dia", () => {
+    const b = board({ cltTasks: [{ task: clt({ id: "c3", status: "concluida", completed_at: "2026-10-01T10:00:00Z" }), module: "clt", companyName: null }], cltSubtasks: [sub({ parent_type: "clt", parent_id: "c3", title: "Sobrou", due_date: "2026-10-20" })] });
+    expect(statusOf(b, "Sobrou")).toEqual([]);
+  });
+  it("item do checklist com data: dentro do checklist quando a subtarefa está na seção; sozinho (com aviso) só quando não está", () => {
+    const t = task({ id: "p", title: "Lançamento", kind: "organizadora" as Task["kind"] });
+    const together = board({ tasks: [t], subtasks: [sub({ id: "s1", parent_id: "p", title: "Editar", scheduled_date: TODAY }), sub({ id: "i1", parent_id: "p", parent_subtask_id: "s1", title: "Cortar vídeo", scheduled_date: TODAY })] });
+    expect(titles(together.hoje)).toEqual(["Editar"]);
+    const alone = board({ tasks: [t], subtasks: [sub({ id: "s1", parent_id: "p", title: "Editar", scheduled_date: "2026-11-04" }), sub({ id: "i1", parent_id: "p", parent_subtask_id: "s1", title: "Cortar vídeo", scheduled_date: TODAY })] });
+    const i = alone.hoje[0];
+    expect(i.source === "subtask" && [i.title, i.checklistOf]).toEqual(["Cortar vídeo", "Editar"]);
+  });
+});

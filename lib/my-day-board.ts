@@ -80,8 +80,12 @@ type Base = {
 export type BoardItem = Base &
   (
     | { source: "task"; task: Task; entry: DayTaskEntry | null; recurring: boolean }
-    /** `occurrenceDate` = execução (dia) de uma subtarefa recorrente; null = subtarefa comum. */
-    | { source: "subtask"; subtask: Subtask; parent: Task; occurrenceDate: string | null }
+    /**
+     * `occurrenceDate` = execução (dia) de uma subtarefa recorrente; null = subtarefa comum.
+     * `parentType`: tarefa Pessoal (`parent` = a tarefa) ou CLT/MKT (`cltParent`; `parent` só com id/título).
+     * `checklistOf`: é um ITEM do checklist de outra subtarefa (aparece sozinho só quando a subtarefa não está na mesma seção).
+     */
+    | { source: "subtask"; subtask: Subtask; parent: Task; parentType: "pessoal" | "clt"; cltParent?: { task: CltTask; module: "clt" | "mkt"; companyName: string | null }; occurrenceDate: string | null; checklistOf?: string | null }
     | { source: "clt"; cltTask: CltTask; module: "clt" | "mkt"; occurrenceDate: string | null; companyName: string | null }
     | { source: "work"; workItem: WorkItem }
     | { source: "legacy"; workTask: PersonalWorkTask }
@@ -94,6 +98,8 @@ export type BoardInput = {
   tasks: Task[];
   occurrences: TaskOccurrence[];
   subtasks: Subtask[];
+  /** Subtarefas das tarefas do CLT/MKT (`cltTasks`), com programação própria. */
+  cltSubtasks?: Subtask[];
   activities: Activity[];
   cltTasks?: { task: CltTask; module: "clt" | "mkt"; companyName: string | null }[];
   cltOccurrences?: CltTaskOccurrence[];
@@ -185,11 +191,13 @@ function taskItems(input: BoardInput, linked: Set<string>, horizon: string): Boa
  * ficaram pendentes), senão a pendência mais recente, senão a próxima
  * execução. Concluir marca SÓ aquele dia.
  */
-function recurringSubtaskItem(sub: Subtask, parent: Task, input: BoardInput, horizon: string): BoardItem | null {
+type SubParent = { parent: Task; parentType: "pessoal" | "clt"; cltParent?: { task: CltTask; module: "clt" | "mkt"; companyName: string | null }; areaLabel: string | null };
+
+function recurringSubtaskItem(sub: Subtask, p: SubParent, input: BoardInput, horizon: string): BoardItem | null {
   const { todayKey } = input;
   const missed = missedSubtaskDates(sub, todayKey, input.lookbackDays ?? SUBTASK_LOOKBACK_DAYS);
   const time = time5(sub.scheduled_time);
-  const common = { source: "subtask" as const, parent, key: `sub:${sub.id}`, title: sub.title, description: sub.description ?? null, important: sub.priority === "importante", executionTime: time, deadlineDate: null, deadlineTime: null, areaLabel: null };
+  const common = { source: "subtask" as const, ...p, key: `sub:${sub.id}`, title: sub.title, description: sub.description ?? null, important: sub.priority === "importante", executionTime: time, deadlineDate: null, deadlineTime: null };
   if (subtaskOccursOn(sub, todayKey)) {
     const day = resolveSubtaskForDay(sub, todayKey);
     return {
@@ -211,16 +219,35 @@ function recurringSubtaskItem(sub: Subtask, parent: Task, input: BoardInput, hor
   return { ...common, subtask: resolveSubtaskForDay(sub, next), occurrenceDate: null, status: "proxima", executionDate: next, completedOn: null, note: null };
 }
 
-function subtaskItems(input: BoardInput, linked: Set<string>, horizon: string): BoardItem[] {
-  const parents = new Map(input.tasks.map((t) => [t.id, t]));
-  const out: BoardItem[] = [];
+/** Pai de cada subtarefa: tarefa Pessoal (não vinculada à Rotina de hoje) ou tarefa do CLT/MKT. Tarefa principal concluída/arquivada: as subtarefas saem do Meu Dia. */
+function subtaskParents(input: BoardInput, linked: Set<string>): Array<{ sub: Subtask; p: SubParent }> {
+  const out: Array<{ sub: Subtask; p: SubParent }> = [];
+  const personal = new Map(input.tasks.map((t) => [t.id, t]));
   for (const sub of input.subtasks) {
-    const parent = parents.get(sub.parent_id);
+    const parent = personal.get(sub.parent_id);
     if (!parent || parent.archived_at || linked.has(parent.id)) continue;
-    // Tarefa principal concluída: as subtarefas saem do Meu Dia (não ficam "atrasadas").
     if (!isRecurringTask(parent) && parent.status === "concluida") continue;
+    out.push({ sub, p: { parent, parentType: "pessoal", areaLabel: null } });
+  }
+  const clt = new Map((input.cltTasks ?? []).map((c) => [c.task.id, c]));
+  for (const sub of input.cltSubtasks ?? []) {
+    const c = clt.get(sub.parent_id);
+    if (!c || c.task.archived_at) continue;
+    if (c.task.recurrence !== "weekly" && c.task.status === "concluida") continue;
+    // `parent` só com o que o agrupamento usa (id/título); a tarefa completa fica em `cltParent`.
+    const parent = { id: c.task.id, title: c.task.title, archived_at: null, status: c.task.status } as unknown as Task;
+    out.push({ sub, p: { parent, parentType: "clt", cltParent: c, areaLabel: c.companyName ? `${MODULE_LABEL[c.module]} · ${c.companyName}` : MODULE_LABEL[c.module] } });
+  }
+  return out;
+}
+
+function subtaskItems(input: BoardInput, linked: Set<string>, horizon: string): BoardItem[] {
+  const out: BoardItem[] = [];
+  const titles = new Map([...input.subtasks, ...(input.cltSubtasks ?? [])].map((s) => [s.id, s.title]));
+  for (const { sub, p } of subtaskParents(input, linked)) {
+    const checklistOf = sub.parent_subtask_id ? titles.get(sub.parent_subtask_id) ?? "subtarefa" : null;
     if (isRecurringSubtask(sub)) {
-      const item = recurringSubtaskItem(sub, parent, input, horizon);
+      const item = recurringSubtaskItem(sub, p, input, horizon);
       if (item) out.push(item);
       continue;
     }
@@ -230,10 +257,10 @@ function subtaskItems(input: BoardInput, linked: Set<string>, horizon: string): 
     const status = classifySchedule({ executionDate: s.executionDate, deadlineDate: s.deadlineDate, done: sub.is_done, completedOn }, input.todayKey, horizon);
     if (!status) continue;
     out.push({
-      source: "subtask", subtask: sub, parent, occurrenceDate: null, key: `sub:${sub.id}`, status,
+      source: "subtask", subtask: sub, ...p, occurrenceDate: null, checklistOf, key: `sub:${sub.id}`, status,
       title: sub.title, description: sub.description ?? null, important: sub.priority === "importante",
       executionDate: s.executionDate, executionTime: s.executionTime, deadlineDate: s.deadlineDate, deadlineTime: s.deadlineTime,
-      completedOn: sub.is_done ? completedOn : null, areaLabel: null, note: null,
+      completedOn: sub.is_done ? completedOn : null, note: null,
     });
   }
   return out;
@@ -301,15 +328,18 @@ const SORTERS: Record<BoardSection, (a: BoardItem, b: BoardItem) => number> = {
 };
 
 /** Subtarefa logo abaixo da tarefa principal quando as duas estão na mesma seção. */
+/** Chave do pai de uma subtarefa (`task:id` Pessoal, `clt:id` CLT/MKT) — a mesma `key` do item da tarefa principal. */
+const parentKeyOf = (i: SubtaskItem) => `${i.parentType === "clt" ? "clt" : "task"}:${i.parent.id}`;
+
 function nestUnderParents(items: BoardItem[]): BoardItem[] {
-  const parentKeys = new Set(items.filter((i) => i.source === "task").map((i) => i.key));
+  const parentKeys = new Set(items.filter((i) => i.source === "task" || i.source === "clt").map((i) => i.key));
   const children = new Map<string, BoardItem[]>();
   const rest: BoardItem[] = [];
   for (const i of items) {
-    if (i.source === "subtask" && parentKeys.has(`task:${i.parent.id}`)) (children.get(i.parent.id) ?? children.set(i.parent.id, []).get(i.parent.id)!).push(i);
+    if (i.source === "subtask" && parentKeys.has(parentKeyOf(i))) (children.get(parentKeyOf(i)) ?? children.set(parentKeyOf(i), []).get(parentKeyOf(i))!).push(i);
     else rest.push(i);
   }
-  return rest.flatMap((i) => (i.source === "task" ? [i, ...(children.get(i.task.id) ?? [])] : [i]));
+  return rest.flatMap((i) => (i.source === "task" || i.source === "clt" ? [i, ...(children.get(i.key) ?? [])] : [i]));
 }
 
 export type SubtaskItem = Extract<BoardItem, { source: "subtask" }>;
@@ -324,7 +354,7 @@ export type SubtaskItem = Extract<BoardItem, { source: "subtask" }>;
  */
 export type SectionRow =
   | { kind: "item"; item: BoardItem }
-  | { kind: "group"; key: string; parent: Task; parentItem: BoardItem | null; children: SubtaskItem[] };
+  | { kind: "group"; key: string; parent: Task; parentType: "pessoal" | "clt"; parentItem: BoardItem | null; children: SubtaskItem[] };
 
 /**
  * Agrupa as subtarefas de uma seção dentro da tarefa principal. Nunca
@@ -335,21 +365,23 @@ export type SectionRow =
 export function groupSection(items: BoardItem[]): SectionRow[] {
   const groups = new Map<string, Extract<SectionRow, { kind: "group" }>>();
   const taskInSection = new Map<string, BoardItem>();
-  for (const i of items) if (i.source === "task") taskInSection.set(i.task.id, i);
+  for (const i of items) if (i.source === "task" || i.source === "clt") taskInSection.set(i.key, i);
   const rows: SectionRow[] = [];
-  const ensure = (parent: Task) => {
-    let g = groups.get(parent.id);
+  const ensure = (parent: Task, parentType: "pessoal" | "clt") => {
+    const pk = `${parentType === "clt" ? "clt" : "task"}:${parent.id}`;
+    let g = groups.get(pk);
     if (!g) {
-      g = { kind: "group", key: `group:${parent.id}`, parent, parentItem: taskInSection.get(parent.id) ?? null, children: [] };
-      groups.set(parent.id, g);
+      g = { kind: "group", key: parentType === "clt" ? `group:clt:${parent.id}` : `group:${parent.id}`, parent, parentType, parentItem: taskInSection.get(pk) ?? null, children: [] };
+      groups.set(pk, g);
       rows.push(g);
     }
     return g;
   };
-  const withChildren = new Set(items.filter((i): i is SubtaskItem => i.source === "subtask").map((i) => i.parent.id));
+  const withChildren = new Set(items.filter((i): i is SubtaskItem => i.source === "subtask").map(parentKeyOf));
   for (const i of items) {
-    if (i.source === "subtask") ensure(i.parent).children.push(i);
-    else if (i.source === "task" && withChildren.has(i.task.id)) ensure(i.task);
+    if (i.source === "subtask") ensure(i.parent, i.parentType).children.push(i);
+    else if (i.source === "task" && withChildren.has(i.key)) ensure(i.task, "pessoal");
+    else if (i.source === "clt" && withChildren.has(i.key)) ensure({ id: i.cltTask.id, title: i.cltTask.title, archived_at: null, status: i.cltTask.status } as unknown as Task, "clt");
     else rows.push({ kind: "item", item: i });
   }
   return rows;
@@ -372,6 +404,11 @@ export function buildMyDayBoard(input: BoardInput): MyDayBoard {
     if (seen.has(item.key)) continue; // garantia extra: nunca duas vezes
     seen.add(item.key);
     board[SECTION_OF[item.status]].push(item);
+  }
+  // Item do checklist cuja subtarefa está na MESMA seção: aparece só dentro do checklist dela (nunca como outra subtarefa).
+  for (const section of BOARD_SECTIONS) {
+    const subIds = new Set(board[section].filter((i): i is SubtaskItem => i.source === "subtask").map((i) => i.subtask.id));
+    board[section] = board[section].filter((i) => !(i.source === "subtask" && i.subtask.parent_subtask_id && subIds.has(i.subtask.parent_subtask_id)));
   }
   for (const section of ["hoje", "atrasadas", "proximas", "concluidas"] as const) board[section] = nestUnderParents(board[section].sort(SORTERS[section]));
   return board;

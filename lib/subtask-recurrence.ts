@@ -24,7 +24,16 @@ export const SUBTASK_LOOKBACK_DAYS = 7;
 export const SUBTASK_HISTORY_DAYS = 60;
 
 export function isRecurringSubtask(s: Pick<Subtask, "recurrence">): boolean {
-  return s.recurrence === "weekly";
+  return s.recurrence === "weekly" || s.recurrence === "monthly";
+}
+
+/** Último dia do mês de `dateKey` (yyyy-MM-dd). */
+const lastDayOfMonth = (dateKey: string) => new Date(Date.UTC(Number(dateKey.slice(0, 4)), Number(dateKey.slice(5, 7)), 0)).getUTCDate();
+
+/** Mensal: dia do mês configurado; em meses mais curtos (ex.: 31 em novembro), o último dia do mês. */
+export function monthlyOccursOn(monthDay: number, dateKey: string): boolean {
+  const day = Number(dateKey.slice(8, 10));
+  return day === Math.min(monthDay, lastDayOfMonth(dateKey));
 }
 
 /** A definição ATUAL da subtarefa recorrente gera execução nesse dia? */
@@ -32,12 +41,14 @@ export function subtaskOccursOn(s: Subtask, dateKey: string): boolean {
   if (!isRecurringSubtask(s) || !s.recurrence_start) return false;
   if (dateKey < s.recurrence_start) return false;
   if (s.recurrence_until && dateKey > s.recurrence_until) return false;
+  if (s.recurrence === "monthly") return !!s.month_day && monthlyOccursOn(s.month_day, dateKey);
   return (s.weekdays ?? []).includes(weekdayOfKey(dateKey));
 }
 
-/** Próximo dia (a partir de `fromKey`, inclusive) com execução — no máximo 7 dias à frente. */
+/** Próximo dia (a partir de `fromKey`, inclusive) com execução — semanal: até 7 dias; mensal: até 62 dias. */
 export function nextSubtaskOccurrence(s: Subtask, fromKey: string): string | null {
-  for (let i = 0, d = fromKey; i < 8; i++, d = addDaysToKey(d, 1)) if (subtaskOccursOn(s, d)) return d;
+  const span = s.recurrence === "monthly" ? 63 : 8;
+  for (let i = 0, d = fromKey; i < span; i++, d = addDaysToKey(d, 1)) if (subtaskOccursOn(s, d)) return d;
   return null;
 }
 
@@ -120,4 +131,11 @@ export function subtaskHistory(s: Subtask, todayKey: string, days = SUBTASK_HIST
 export function normalizeWeekdays(values: unknown): number[] {
   if (!Array.isArray(values)) return [];
   return [...new Set(values.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b);
+}
+
+/** "todos os dias" · "seg, qua, sex" · "todo dia 10 do mês" — rótulo curto da repetição. */
+export function subtaskRecurrenceLabel(s: Pick<Subtask, "recurrence" | "weekdays" | "month_day">, formatWeekdays: (days: number[]) => string): string {
+  if (s.recurrence === "monthly") return s.month_day ? `todo dia ${s.month_day} do mês` : "todo mês";
+  const days = s.weekdays ?? [];
+  return days.length === 7 ? "todos os dias" : formatWeekdays(days);
 }

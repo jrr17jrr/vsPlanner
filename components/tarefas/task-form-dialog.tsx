@@ -11,6 +11,8 @@ import { createTaskAction, updateTaskAction, type TaskFormInput } from "@/lib/su
 import { addDaysToKey, isRecurringTask, WEEKDAY_ORDER, WEEKDAY_SHORT } from "@/lib/tasks";
 import { normalizeReminderOffsets, taskSchedule } from "@/lib/task-schedule";
 import { ReminderOffsetsPicker } from "@/components/shared/reminder-offsets-picker";
+import { DraftSubtasksEditor } from "@/components/shared/subtask-fields";
+import { inheritedSubtaskDraft, prepareSubtaskDrafts, type SubtaskDraft } from "@/lib/subtask-draft";
 import type { Task, TaskKind, TaskPriority } from "@/types/database.types";
 
 export function TaskFormDialog({
@@ -99,6 +101,8 @@ function TaskForm({
   const [weekdays, setWeekdays] = useState<number[]>(task?.weekdays ?? []);
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
+  // Subtarefas (com checklist) criadas junto — o MESMO editor do CLT/MKT. Na edição, a estrutura muda pelo painel de subtarefas da tarefa.
+  const [drafts, setDrafts] = useState<SubtaskDraft[]>([]);
   const [pending, setPending] = useState(false);
 
   // Dias da semana sem nenhum dia marcado = tarefa organizadora (sem dia fixo, sem recorrência).
@@ -116,6 +120,8 @@ function TaskForm({
     if (!title.trim()) return toast.error("Dê um título para a tarefa.");
     if (mode === "dia" && !date) return toast.error("Escolha o dia de execução — ou marque “Sem dia definido”.");
     if (mode === "dia" && deadlineDate && deadlineDate < date) return toast.error("O prazo final não pode ser antes do dia de execução.");
+    const prepared = task ? { inputs: [] } : prepareSubtaskDrafts(drafts);
+    if ("error" in prepared) return toast.error(prepared.error);
 
     const kind: TaskKind = organizer ? "organizadora" : hasExecution ? "dia" : "prazo";
     const input: TaskFormInput = organizer ? {
@@ -137,7 +143,7 @@ function TaskForm({
     };
 
     setPending(true);
-    const result = task ? await updateTaskAction(task.id, input) : await createTaskAction(input);
+    const result = task ? await updateTaskAction(task.id, input) : await createTaskAction({ ...input, subtasks: prepared.inputs });
     setPending(false);
 
     if (result.error) return toast.error(result.error);
@@ -299,6 +305,17 @@ function TaskForm({
           <Label htmlFor="task-notes">Observações</Label>
           <Textarea id="task-notes" value={notes} onChange={(e) => setNotes(e.target.value)} disabled={pending} rows={2} />
         </div>
+
+        {!task && (
+          <div className="rounded-lg border border-border/70 p-3">
+            <DraftSubtasksEditor
+              drafts={drafts}
+              onChange={setDrafts}
+              disabled={pending}
+              newDraft={() => inheritedSubtaskDraft({ kind: organizer ? "organizadora" : hasExecution ? "dia" : "prazo", date: mode === "dia" ? date : deadlineDate, recurring: isRecurring })}
+            />
+          </div>
+        )}
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>Cancelar</Button>

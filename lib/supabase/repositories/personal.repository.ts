@@ -112,7 +112,7 @@ export async function listTasksByIds(ids: string[]): Promise<Task[]> {
  * Subtarefas (registro original) das tarefas pessoais informadas, com as
  * execuções recentes das recorrentes anexadas (arquivadas ficam de fora).
  */
-export async function listPersonalSubtasks(parentIds: string[], todayKey = todayKeySaoPaulo()): Promise<Subtask[]> {
+export async function listPersonalSubtasks(parentIds: string[], todayKey = todayKeySaoPaulo(), parentType: "pessoal" | "clt" = "pessoal"): Promise<Subtask[]> {
   if (parentIds.length === 0) return [];
   const supabase = await createSupabaseServerClient();
   // Lotes de 100 ids: evita URL longa demais no PostgREST com muitas tarefas.
@@ -123,7 +123,7 @@ export async function listPersonalSubtasks(parentIds: string[], todayKey = today
       supabase
         .from("task_subtasks" as never)
         .select("*")
-        .eq("parent_type", "pessoal")
+        .eq("parent_type", parentType)
         .in("parent_id", ids)
         .order("position", { ascending: true })
         .order("created_at", { ascending: true })
@@ -161,15 +161,15 @@ export async function listMyDaySubtasks(userId: string, todayKey: string): Promi
  * execução ou prazo até `horizonKey` (inclui atrasadas) + concluídas hoje.
  * Antes da migration de agenda: só o prazo (due_date) e sem "concluídas hoje".
  */
-export async function listMyDayBoardSubtasks(userId: string, todayKey: string, horizonKey: string): Promise<Subtask[]> {
+export async function listMyDayBoardSubtasks(userId: string, todayKey: string, horizonKey: string, parentType: "pessoal" | "clt" = "pessoal"): Promise<Subtask[]> {
   const supabase = await createSupabaseServerClient();
-  const base = () => supabase.from("task_subtasks" as never).select("*").eq("user_id", userId).eq("parent_type", "pessoal");
+  const base = () => supabase.from("task_subtasks" as never).select("*").eq("user_id", userId).eq("parent_type", parentType);
   // Meia-noite em São Paulo (UTC-3, sem horário de verão desde 2019).
   const startOfToday = `${todayKey}T03:00:00Z`;
   const scheduled = `and(is_done.eq.false,or(scheduled_date.lte.${horizonKey},due_date.lte.${horizonKey})),completed_at.gte.${startOfToday}`;
   const attach = (rows: unknown) => attachSubtaskOccurrences(supabase as unknown as SupabaseClient, (rows ?? []) as Subtask[], todayKey);
   // Recorrentes (sem data fixa) entram sempre: o dia de cada execução é calculado em lib/subtask-recurrence.ts.
-  const withRecurring = await base().or(`${scheduled},recurrence.eq.weekly`);
+  const withRecurring = await base().or(`${scheduled},recurrence.in.(weekly,monthly)`);
   if (!withRecurring.error) return attach(withRecurring.data);
   if (!isMissingColumnError(withRecurring.error)) throw withRecurring.error;
   const full = await base().or(scheduled);

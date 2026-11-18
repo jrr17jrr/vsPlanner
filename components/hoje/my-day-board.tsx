@@ -55,6 +55,7 @@ function dateLine(item: BoardItem, todayKey: string): string {
 
 function hrefOf(item: BoardItem): string {
   if (item.source === "clt") return item.module === "mkt" ? "/visionario/mkt/tarefas" : "/trabalho/tarefas";
+  if (item.source === "subtask" && item.cltParent) return item.cltParent.module === "mkt" ? "/visionario/mkt/tarefas" : "/trabalho/tarefas";
   if (item.source === "work") return "/visionario/trabalhos";
   if (item.source === "legacy") return "/trabalho";
   return "/tarefas";
@@ -104,7 +105,11 @@ function Row({
   const nested = item.source === "subtask";
   const overdue = item.status === "prazo_vencido" || item.status === "execucao_atrasada";
   const canExpand = item.source === "task" || item.source === "clt" || !!item.description || checklist.length > 0;
-  const progress = checklist.length ? checklistProgress(checklist) : null;
+  // Progresso do checklist atualizado na hora (marcar um item não espera o servidor).
+  const [live, setLive] = useState<{ done: number; total: number } | null>(null);
+  const [liveFor, setLiveFor] = useState(checklist);
+  if (liveFor !== checklist) { setLiveFor(checklist); setLive(null); }
+  const progress = live ?? (checklist.length ? checklistProgress(checklist) : null);
 
   function run(action: () => Promise<{ error?: string; success?: string | boolean }>) {
     start(async () => {
@@ -117,7 +122,7 @@ function Row({
   // Reprogramar: muda só a execução (o prazo final nunca muda junto).
   const reschedule =
     item.source === "task" && !item.recurring ? (d: string) => run(() => rescheduleTaskExecutionAction(item.task.id, d))
-    : item.source === "subtask" && !item.occurrenceDate ? (d: string) => run(() => rescheduleSubtaskAction("pessoal", item.parent.id, item.subtask.id, d))
+    : item.source === "subtask" && !item.occurrenceDate ? (d: string) => run(() => rescheduleSubtaskAction(item.parentType, item.parent.id, item.subtask.id, d))
     : item.source === "clt" && !item.occurrenceDate ? (d: string) => run(() => rescheduleCltTaskAction(item.cltTask.id, d))
     : null;
   const changeDeadline = item.source === "task" && !item.recurring && item.status === "prazo_vencido" ? (d: string) => run(() => moveTaskDeadlineAction(item.task.id, d)) : null;
@@ -137,7 +142,8 @@ function Row({
           <Checkbox checked={done} disabled={!onToggle || busy} onCheckedChange={() => onToggle?.()} aria-label={`${done ? "Reabrir" : "Concluir"}: ${item.title}`} className="h-5 w-5" />
         </label>
         <button type="button" className="min-w-0 flex-1 pt-0.5 text-left" onClick={() => canExpand && setOpen((v) => !v)} aria-expanded={canExpand ? open : undefined}>
-          {nested && !inGroup && <p className="truncate text-[11px] text-muted-foreground">↳ {item.parent.title}</p>}
+          {nested && !inGroup && <p className="truncate text-[11px] text-muted-foreground">↳ {item.parent.title}{item.checklistOf ? ` › ${item.checklistOf}` : ""}</p>}
+          {nested && inGroup && item.checklistOf && <p className="truncate text-[11px] text-muted-foreground">Item do checklist de “{item.checklistOf}”</p>}
           <p className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-0.5 break-words font-medium leading-snug", inGroup ? "text-[13px]" : "text-sm", done && "text-muted-foreground")}>
             {item.executionTime && item.status !== "concluida" && (
               <span className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-xs font-semibold tabular-nums text-primary">{item.executionTime}</span>
@@ -187,7 +193,7 @@ function Row({
         <div className={cn("space-y-2 border-t border-border/60 py-2.5", inGroup ? "pl-11 pr-1" : "px-3 sm:pl-12")}>
           {item.description && <ExpandableDescription text={item.description} />}
           {item.source === "subtask" && checklist.length > 0 && (
-            <SubtaskChecklist parentType="pessoal" parentId={item.parent.id} items={checklist} blocking={blocking} onChanged={onChanged} />
+            <SubtaskChecklist parentType={item.parentType} parentId={item.parent.id} items={checklist} blocking={blocking} onChanged={onChanged} onProgress={setLive} />
           )}
           {item.source === "task" && (
             <Subtasks embedded parentType="pessoal" parentId={item.task.id} initialItems={subtasks ?? []} initialOpen={!!subtasks?.length} onChanged={onChanged} expandSignal={expandSignal} />
@@ -220,14 +226,14 @@ function GroupToggle({ open, count, onToggle, controls, className }: { open: boo
  * Tarefa principal que aparece SÓ como agrupamento (não está programada
  * para esta seção): sem caixa de concluir e fora da contagem.
  */
-function GroupHeader({ parent, count, open, onToggle, controls, onEdit }: { parent: Task; count: number; open: boolean; onToggle: () => void; controls: string; onEdit?: (task: Task) => void }) {
+function GroupHeader({ parent, count, open, onToggle, controls, onEdit, href = "/tarefas", areaLabel = null }: { parent: Task; count: number; open: boolean; onToggle: () => void; controls: string; onEdit?: (task: Task) => void; href?: string; areaLabel?: string | null }) {
   return (
     <div className={cn("flex items-center gap-1 rounded-t-xl bg-secondary/40 pr-1", !open && "rounded-b-xl")}>
       <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={controls} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left">
         <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
         <span className="min-w-0">
           <span className="block break-words text-sm font-medium text-foreground/85">{parent.title}</span>
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><ListTree className="h-3 w-3" />Contexto · tarefa principal · {count} subtarefa{count > 1 ? "s" : ""} nesta seção</span>
+          <span className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">{areaLabel && <span className="rounded bg-secondary px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-foreground/70">{areaLabel}</span>}<ListTree className="h-3 w-3" />Contexto · tarefa principal · {count} subtarefa{count > 1 ? "s" : ""} nesta seção</span>
         </span>
       </button>
       {onEdit && !parent.archived_at && (
@@ -235,7 +241,7 @@ function GroupHeader({ parent, count, open, onToggle, controls, onEdit }: { pare
           <Pencil className="h-3.5 w-3.5" />
         </button>
       )}
-      <Link href="/tarefas" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary" aria-label={`Abrir na página: ${parent.title}`}>
+      <Link href={href} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary" aria-label={`Abrir na página: ${parent.title}`}>
         <ExternalLink className="h-3.5 w-3.5" />
       </Link>
     </div>
@@ -280,10 +286,11 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
     } else if (item.source === "subtask") {
       // Recorrente: só a execução daquele dia. Comum: a própria subtarefa.
       const sub = item;
+      // Concluir a subtarefa (ou o item do checklist) NUNCA conclui a tarefa principal.
       action = sub.occurrenceDate
-        ? () => setSubtaskOccurrenceDone("pessoal", sub.parent.id, sub.subtask.id, sub.occurrenceDate!, next)
+        ? () => setSubtaskOccurrenceDone(sub.parentType, sub.parent.id, sub.subtask.id, sub.occurrenceDate!, next)
         : isRecurringSubtask(sub.subtask) ? null // próxima execução: o dia ainda não chegou
-        : () => setSubtaskDone("pessoal", sub.parent.id, sub.subtask.id, next);
+        : () => setSubtaskDone(sub.parentType, sub.parent.id, sub.subtask.id, next);
     }
     else if (item.source === "clt") action = item.occurrenceDate ? () => toggleCltTaskOccurrenceAction(item.cltTask.id, item.occurrenceDate!, next) : () => toggleCltTaskStatusAction(item.cltTask.id, next);
     else if (item.source === "work") action = () => updateWorkItemStatusAction(item.workItem.id, next ? "concluido" : "pendente");
@@ -373,7 +380,7 @@ export function MyDayBoardView({ board, todayKey, subtasksByTask, onEditTask }: 
                   const accent = row.parentItem ? ACCENT[row.parentItem.status] : CARD_ACCENT.default;
                   return (
                     <li key={row.key} className={cn(CARD, accent, !row.parentItem && "border-dashed")}>
-                      {row.parentItem ? <Row {...rowProps(row.parentItem)} group={toggle} flat /> : <GroupHeader parent={row.parent} onEdit={onEditTask} {...toggle} />}
+                      {row.parentItem ? <Row {...rowProps(row.parentItem)} group={toggle} flat /> : <GroupHeader parent={row.parent} onEdit={row.parentType === "pessoal" ? onEditTask : undefined} href={row.children[0]?.cltParent ? (row.children[0].cltParent.module === "mkt" ? "/visionario/mkt/tarefas" : "/trabalho/tarefas") : "/tarefas"} areaLabel={row.children[0]?.areaLabel ?? null} {...toggle} />}
                       {open && (
                         <ul id={toggle.controls} className="flex flex-col gap-1 pb-2 pl-4 pr-2 sm:pl-6" aria-label={`Subtarefas de ${row.parent.title}`}>
                           {row.children.map((child) => <Row key={child.key} {...rowProps(child)} inGroup flat />)}

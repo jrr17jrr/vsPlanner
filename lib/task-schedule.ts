@@ -66,8 +66,10 @@ export type Subtask = {
    * `task_subtask_occurrences` (concluir segunda não conclui terça); `is_done`
    * da linha não é usado. Regra em lib/subtask-recurrence.ts.
    */
-  recurrence?: "none" | "weekly" | null;
+  recurrence?: "none" | "weekly" | "monthly" | null;
   weekdays?: number[] | null;
+  /** Dia do mês (1..31) da subtarefa mensal — migration 20261117100000. Mês sem o dia → último dia. */
+  month_day?: number | null;
   recurrence_start?: string | null;
   recurrence_until?: string | null;
   archived_at?: string | null;

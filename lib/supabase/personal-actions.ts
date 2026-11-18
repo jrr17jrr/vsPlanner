@@ -6,6 +6,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { addDaysToKey, isRecurringTask, pastRecurringDates, recurringTaskOccursOn, weekdayOfKey } from "@/lib/tasks";
 import { activityOccursOn } from "@/lib/routine-real";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { NewSubtaskInput } from "@/lib/supabase/subtask-rows";
+import { checkNewSubtasks, insertSubtasksOrRollback } from "@/lib/supabase/subtask-create";
 import {
   ACTIVITY_LINK_COLUMNS,
   isMissingColumnError,
@@ -61,6 +64,8 @@ export type TaskFormInput = {
   recurrence: TaskRecurrence;
   weekdays: number[];
   notes?: string;
+  /** Só na criação: subtarefas (e o checklist de cada uma) salvas junto, tudo ou nada. */
+  subtasks?: NewSubtaskInput[];
 };
 
 type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -186,6 +191,10 @@ export async function createTaskAction(input: TaskFormInput): Promise<ActionStat
   const normalized = normalizeTaskInput(input);
   if ("error" in normalized) return { error: normalized.error };
   const { values } = normalized;
+  // Subtarefas (e checklist) criadas junto — mesma regra do CLT/MKT; validadas ANTES de criar a tarefa.
+  const subtasks = Array.isArray(input.subtasks) ? input.subtasks : [];
+  const subError = checkNewSubtasks(profile.id, "pessoal", subtasks);
+  if (subError) return { error: subError };
 
   const supabase = await createSupabaseServerClient();
   const row = {
@@ -205,8 +214,12 @@ export async function createTaskAction(input: TaskFormInput): Promise<ActionStat
   }
 
   if (error || !data) return { error: error ? friendlyTaskError(error) : "Erro ao criar tarefa." };
+  if (subtasks.length) {
+    const failed = await insertSubtasksOrRollback(supabase as unknown as SupabaseClient, profile.id, { type: "pessoal", table: "tasks" }, [data.id], subtasks);
+    if (failed) { revalidateTaskPaths(); return { error: failed }; }
+  }
   revalidateTaskPaths();
-  return { success: "Tarefa criada.", id: data.id, warning };
+  return { success: subtasks.length ? `Tarefa criada com ${subtasks.length} subtarefa(s).` : "Tarefa criada.", id: data.id, warning };
 }
 
 export async function updateTaskAction(taskId: string, input: TaskFormInput): Promise<ActionState> {

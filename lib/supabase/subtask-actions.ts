@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isMissingDescriptionColumn, MISSING_DESCRIPTION_WARNING, normalizeSubtaskDescription } from "@/lib/subtask-description";
 import { isMissingColumnError, MISSING_SCHEDULE_WARNING, stripScheduleColumns, SUBTASK_SCHEDULE_COLUMNS, type Subtask } from "@/lib/task-schedule";
-import { MISSING_RECURRENCE_ERROR, SUBTASK_RECURRENCE_COLUMNS, subtaskRecurrenceValues, subtaskScheduleValues } from "@/lib/supabase/subtask-rows";
+import { MISSING_MONTHLY_ERROR, MISSING_RECURRENCE_ERROR, SUBTASK_RECURRENCE_COLUMNS, subtaskRecurrenceValues, subtaskScheduleValues } from "@/lib/supabase/subtask-rows";
 import { attachSubtaskOccurrences, isMissingSchema } from "@/lib/supabase/subtask-occurrences";
 import { isRecurringSubtask, subtaskHistory, subtaskOccursOn } from "@/lib/subtask-recurrence";
 import { todayKeySaoPaulo } from "@/lib/format";
@@ -30,6 +30,8 @@ async function writeWithScheduleFallback(write: (values: Record<string, unknown>
   if (!first.error || !isMissingColumnError(first.error) || isMissingDescriptionColumn(first.error)) return { error: first.error };
   const hasRecurrence = SUBTASK_RECURRENCE_COLUMNS.some((c) => c in values);
   if (hasRecurrence) {
+    // Pedir repetição sem a coluna no banco: erro claro (nunca salva como "não repetir" em silêncio).
+    if (values.recurrence === "monthly") return { error: { message: MISSING_MONTHLY_ERROR } };
     if (values.recurrence === "weekly") return { error: { message: MISSING_RECURRENCE_ERROR } };
     const withoutRecurrence = Object.fromEntries(Object.entries(values).filter(([k]) => !(SUBTASK_RECURRENCE_COLUMNS as readonly string[]).includes(k)));
     const retry = await write(withoutRecurrence);
@@ -101,8 +103,9 @@ export type SubtaskInput = {
   priority?: "normal" | "importante";
   reminderOffsets?: number[];
   /** Programação própria (independente da tarefa principal). `undefined` = não mexe. */
-  recurrence?: "none" | "weekly";
+  recurrence?: "none" | "weekly" | "monthly";
   weekdays?: number[];
+  monthDay?: number | null;
   recurrenceStart?: string | null;
   recurrenceUntil?: string | null;
 };
@@ -129,14 +132,14 @@ export async function saveSubtask(parentType: SubtaskParent, parentId: string, i
     const recurrence = subtaskRecurrenceValues({ ...input, isChecklistItem: !!existing.parent_subtask_id }, todayKey, existing);
     if (recurrence.error) return { error: recurrence.error };
     const wasRecurring = isRecurringSubtask(existing);
-    const definitionChanged = wasRecurring && input.recurrence !== undefined && (recurrence.values.recurrence !== "weekly" || recurrence.values.recurrence_start !== existing.recurrence_start || (recurrence.values.recurrence_until ?? null) !== (existing.recurrence_until ?? null));
+    const definitionChanged = wasRecurring && input.recurrence !== undefined && (recurrence.values.recurrence === "none" || recurrence.values.recurrence_start !== existing.recurrence_start || (recurrence.values.recurrence_until ?? null) !== (existing.recurrence_until ?? null));
     if (definitionChanged) {
       const freezeError = await freezePastSubtaskOccurrences(db, withHistory ?? existing, todayKey);
       if (freezeError) return { error: freezeError };
     }
     const base: Record<string, unknown> = { title, due_date: input.dueDate || null, updated_at: new Date().toISOString() };
     // Virou rotina: o estado passa a ser por dia — o "concluída" único não vale mais.
-    if (!wasRecurring && recurrence.values.recurrence === "weekly") Object.assign(base, { is_done: false, completed_at: null });
+    if (!wasRecurring && (recurrence.values.recurrence === "weekly" || recurrence.values.recurrence === "monthly")) Object.assign(base, { is_done: false, completed_at: null });
     const update = (values: Record<string, unknown>) => db.from("task_subtasks").update(values).eq("id", id).eq("parent_type", parentType).eq("parent_id", parentId).eq("user_id", user.id);
     // Sem mudança de recorrência pedida e linha não recorrente: nem envia as colunas (funciona antes da migration).
     const recurrenceValues = recurrence.values.recurrence === "none" && !wasRecurring ? {} : recurrence.values;
@@ -150,7 +153,7 @@ export async function saveSubtask(parentType: SubtaskParent, parentId: string, i
     }
     if (error) return { error: error.message };
   } else {
-    const recurrence = input.recurrence === "weekly" ? subtaskRecurrenceValues({ ...input, isChecklistItem: !!input.parentSubtaskId }, todayKey) : { values: {} as Record<string, unknown> };
+    const recurrence = input.recurrence === "weekly" || input.recurrence === "monthly" ? subtaskRecurrenceValues({ ...input, isChecklistItem: !!input.parentSubtaskId }, todayKey) : { values: {} as Record<string, unknown> };
     if (recurrence.error) return { error: recurrence.error };
     const { data } = await db.from("task_subtasks").select("position").eq("parent_type", parentType).eq("parent_id", parentId).order("position", { ascending: false }).limit(1);
     const row: Record<string, unknown> = { parent_type: parentType, parent_id: parentId, user_id: user.id, title, due_date: input.dueDate || null, parent_subtask_id: input.parentSubtaskId || null, position: (data?.[0]?.position ?? -1) + 1, ...schedule.values, ...recurrence.values };

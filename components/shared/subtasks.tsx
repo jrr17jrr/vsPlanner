@@ -13,7 +13,7 @@ import { SubtaskDescriptionField, SubtaskDetailsFields } from "@/components/shar
 import { listSubtasks, saveSubtask, setSubtaskDone, setSubtaskOccurrenceDone, setSubtaskPriority, deleteSubtask, moveSubtask, type Subtask, type SubtaskParent } from "@/lib/supabase/subtask-actions";
 import { EMPTY_SUBTASK_DRAFT, subtaskDraftToInput, validateSubtaskDraft, type SubtaskDraft } from "@/lib/subtask-draft";
 import { groupSubtasks, normalizeReminderOffsets, type SubtaskEntry } from "@/lib/task-schedule";
-import { isRecurringSubtask, missedSubtaskDates, resolveSubtasksForDay, subtaskHistory } from "@/lib/subtask-recurrence";
+import { isRecurringSubtask, missedSubtaskDates, resolveSubtasksForDay, subtaskHistory, subtaskRecurrenceLabel } from "@/lib/subtask-recurrence";
 import { filterChecklist, type ChecklistFilter } from "@/lib/checklist-priority";
 import { formatWeekdays } from "@/lib/tasks";
 import { nowTimeSaoPaulo, parseLocalDate, todayKeySaoPaulo, weekdayLabel } from "@/lib/format";
@@ -152,8 +152,9 @@ export function Subtasks({
       deadlineTime: raw.deadline_time?.slice(0, 5) ?? "",
       priority: raw.priority === "importante" ? "importante" : "normal",
       reminders: normalizeReminderOffsets(raw.reminder_offsets),
-      recurrence: weekly ? "weekly" : "none",
+      recurrence: raw.recurrence === "monthly" ? "monthly" : weekly ? "weekly" : "none",
       weekdays: raw.weekdays ?? [],
+      monthDay: raw.month_day ? String(raw.month_day) : "",
       recurrenceStart: weekly ? raw.recurrence_start ?? "" : "",
       recurrenceUntil: weekly ? raw.recurrence_until ?? "" : "",
       showMore,
@@ -231,7 +232,7 @@ export function Subtasks({
     const raw = rawById.get(subtask.id) ?? subtask;
     const recurring = isRecurringSubtask(raw);
     return <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-      {recurring && <span className="inline-flex items-center gap-0.5"><Repeat className="h-3 w-3"/>{formatWeekdays(raw.weekdays ?? [])}{raw.scheduled_time && ` · ${raw.scheduled_time.slice(0, 5)}`}</span>}
+      {recurring && <span className="inline-flex items-center gap-0.5"><Repeat className="h-3 w-3"/>{subtaskRecurrenceLabel(raw, formatWeekdays)}{raw.scheduled_time && ` · ${raw.scheduled_time.slice(0, 5)}`}</span>}
       {recurring && subtask.day && !subtask.day.occurs && subtask.day.nextDate && <span>Próxima: {shortDay(subtask.day.nextDate)}</span>}
       {!recurring && schedule.executionDate && <span className={cn(state.executionOverdue && "font-medium text-warning")}>
         <CalendarClock className="mr-0.5 inline h-3 w-3"/>Fazer {shortDay(schedule.executionDate)}{schedule.executionTime && ` · ${schedule.executionTime}`}

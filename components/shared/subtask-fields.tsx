@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ListChecks, Plus, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ReminderOffsetsPicker } from "@/components/shared/reminder-offsets-picker";
 import { SUBTASK_DESCRIPTION_MAX } from "@/lib/subtask-description";
-import { isBlankSubtaskDraft, type SubtaskDraft } from "@/lib/subtask-draft";
+import { isBlankSubtaskDraft, type ChecklistDraft, type SubtaskDraft } from "@/lib/subtask-draft";
 import { formatWeekdays, WEEKDAY_ORDER, WEEKDAY_SHORT } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
 
@@ -30,12 +30,21 @@ export function SubtaskDetailsFields({ value, onChange, idPrefix, disabled, clas
   allowRecurrence?: boolean;
 }) {
   const field = "flex min-w-0 flex-col gap-1";
-  const weekly = allowRecurrence && value.recurrence === "weekly";
+  const weekly = allowRecurrence && (value.recurrence === "weekly" || value.recurrence === "monthly");
   const mode: ScheduleMode = weekly ? "semanal" : value.scheduledDate ? "data" : "sem";
+  const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
   function setMode(next: ScheduleMode) {
     if (next === "semanal") onChange({ recurrence: "weekly", scheduledDate: "", dueDate: "", deadlineTime: "" });
-    else if (next === "data") onChange({ recurrence: "none", weekdays: [], scheduledDate: value.scheduledDate || new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) });
+    else if (next === "data") onChange({ recurrence: "none", weekdays: [], scheduledDate: value.scheduledDate || today() });
     else onChange({ recurrence: "none", weekdays: [], scheduledDate: "", scheduledTime: "", reminders: [] });
+  }
+  // Frequência da repetição: diária (todos os dias), semanal/personalizada (dias escolhidos) ou mensal (dia do mês).
+  type Freq = "diaria" | "semanal" | "mensal";
+  const freq: Freq = value.recurrence === "monthly" ? "mensal" : value.weekdays.length === 7 ? "diaria" : "semanal";
+  function setFreq(f: Freq) {
+    if (f === "diaria") onChange({ recurrence: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6] });
+    else if (f === "semanal") onChange({ recurrence: "weekly", weekdays: value.weekdays.length === 7 ? [] : value.weekdays });
+    else onChange({ recurrence: "monthly", weekdays: [], monthDay: value.monthDay || String(Number(today().slice(8, 10))) });
   }
   const toggleDay = (d: number) => onChange({ weekdays: value.weekdays.includes(d) ? value.weekdays.filter((x) => x !== d) : [...value.weekdays, d] });
   return (
@@ -53,16 +62,34 @@ export function SubtaskDetailsFields({ value, onChange, idPrefix, disabled, clas
       {weekly ? (
         <>
           <div className="col-span-2 flex min-w-0 flex-col gap-1">
-            <Label className="text-xs">Dias da semana</Label>
-            <div className="grid grid-cols-7 gap-1">
-              {WEEKDAY_ORDER.map((d) => (
-                <Button key={d} type="button" size="sm" className="h-9 px-0 text-xs" disabled={disabled} variant={value.weekdays.includes(d) ? "default" : "outline"} aria-pressed={value.weekdays.includes(d)} onClick={() => toggleDay(d)}>{WEEKDAY_SHORT[d]}</Button>
+            <Label className="text-xs">Frequência</Label>
+            <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Frequência da repetição">
+              {([["diaria", "Diária"], ["semanal", "Semanal"], ["mensal", "Mensal"]] as const).map(([f, label]) => (
+                <Button key={f} type="button" size="sm" className="h-9 px-1 text-xs" disabled={disabled} variant={freq === f ? "default" : "outline"} aria-pressed={freq === f} onClick={() => setFreq(f)}>{label}</Button>
               ))}
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              {value.weekdays.length ? `Aparece no Meu Dia: ${formatWeekdays(value.weekdays)}. Cada dia é concluído separadamente.` : "Escolha os dias em que esta subtarefa se repete."}
-            </p>
           </div>
+          {freq === "mensal" ? (
+            <div className="col-span-2 flex min-w-0 flex-col gap-1">
+              <Label className="text-xs" htmlFor={`${idPrefix}-md`}>Dia do mês</Label>
+              <Input id={`${idPrefix}-md`} type="number" inputMode="numeric" min={1} max={31} value={value.monthDay} disabled={disabled} onChange={(e) => onChange({ monthDay: e.target.value })} className="w-28" />
+              <p className="text-[11px] text-muted-foreground">
+                {value.monthDay ? `Aparece no Meu Dia todo dia ${value.monthDay} do mês${Number(value.monthDay) > 28 ? " (em meses mais curtos, no último dia)" : ""}. Cada mês é concluído separadamente.` : "Escolha o dia do mês."}
+              </p>
+            </div>
+          ) : (
+            <div className="col-span-2 flex min-w-0 flex-col gap-1">
+              <Label className="text-xs">Dias da semana{freq === "semanal" ? " (personalize)" : ""}</Label>
+              <div className="grid grid-cols-7 gap-1">
+                {WEEKDAY_ORDER.map((d) => (
+                  <Button key={d} type="button" size="sm" className="h-9 px-0 text-xs" disabled={disabled} variant={value.weekdays.includes(d) ? "default" : "outline"} aria-pressed={value.weekdays.includes(d)} onClick={() => toggleDay(d)}>{WEEKDAY_SHORT[d]}</Button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {value.weekdays.length ? `Aparece no Meu Dia: ${value.weekdays.length === 7 ? "todos os dias" : formatWeekdays(value.weekdays)}. Cada dia é concluído separadamente.` : "Escolha os dias em que esta subtarefa se repete."}
+              </p>
+            </div>
+          )}
           <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-st`}>Horário</Label><Input id={`${idPrefix}-st`} type="time" value={value.scheduledTime} disabled={disabled} onChange={(e) => onChange({ scheduledTime: e.target.value })} /></div>
           <div />
           <div className={field}><Label className="text-xs" htmlFor={`${idPrefix}-rs`}>Início</Label><Input id={`${idPrefix}-rs`} type="date" value={value.recurrenceStart} disabled={disabled} onChange={(e) => onChange({ recurrenceStart: e.target.value })} /></div>
@@ -120,7 +147,7 @@ export function DraftSubtasksEditor({ drafts, onChange, newDraft, disabled }: {
       </div>
       {drafts.map((d, i) => {
         const expanded = open.includes(i);
-        const summary = [d.recurrence === "weekly" && `repete ${formatWeekdays(d.weekdays)}`, d.scheduledDate && `fazer ${d.scheduledDate.split("-").reverse().slice(0, 2).join("/")}${d.scheduledTime ? " " + d.scheduledTime : ""}`, d.dueDate && `prazo ${d.dueDate.split("-").reverse().slice(0, 2).join("/")}`, d.priority === "importante" && "importante", d.reminders.length && `${d.reminders.length} lembrete(s)`].filter(Boolean).join(" · ");
+        const summary = [d.recurrence === "monthly" && `repete todo dia ${d.monthDay}`, d.recurrence === "weekly" && `repete ${d.weekdays.length === 7 ? "todos os dias" : formatWeekdays(d.weekdays)}`, d.scheduledDate && `fazer ${d.scheduledDate.split("-").reverse().slice(0, 2).join("/")}${d.scheduledTime ? " " + d.scheduledTime : ""}`, d.dueDate && `prazo ${d.dueDate.split("-").reverse().slice(0, 2).join("/")}`, d.priority === "importante" && "importante", d.reminders.length && `${d.reminders.length} lembrete(s)`].filter(Boolean).join(" · ");
         return (
           <div key={i} className="min-w-0 rounded-md border border-border p-2">
             <div className="flex min-w-0 items-center gap-1">
@@ -150,11 +177,46 @@ export function DraftSubtasksEditor({ drafts, onChange, newDraft, disabled }: {
                 <SubtaskDetailsFields idPrefix={`draft-${i}`} value={d} disabled={disabled} onChange={(p) => update(i, p)} />
               </div>
             )}
+            <DraftChecklistEditor index={i} items={d.checklist ?? []} disabled={disabled} onChange={(checklist) => update(i, { checklist })} />
           </div>
         );
       })}
       <Button type="button" variant="outline" size="sm" className="h-9 self-start" disabled={disabled} onClick={add}><Plus className="h-4 w-4" />Adicionar subtarefa</Button>
       {drafts.length > 0 && <p className="text-[11px] text-muted-foreground">As subtarefas são salvas junto com a tarefa. Toque na seta para data, prazo, prioridade, lembretes e descrição.</p>}
+    </div>
+  );
+}
+
+/**
+ * Checklist de UMA subtarefa ainda não salva (subtarefas dentro da
+ * subtarefa): adicionar (Enter cria o próximo), definir prioridade (estrela)
+ * e remover. Gravado junto com a tarefa, no mesmo insert.
+ */
+function DraftChecklistEditor({ index, items, onChange, disabled }: { index: number; items: ChecklistDraft[]; onChange: (items: ChecklistDraft[]) => void; disabled?: boolean }) {
+  const [focus, setFocus] = useState<number | null>(null);
+  const set = (j: number, patch: Partial<ChecklistDraft>) => onChange(items.map((c, k) => (k === j ? { ...c, ...patch } : c)));
+  const add = () => { onChange([...items, { title: "", priority: "normal" }]); setFocus(items.length); };
+  return (
+    <div className="mt-2 flex min-w-0 flex-col gap-1.5 border-l-2 border-border/70 pl-2">
+      {items.map((c, j) => (
+        <div key={j} className="flex min-w-0 items-center gap-1">
+          <Input aria-label={`Item ${j + 1} do checklist da subtarefa ${index + 1}`} placeholder={`Item ${j + 1} do checklist`} value={c.title} maxLength={300} disabled={disabled} autoFocus={focus === j}
+            onChange={(e) => set(j, { title: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (c.title.trim()) add(); } }}
+            className="h-9 min-w-0 flex-1 text-sm" />
+          <button type="button" disabled={disabled} aria-pressed={c.priority === "importante"} onClick={() => set(j, { priority: c.priority === "importante" ? "normal" : "importante" })}
+            aria-label={c.priority === "importante" ? `Marcar item ${j + 1} como normal` : `Marcar item ${j + 1} como importante`}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary">
+            <Star className={cn("h-4 w-4", c.priority === "importante" && "fill-current text-destructive")} />
+          </button>
+          <button type="button" disabled={disabled} aria-label={`Remover item ${j + 1}`} onClick={() => onChange(items.filter((_, k) => k !== j))} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-destructive">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      ))}
+      <button type="button" disabled={disabled} onClick={add} className="flex min-h-9 items-center gap-1 self-start rounded-md px-1 text-xs text-muted-foreground hover:text-foreground">
+        <ListChecks className="h-3.5 w-3.5" /> {items.length ? "Adicionar item" : "Adicionar checklist (itens dentro da subtarefa)"}
+      </button>
     </div>
   );
 }
