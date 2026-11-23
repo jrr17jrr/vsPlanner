@@ -19,10 +19,11 @@ import {
   calculateMRR,
   financialMonthOverview,
   listChargesForKind,
-  isOpenEndedDebt,
+  FORMER_PARTNER_DEBT_DESCRIPTION,
   clientBillingSnapshot,
   recurringRevenueByService,
 } from "@/lib/financial-calc";
+import { debtSummary } from "@/lib/finance/debts";
 import { effectiveRenewalDate, groupChargesByOrigin, isPlannedRenewal, plannedRenewalsTotal } from "@/lib/domains";
 import { addDaysKey, daysBetweenKeys } from "@/lib/recurrence";
 import { VISIONARIO_DEV_SLUG } from "@/lib/space-slugs";
@@ -146,10 +147,11 @@ export default async function VisionarioOverviewPage() {
     const incoming = listChargesForKind(charges, payments, "entrada", today);
     const outgoing = listChargesForKind(charges, payments, "saida", today);
 
-    const debt = charges.find(isOpenEndedDebt);
+    // Mesma regra do painel de Dívidas (lib/finance/debts.ts): total = valor original.
+    const debt = charges.find((c) => c.kind === "saida" && c.description.trim() === FORMER_PARTNER_DEBT_DESCRIPTION && c.status !== "cancelado");
     if (debt) {
-      const paid = payments.filter(p => p.charge_id === debt.id).reduce((sum,p)=>sum+Number(p.amount),0);
-      formerPartnerDebt = { total: Number(debt.amount), paid, remaining: Math.max(0,Number(debt.amount)-paid) };
+      const summary = debtSummary(debt, payments);
+      formerPartnerDebt = { total: summary.total, paid: summary.paid, remaining: summary.remaining };
     }
     const partnerPaid = payments.filter((p) => p.payment_date.startsWith(monthKey) && charges.some((charge) => charge.id === p.charge_id && charge.kind === "saida"));
     partnerExpenses = {

@@ -18,6 +18,7 @@ import { payChargeWithPersonalAccountCore } from "@/lib/supabase/finance-persona
 import type { FinancialScope } from "@/lib/space-slugs";
 import { todayKeySaoPaulo } from "@/lib/format";
 import { FORMER_PARTNER_DEBT_DESCRIPTION } from "@/lib/financial-calc";
+import { isDebtCharge } from "@/lib/finance/debts";
 import {
   addMonthsKey,
   firstDueOnOrAfter,
@@ -465,13 +466,16 @@ export async function registerPaymentAction(scope: FinancialScope, chargeId: str
 
   const { data: charge, error: chargeError } = await supabase
     .from("financial_charges")
-    .select("id, kind, status, original_amount, discount_amount, addition_amount, amount")
+    .select("id, kind, description, status, original_amount, discount_amount, addition_amount, amount")
     .eq("id", chargeId)
     .eq("space_id", space.id)
     .maybeSingle();
   if (chargeError) return { error: chargeError.message };
   if (!charge) return { error: "Cobrança não encontrada." };
   if (charge.status === "cancelado") return { error: "Esta cobrança foi cancelada." };
+  // Dívida: pagamento é SEMPRE parcial/exato. "Quitar" com valor menor
+  // transformava o restante em desconto (R$ 1.000 virava R$ 525) — nunca mais.
+  if (isDebtCharge(charge)) input = { ...input, settle: false };
 
   const externalPartner = scope === "visionario" && charge.kind === "saida" && input.payerLabel === "guilherme";
   const noAccountMovement = externalPartner || input.recordOnly === true;

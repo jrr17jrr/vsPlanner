@@ -12,6 +12,7 @@ import { registerPaymentAction } from "@/lib/supabase/financial-actions";
 import { PAYMENT_METHOD_LABEL } from "@/lib/finance-labels";
 import { PERSONAL_PAYER_NAME } from "@/lib/finance/personal-link";
 import { formatCurrency, formatDate, parseMoneyInput as parseMoney, todayKeySaoPaulo } from "@/lib/format";
+import { isDebtCharge } from "@/lib/finance/debts";
 import { usePersonalAccounts } from "@/components/visionario/financeiro/use-personal-accounts";
 import { PersonalCategoryPicker } from "@/components/visionario/financeiro/personal-category-picker";
 import type { FinancialAccount, FinancialCharge, FinancialPaymentMethod } from "@/types/database.types";
@@ -53,7 +54,9 @@ export function MarkPaymentDialog({
   const [accountId, setAccountId] = useState(activeAccounts[0]?.id ?? "");
   const [personalAccountId, setPersonalAccountId] = useState("");
   const [personalCategoryId, setPersonalCategoryId] = useState("");
-  const [settle, setSettle] = useState(true);
+  // Dívida nunca "quita com desconto": pagamento é parcial (ou exato).
+  const debt = isDebtCharge(charge);
+  const [settle, setSettle] = useState(!debt);
   const [notes, setNotes] = useState("");
   const [payerLabel, setPayerLabel] = useState<"junior" | "empresa">("empresa");
   const [moveAccount, setMoveAccount] = useState(true);
@@ -73,6 +76,7 @@ export function MarkPaymentDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validValue) return toast.error("Informe um valor válido.");
+    if (debt && diff > 0) return toast.error(`O valor passa do saldo restante (${formatCurrency(remaining)}).`);
     if (!paymentDate) return toast.error("Informe a data do pagamento.");
     if (moveAccount && juniorPays) {
       if (personal.loading) return toast.error("Aguarde carregar as contas pessoais.");
@@ -243,10 +247,16 @@ export function MarkPaymentDialog({
             <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="text-sm">
-                  <p className="font-medium text-foreground">Quitar a dívida com este pagamento</p>
+                  <p className="font-medium text-foreground">{debt ? "Pagamento da dívida" : "Quitar a dívida com este pagamento"}</p>
                   <p className="text-xs text-muted-foreground">
                     {!validValue
                       ? "Informe o valor efetivamente pago."
+                      : debt
+                        ? diff > 0
+                          ? `O valor passa do saldo restante (${formatCurrency(remaining)}). Informe no máximo o saldo.`
+                          : diff === 0
+                            ? "O valor cobre o saldo restante — a dívida fica quitada."
+                            : `Pagamento parcial — continuam em aberto ${formatCurrency(-diff)}.`
                       : diff === 0
                         ? `O valor cobre o que está em aberto — a cobrança fica ${verb}.`
                         : settle
@@ -258,14 +268,14 @@ export function MarkPaymentDialog({
                             : "Desligado, o valor não pode passar do que está em aberto."}
                   </p>
                 </div>
-                <Switch checked={settle} onCheckedChange={setSettle} disabled={pending} aria-label="Quitar a dívida com este pagamento" />
+                {!debt && <Switch checked={settle} onCheckedChange={setSettle} disabled={pending} aria-label="Quitar a dívida com este pagamento" />}
               </div>
               {validValue && (
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-3">
                   {(
                     [
                       ["Valor original", Number(charge.original_amount)],
-                      ...(Number(charge.amount) - remaining > 0 ? [["Já pago", Math.round((Number(charge.amount) - remaining) * 100) / 100]] : []),
+                      ...(Number(debt ? charge.original_amount : charge.amount) - remaining > 0 ? [["Já pago", Math.round((Number(debt ? charge.original_amount : charge.amount) - remaining) * 100) / 100]] : []),
                       ["Em aberto", remaining],
                       ["Valor pago agora", value],
                       ...(settle && diff < 0 ? [["Desconto", -diff]] : []),

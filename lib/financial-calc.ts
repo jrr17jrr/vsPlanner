@@ -8,6 +8,7 @@ import type {
 } from "@/types/database.types";
 import { toDateKey, todayKeySaoPaulo } from "@/lib/format";
 import { daysBetweenKeys, monthlyFactor, nextOccurrence, parseDateKey } from "@/lib/recurrence";
+import { isDebtCharge } from "@/lib/finance/debts";
 
 /**
  * Único lugar onde o Financeiro é CALCULADO. Dashboard, gráficos, contas a
@@ -31,7 +32,8 @@ export const FORMER_PARTNER_DEBT_DESCRIPTION = "Dívida — Ex-sócio G";
  * mês, resultado), porque esses cálculos partem dos pagamentos.
  */
 export function isOpenEndedDebt(charge: Pick<FinancialCharge, "kind" | "description">): boolean {
-  return charge.kind === "saida" && charge.description.trim() === FORMER_PARTNER_DEBT_DESCRIPTION;
+  // Toda "Dívida — <nome>" (lib/finance/debts.ts), inclusive a do ex-sócio.
+  return isDebtCharge(charge);
 }
 
 /** Cobrança que conta como conta a receber/pagar (exclui dívida sem vencimento). */
