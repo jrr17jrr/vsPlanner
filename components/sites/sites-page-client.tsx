@@ -17,6 +17,18 @@ import { classifyDueDate } from "@/lib/due-date";
 import { formatCurrency, formatDate, toDateKey } from "@/lib/format";
 import type { Client, ClientSite, ClientSiteStatus } from "@/types/database.types";
 
+function externalSiteUrl(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw || /\s/.test(raw) || raw.startsWith("/") || raw.includes("\\")) return null;
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname.includes(".") || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 export function SitesPageClient({
   sites,
   clients,
@@ -141,6 +153,7 @@ export function SitesPageClient({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((site) => {
             const client = site.client_id ? clientById.get(site.client_id) : undefined;
+            const siteUrl = externalSiteUrl(site.url);
             return (
               <Card key={site.id} className="p-4">
                 <div className="flex items-start justify-between gap-2">
@@ -160,9 +173,9 @@ export function SitesPageClient({
                       <Link href={`/visionario/clientes/${client.id}`}>Ver cliente</Link>
                     </Button>
                   )}
-                  {site.url && (
+                  {siteUrl && (
                     <Button variant="secondary" size="sm" className="flex-1" asChild>
-                      <a href={site.url} target="_blank" rel="noreferrer">
+                      <a href={siteUrl} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="h-3.5 w-3.5" /> Abrir site
                       </a>
                     </Button>
